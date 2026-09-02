@@ -1,0 +1,6 @@
+{
+  "name": "2OS Accounting System",
+  "description": "2OS Accounting System (Tagalog Pagtutuos / Tuos: 2 Parties, Orient, Support) — Full Philippine Double-Entry Accounting & BIR/PFRS Compliance Suite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
