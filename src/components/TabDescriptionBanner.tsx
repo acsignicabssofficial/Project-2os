@@ -109,6 +109,36 @@ export const TAB_DESCRIPTIONS: Record<string, TabDescriptionItem> = {
     details: 'Explains double-entry bookkeeping engine, multi-entity support, Philippine tax compliance, and automated reporting workflows.',
     keyFeatures: ['Philippine Accounting Standards', 'Full BIR Tax Suite', 'Automated Journal Engine', 'Multi-Company Architecture']
   },
+  activities: {
+    key: 'activities',
+    title: 'Activity Lists & Team Workflows',
+    groupName: 'OPERATIONS',
+    groupNumber: 'Operations 1',
+    icon: Activity,
+    accentColor: 'text-cyan-400',
+    borderAccent: 'border-cyan-500/30',
+    badgeBg: 'bg-cyan-500/10',
+    badgeText: 'text-cyan-400',
+    tagColor: 'bg-cyan-950/60 border-cyan-700/40 text-cyan-300',
+    description: 'Activity Lists: Interactive Gantt chart timeline, Kanban task board, department assignments (Sales, Payroll, Purchasing, Accounting), team chat and status tracking.',
+    details: 'Manage operational accounting workflows, assign tasks to team members across departments, track deadlines on Gantt timelines, collaborate via live task chat, and manage milestone progression.',
+    keyFeatures: ['Interactive Gantt Timeline', 'Kanban Task Board', 'Department Assignments', 'Team Communication & Chat', 'Stage 1-5 Pipeline']
+  },
+  activity_lists: {
+    key: 'activity_lists',
+    title: 'Activity Lists & Team Workflows',
+    groupName: 'OPERATIONS',
+    groupNumber: 'Operations 1',
+    icon: Activity,
+    accentColor: 'text-cyan-400',
+    borderAccent: 'border-cyan-500/30',
+    badgeBg: 'bg-cyan-500/10',
+    badgeText: 'text-cyan-400',
+    tagColor: 'bg-cyan-950/60 border-cyan-700/40 text-cyan-300',
+    description: 'Activity Lists: Interactive Gantt chart timeline, Kanban task board, department assignments (Sales, Payroll, Purchasing, Accounting), team chat and status tracking.',
+    details: 'Manage operational accounting workflows, assign tasks to team members across departments, track deadlines on Gantt timelines, collaborate via live task chat, and manage milestone progression.',
+    keyFeatures: ['Interactive Gantt Timeline', 'Kanban Task Board', 'Department Assignments', 'Team Communication & Chat', 'Stage 1-5 Pipeline']
+  },
 
   // 2. DIRECTORY
   companies: {

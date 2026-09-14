@@ -110,6 +110,7 @@ import RelatedPartiesTab from './components/RelatedPartiesTab';
 import EmployeeProfilesTab from './components/EmployeeProfilesTab';
 import PayrollTab from './components/PayrollTab';
 import ContributionTablesTab from './components/ContributionTablesTab';
+import ActivitiesWorkflow from './components/ActivitiesWorkflow';
 import AboutAppTab from './components/AboutAppTab';
 import TabDescriptionBanner from './components/TabDescriptionBanner';
 import TwoOSDocumentHeader from './components/2os/2osDocumentHeader';
@@ -312,7 +313,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<
     | 'sales' | 'collections' | 'expenses' | 'payments' | 'general_journal' | 'general_ledger' // Group 1
     | 'companies' | 'customers' | 'providers' | 'related_parties' | 'employees' // Group 2
-    | 'dashboard' | 'account_titles' | 'tax_calendar' | 'about_app' // Group 3
+    | 'dashboard' | 'account_titles' | 'tax_calendar' | 'activities' | 'activity_lists' | 'about_app' | 'system_specs' | 'about' // Group 3
     | 'tax_reports' | 'income_tax' | 'ppe' | 'payroll' | 'contribution_tables' | 'cwt_customers' | 'cwt_providers' | 'special_entries' // Group 4
     | 'fs_position' | 'fs_income' | 'fs_equity' | 'fs_cashflows' | 'fs_notes' // Group 5
     | 'bir_2316' | 'bir_slsp' | 'bir_qap' | 'bir_sawt' // Group 6
@@ -320,6 +321,19 @@ export default function App() {
   >('dashboard');
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+
+  // Global Period Selection (Month / Year / Prefix) synchronized across Document Header, Dashboard, Reports, and Journals
+  const [selectedMonthIdx, setSelectedMonthIdx] = useState<number>(7); // 7 = August
+  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [selectedPrefix, setSelectedPrefix] = useState<string>('FOR THE MONTH OF');
+
+  const handleMonthYearChange = (newMonth: number, newYear: number, newPrefix?: string) => {
+    setSelectedMonthIdx(newMonth);
+    setSelectedYear(newYear);
+    if (newPrefix) {
+      setSelectedPrefix(newPrefix);
+    }
+  };
 
   // Accordion State
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
@@ -372,6 +386,31 @@ export default function App() {
   const companyPpeAssets = ppeAssets.filter(a => !activeCompanyName || a.company_name === activeCompanyName);
   const companyPayrollRecords = payrollRecords.filter(r => !activeCompanyName || r.company_name === activeCompanyName);
   const companyEmployees = employees.filter(e => !activeCompanyName || e.company_name === activeCompanyName);
+
+  // Currency & Statistical Formatting Helpers for Operational Views
+  const fmtMoney = (val: number) => {
+    return '₱' + (Number(val) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const fmtShortMoney = (val: number) => {
+    const num = Math.abs(Number(val) || 0);
+    const sign = val < 0 ? '-' : '';
+    if (num >= 1000000) return `${sign}₱${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${sign}₱${(num / 1000).toFixed(0)}k`;
+    return `${sign}₱${num.toFixed(0)}`;
+  };
+
+  const totalSalesDue = companySales.reduce((sum, s) => sum + (Number(s.invoice_amount) || 0), 0);
+  const totalColls = companyCollections.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+  const overdueAR = Math.max(0, totalSalesDue - totalColls);
+
+  const totalExpDue = companyExpenses.reduce((sum, e) => sum + (Number(e.expense_invoice_amount) || 0), 0);
+  const totalPaid = companyPayments.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+  const outstandingAP = Math.max(0, totalExpDue - totalPaid);
+  
+  const netVatPayable = Math.max(0, 
+    companySales.reduce((sum, s) => sum + (Number(s.output_vat) || 0), 0) - 
+    companyExpenses.reduce((sum, e) => sum + (Number(e.vat_input_amount) || 0), 0)
+  );
 
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
@@ -503,6 +542,10 @@ export default function App() {
           onSave={handleManualSave}
           onExportAll={handleExportAllSheets}
           onOpenInfinityFreeModal={() => setIsInfinityFreeModalOpen(true)}
+          onOpenSettings={() => {
+            setActiveTab('system_specs');
+          }}
+          activeTab={activeTab}
           triggerAlert={triggerAlert}
           theme={activeTheme}
           themeMode={theme}
@@ -547,7 +590,6 @@ export default function App() {
           }}
           className="flex-grow flex flex-col gap-4 transition-transform duration-100"
         >
-          
           {/* CENTERED 2OS DOCUMENT HEADER (COMPANY, PERIOD, JOURNAL TITLE, BRANCH BADGE) */}
           <TwoOSDocumentHeader 
             activeTab={activeTab} 
@@ -558,6 +600,10 @@ export default function App() {
             theme={activeTheme} 
             themeMode={theme}
             triggerAlert={triggerAlert}
+            selectedMonthIdx={selectedMonthIdx}
+            selectedYear={selectedYear}
+            selectedPrefix={selectedPrefix}
+            onMonthYearChange={handleMonthYearChange}
           />
 
           <AnimatePresence mode="wait">
@@ -586,6 +632,10 @@ export default function App() {
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
+                  selectedMonthIdx={selectedMonthIdx}
+                  selectedYear={selectedYear}
+                  selectedPrefix={selectedPrefix}
+                  onMonthYearChange={handleMonthYearChange}
                 />
               )}
 
@@ -768,10 +818,6 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                 />
-              )}
-
-              {activeTab === 'about_app' && (
-                <AboutAppTab theme={activeTheme} />
               )}
 
               {activeTab === 'special_entries' && (
@@ -969,7 +1015,7 @@ export default function App() {
                   payments={companyPayments}
                   specialEntries={companySpecialEntries}
                   ppeAssets={companyPpeAssets}
-                  payrollRecords={[]}
+                  payrollRecords={companyPayrollRecords as any}
                   accountTitles={accountTitles}
                   activeCompany={activeCompany}
                   theme={activeTheme}
@@ -979,6 +1025,35 @@ export default function App() {
                     activeTab === 'reports_vertical' ? 'vertical' :
                     activeTab === 'reports_ratios' ? 'ratios' : 'turnovers'
                   }
+                  selectedMonthIdx={selectedMonthIdx}
+                  selectedYear={selectedYear}
+                  selectedPrefix={selectedPrefix}
+                  onMonthYearChange={handleMonthYearChange}
+                />
+              )}
+
+              {(activeTab === 'activities' || activeTab === 'activity_lists' || activeTab === 'about_app') && (
+                <ActivitiesWorkflow 
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                  privacyMode={false}
+                  fmtShortMoney={fmtShortMoney}
+                  fmtMoney={fmtMoney}
+                  stats={{
+                    withholdingTaxCompPayable: 14500,
+                    overdueAR,
+                    outstandingAP,
+                    statutoryPayable: 8250,
+                    netVatPayable
+                  }}
+                  employees={companyEmployees}
+                  activeCompanyName={activeCompany?.company_name}
+                />
+              )}
+
+              {(activeTab === 'system_specs' || activeTab === 'about') && (
+                <AboutAppTab 
+                  theme={activeTheme}
                 />
               )}
 

@@ -23,6 +23,10 @@ interface TwoOSDocumentHeaderProps {
   theme: any;
   themeMode: 'neon_light' | 'clean' | 'dark';
   triggerAlert?: (text: string, type?: 'success' | 'error' | 'info') => void;
+  selectedMonthIdx?: number;
+  selectedYear?: number;
+  selectedPrefix?: string;
+  onMonthYearChange?: (monthIdx: number, year: number, prefix: string) => void;
 }
 
 const MONTH_NAMES = [
@@ -46,7 +50,11 @@ export default function TwoOSDocumentHeader({
   activeBranchCode = 'ALL',
   theme,
   themeMode,
-  triggerAlert
+  triggerAlert,
+  selectedMonthIdx: propMonthIdx,
+  selectedYear: propYear,
+  selectedPrefix: propPrefix,
+  onMonthYearChange
 }: TwoOSDocumentHeaderProps) {
   const isNeon = themeMode === 'neon_light';
   const isDark = themeMode === 'dark';
@@ -58,10 +66,24 @@ export default function TwoOSDocumentHeader({
     ? 'HEAD OFFICE / MAIN (00000)'
     : `BRANCH CODE ${activeBranchCode}`;
 
-  // Current date states
-  const [selectedPrefix, setSelectedPrefix] = useState<string>('FOR THE MONTH OF');
-  const [selectedMonthIdx, setSelectedMonthIdx] = useState<number>(7); // 7 = August
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  // Current date states (controlled if props provided, otherwise fallback to local)
+  const [localPrefix, setLocalPrefix] = useState<string>('FOR THE MONTH OF');
+  const [localMonthIdx, setLocalMonthIdx] = useState<number>(7); // 7 = August
+  const [localYear, setLocalYear] = useState<number>(2026);
+
+  const selectedPrefix = propPrefix !== undefined ? propPrefix : localPrefix;
+  const selectedMonthIdx = propMonthIdx !== undefined ? propMonthIdx : localMonthIdx;
+  const selectedYear = propYear !== undefined ? propYear : localYear;
+
+  const handleUpdateDate = (newMonth: number, newYear: number, newPrefix: string) => {
+    setLocalMonthIdx(newMonth);
+    setLocalYear(newYear);
+    setLocalPrefix(newPrefix);
+    if (onMonthYearChange) {
+      onMonthYearChange(newMonth, newYear, newPrefix);
+    }
+  };
+
   const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
   const [showCompanyPicker, setShowCompanyPicker] = useState<boolean>(false);
 
@@ -86,7 +108,12 @@ export default function TwoOSDocumentHeader({
         return 'SPECIAL JOURNAL VOUCHERS (ADJUSTING & ACCRUAL ENTRIES)';
       case 'dashboard':
         return 'EXECUTIVE FINANCIAL MONITORING DASHBOARD';
+      case 'activities':
+      case 'activity_lists':
       case 'about_app':
+        return 'ACTIVITY LISTS & WORKFLOWS (GANTT, KANBAN, TASKS & DEPARTMENTS)';
+      case 'system_specs':
+      case 'about':
         return '2OS ACCOUNTING SYSTEM ARCHITECTURE & STANDARDS';
       case 'companies':
         return 'TAXPAYER ENTITY MASTER REGISTER & BRANCHES';
@@ -307,7 +334,7 @@ export default function TwoOSDocumentHeader({
                   </label>
                   <select
                     value={selectedPrefix}
-                    onChange={(e) => setSelectedPrefix(e.target.value)}
+                    onChange={(e) => handleUpdateDate(selectedMonthIdx, selectedYear, e.target.value)}
                     className={`w-full px-2.5 py-1.5 rounded-lg border text-xs font-semibold outline-none cursor-pointer ${
                       isNeon 
                         ? 'bg-slate-50 border-sky-200 text-slate-900' 
@@ -330,7 +357,7 @@ export default function TwoOSDocumentHeader({
                     </label>
                     <select
                       value={selectedMonthIdx}
-                      onChange={(e) => setSelectedMonthIdx(Number(e.target.value))}
+                      onChange={(e) => handleUpdateDate(Number(e.target.value), selectedYear, selectedPrefix)}
                       className={`w-full px-2.5 py-1.5 rounded-lg border text-xs font-semibold outline-none cursor-pointer ${
                         isNeon 
                           ? 'bg-slate-50 border-sky-200 text-slate-900' 
@@ -351,7 +378,7 @@ export default function TwoOSDocumentHeader({
                     </label>
                     <select
                       value={selectedYear}
-                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                      onChange={(e) => handleUpdateDate(selectedMonthIdx, Number(e.target.value), selectedPrefix)}
                       className={`w-full px-2.5 py-1.5 rounded-lg border text-xs font-semibold outline-none cursor-pointer ${
                         isNeon 
                           ? 'bg-slate-50 border-slate-200 text-slate-900' 

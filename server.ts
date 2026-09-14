@@ -577,6 +577,181 @@ app.get("/api/ledger-data", (req, res) => {
 });
 
 // Download standalone single-file index.html for direct upload to InfinityFree / cPanel
+// Dedicated standalone download landing page with auto-download and offline blob fallback
+app.get("/download", (req, res) => {
+  const filePath = path.join(process.cwd(), "public", "2OS_Accounting_Pitch_Deck.pptx");
+  let b64 = "";
+  if (fs.existsSync(filePath)) {
+    b64 = fs.readFileSync(filePath).toString("base64");
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download 2OS Accounting Pitch Deck</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #070E22;
+      color: #F8FAFC;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      text-align: center;
+    }
+    .card {
+      background: #0D1636;
+      border: 1px solid rgba(2, 184, 172, 0.3);
+      border-radius: 16px;
+      padding: 40px 32px;
+      max-width: 520px;
+      width: 100%;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(2, 184, 172, 0.15);
+      border: 1px solid #02B8AC;
+      color: #38BDF8;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #FFFFFF;
+      margin-bottom: 12px;
+    }
+    p {
+      color: #94A3B8;
+      font-size: 15px;
+      line-height: 1.5;
+      margin-bottom: 28px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: #02B8AC;
+      color: #070E22;
+      font-weight: 700;
+      font-size: 16px;
+      padding: 14px 28px;
+      border-radius: 10px;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+      transition: all 0.2s ease;
+    }
+    .btn:hover {
+      background: #38BDF8;
+      transform: translateY(-1px);
+    }
+    .status {
+      margin-top: 18px;
+      font-size: 13px;
+      color: #02B8AC;
+    }
+    .info {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 12px;
+      color: #64748B;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">2OS ACCOUNTING SYSTEM • LIGHT EXECUTIVE EDITION</div>
+    <h1>2OS Pitch Deck (PowerPoint)</h1>
+    <p>11-slide Widescreen (16:9) presentation sa <strong>Light Theme</strong> na may mga <strong>Visual Aids ng MS Office-Style Toolbars, Ribbon Tools, Formula Bar, at Worksheets</strong> (Home Dashboard, Directory, Books of Accounts, Payroll, PFRS Statements, at BIR 2307).</p>
+    
+    <button id="downloadBtn" class="btn" onclick="triggerDownload()">
+      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      I-download ang 2OS_Accounting_Pitch_Deck.pptx
+    </button>
+
+    <div id="status" class="status">Nagsisimula na ang download...</div>
+
+    <div class="info">
+      File size: 491 KB • Format: Microsoft PowerPoint (.pptx)<br/>
+      Widescreen 16:9 • Light Executive Theme • Compatible with PowerPoint, Google Slides, Keynote
+    </div>
+  </div>
+
+  <script>
+    const b64Data = "${b64}";
+
+    function triggerDownload() {
+      try {
+        const byteCharacters = atob(b64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "2OS_Accounting_Pitch_Deck.pptx";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        document.getElementById("status").textContent = "Matagumpay na nai-download ang file!";
+      } catch (e) {
+        // Fallback to direct HTTP endpoint
+        window.location.href = "/api/download-pitch-deck";
+      }
+    }
+
+    // Auto-trigger on page load
+    window.addEventListener("DOMContentLoaded", () => {
+      setTimeout(triggerDownload, 300);
+    });
+  </script>
+</body>
+</html>`;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
+});
+
+app.get("/api/download-pitch-deck", (req, res) => {
+  const filePath = path.join(process.cwd(), "public", "2OS_Accounting_Pitch_Deck.pptx");
+  if (fs.existsSync(filePath)) {
+    res.setHeader("Content-Disposition", 'attachment; filename="2OS_Accounting_Pitch_Deck.pptx"');
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send("Presentation file not found.");
+  }
+});
+
+app.get("/2OS_Accounting_Pitch_Deck.pptx", (req, res) => {
+  const filePath = path.join(process.cwd(), "public", "2OS_Accounting_Pitch_Deck.pptx");
+  if (fs.existsSync(filePath)) {
+    res.setHeader("Content-Disposition", 'attachment; filename="2OS_Accounting_Pitch_Deck.pptx"');
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send("Presentation file not found.");
+  }
+});
+
 app.get("/api/download-singlefile-html", (req, res) => {
   const distHtmlPath = path.join(process.cwd(), "dist", "index.html");
   if (fs.existsSync(distHtmlPath)) {

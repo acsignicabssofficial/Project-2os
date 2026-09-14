@@ -216,21 +216,21 @@ export default function TwoOSRibbon({
           })}
         </div>
 
-        {/* RIGHT SIDE: SETTINGS TAB (POSITIONED AT RIGHT EDGE) */}
+        {/* RIGHT SIDE: SETTINGS TAB (OPTIONAL IF ACCESSED FROM TOP BAR) */}
         <div className="flex items-center flex-shrink-0 pl-2">
           <button
             onClick={() => {
               setSelectedCategory('SETTINGS');
             }}
-            className={`px-3.5 py-1.5 text-xs tracking-tight transition-all duration-150 rounded-t-md cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1 text-xs tracking-tight transition-all duration-150 rounded-md cursor-pointer flex items-center gap-1.5 ${
               selectedCategory === 'SETTINGS'
                 ? settingsTabActive
                 : settingsTabInactive
             }`}
             title="Open System Settings, Themes, About, Audit Log & Compliance"
           >
-            <SettingsIcon className={`w-3.5 h-3.5 ${selectedCategory === 'SETTINGS' ? (isNeon ? 'text-cyan-600' : themeMode === 'clean' ? 'text-violet-600' : 'text-cyan-400') : ''}`} />
-            <span className="font-bold">Settings</span>
+            <SettingsIcon className={`w-3.5 h-3.5 ${selectedCategory === 'SETTINGS' ? (isNeon ? 'text-cyan-600' : themeMode === 'clean' ? 'text-violet-600' : 'text-cyan-400') : 'text-zinc-400'}`} />
+            <span className="font-semibold text-[11px]">Settings</span>
           </button>
         </div>
       </div>
@@ -302,10 +302,10 @@ export default function TwoOSRibbon({
                 {/* About 2OS App */}
                 <button
                   onClick={() => {
-                    onSelectTab('about_app');
-                    triggerAlert('Navigated to About 2OS Accounting System', 'info');
+                    onSelectTab('system_specs');
+                    triggerAlert('Navigated to About 2OS Accounting System Specs', 'info');
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[66px] text-center ${getToolBtnStyle(activeTab === 'about_app')}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[66px] text-center ${getToolBtnStyle(activeTab === 'system_specs')}`}
                   title="View About 2OS Application & System Specs"
                 >
                   <Info className="w-5 h-5 text-blue-500 mb-0.5" />
@@ -442,6 +442,16 @@ export default function TwoOSRibbon({
                   <span className="text-[10px] leading-tight font-medium">Restore</span>
                 </button>
 
+                {/* 2OS Architecture & Specs */}
+                <button
+                  onClick={() => onSelectTab('system_specs')}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[64px] text-center ${getToolBtnStyle(activeTab === 'system_specs')}`}
+                  title="View 2OS Accounting System Architecture, Principles & Specs"
+                >
+                  <Info className="w-5 h-5 text-indigo-500 mb-0.5" />
+                  <span className="text-[10px] leading-tight font-medium whitespace-pre-line">System{"\n"}Specs</span>
+                </button>
+
               </div>
 
               <div className="text-center mt-1">
@@ -498,7 +508,7 @@ export default function TwoOSRibbon({
         {/* ========================================================= */}
         <div className="ml-auto flex items-stretch pl-3 border-l flex-shrink-0" style={{ borderColor: isNeon ? '#bae6fd' : themeMode === 'clean' ? '#e4e4e7' : '#14264F' }}>
           
-          {/* EXPORT & REPORTING CONVERT GROUP (POSITIONED FIXED AT RIGHT BELOW SETTINGS) */}
+          {/* EXPORT & REPORTING CONVERT GROUP */}
           <div className="flex flex-col justify-between flex-shrink-0 h-full py-0.5">
             <div className="flex items-center gap-1">
               

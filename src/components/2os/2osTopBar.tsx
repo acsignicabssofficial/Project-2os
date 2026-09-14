@@ -2,18 +2,12 @@ import React, { useState } from 'react';
 import { 
   Building2, 
   ChevronDown, 
-  User, 
+  Check, 
+  Server, 
   Minus, 
   Square, 
-  X, 
-  Palette, 
-  Sparkles, 
-  Save, 
-  RotateCcw, 
-  RotateCw, 
-  Check,
-  Server,
-  Database
+  X,
+  ChevronUp
 } from 'lucide-react';
 import { Company } from '../../types';
 
@@ -21,11 +15,13 @@ interface TwoOSTopBarProps {
   activeCompany: Company | null;
   companies: Company[];
   onSelectCompany: (company: Company) => void;
-  globalSearch: string;
-  onSearchChange: (val: string) => void;
-  onSave: () => void;
-  onExportAll: () => void;
+  globalSearch?: string;
+  onSearchChange?: (val: string) => void;
+  onSave?: () => void;
+  onExportAll?: () => void;
   onOpenInfinityFreeModal?: () => void;
+  onOpenSettings?: () => void;
+  activeTab?: string;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   theme: any;
   themeMode: 'neon_light' | 'clean' | 'dark';
@@ -36,34 +32,26 @@ export default function TwoOSTopBar({
   activeCompany,
   companies,
   onSelectCompany,
-  globalSearch,
-  onSearchChange,
-  onSave,
-  onExportAll,
   onOpenInfinityFreeModal,
   triggerAlert,
-  theme,
-  themeMode,
-  setThemeMode
+  themeMode
 }: TwoOSTopBarProps) {
   const [showCompanyMenu, setShowCompanyMenu] = useState<boolean>(false);
-  const [showThemeMenu, setShowThemeMenu] = useState<boolean>(false);
 
   const isLight = themeMode !== 'dark';
   const isNeon = themeMode === 'neon_light';
 
-  // Container styling
   const topBarBg = isNeon
-    ? 'bg-[#edf6fc] border-b border-sky-200 text-slate-900'
+    ? 'bg-[#EBF5FF] border-b border-sky-200 text-slate-900'
     : themeMode === 'clean'
-    ? 'bg-[#fafaff] border-b border-zinc-200 text-zinc-900'
+    ? 'bg-white border-b border-zinc-200 text-zinc-900'
     : 'bg-[#060D1F] border-b border-[#14264F] text-cyan-100';
 
-  const entityBoxBg = isNeon
-    ? 'bg-white border-sky-200 text-slate-900 hover:border-cyan-400 shadow-2xs'
+  const selectBtnBg = isNeon
+    ? 'bg-white border-sky-300 text-slate-900 hover:border-cyan-500 shadow-2xs'
     : themeMode === 'clean'
     ? 'bg-white border-zinc-300 text-zinc-900 hover:border-violet-400 shadow-2xs'
-    : 'bg-[#091228] border-[#182F63] text-cyan-200 hover:border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.15)]';
+    : 'bg-[#091228] border-[#182F63] text-cyan-200 hover:border-cyan-400';
 
   const dropdownBg = isNeon
     ? 'bg-white border-sky-200 shadow-xl text-slate-900'
@@ -72,196 +60,144 @@ export default function TwoOSTopBar({
     : 'bg-[#091228] border-[#1c356f] shadow-2xl text-cyan-100';
 
   return (
-    <header className={`${topBarBg} select-none transition-colors duration-200`}>
-      {/* 1. TOP WINDOW BAR: 2OS ACCOUNTING SYSTEM | SELECTED ENTITY | USER NAME & THEMES */}
-      <div className="flex items-center justify-between px-4 py-2 gap-3 text-xs">
+    <header className={`${topBarBg} select-none transition-colors duration-200 px-3 py-1.5 border-b`}>
+      <div className="flex items-center justify-between gap-3">
         
-        {/* LEFT: 2OS ACCOUNTING SYSTEM LOGO & TITLE */}
+        {/* ========================================================================= */}
+        {/* 1. LEFT SECTION: 2OS LOGO + BRANDING                                      */}
+        {/* ========================================================================= */}
         <div className="flex items-center gap-2.5 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-sm tracking-tighter transition-all ${
-              isNeon 
-                ? 'logo-chromatic-light text-white font-black' 
-                : themeMode === 'clean' 
-                ? 'logo-chromatic-clean text-white font-black' 
-                : 'logo-chromatic text-white font-black'
-            }`}>
-              2OS
-            </div>
-            <div>
-              <h1 className={`font-black text-sm tracking-tight leading-none uppercase ${
-                isNeon
-                  ? 'text-slate-950 font-black'
-                  : themeMode === 'clean'
-                  ? 'text-zinc-950 font-black'
-                  : 'neon-text-cyan font-mono font-black'
-              }`}>
-                2OS Accounting System
-              </h1>
-              <span className={`text-[10px] font-semibold tracking-normal ${
-                isNeon 
-                  ? 'text-sky-700' 
-                  : themeMode === 'clean' 
-                  ? 'text-violet-900/70' 
-                  : 'text-blue-300/80 font-mono'
-              }`}>
-                Philippine Tax & PFRS Books of Accounts
-              </span>
-            </div>
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm tracking-tighter transition-all flex-shrink-0 ${
+            isNeon 
+              ? 'logo-chromatic-light text-white font-black shadow-sm' 
+              : themeMode === 'clean' 
+              ? 'logo-chromatic-clean text-white font-black shadow-sm' 
+              : 'logo-chromatic text-white font-black shadow-[0_0_10px_rgba(6,182,212,0.4)]'
+          }`}>
+            2OS
+          </div>
+          <div>
+            <h1 className="font-black text-sm tracking-tight leading-tight uppercase text-slate-950 dark:text-white">
+              2OS ACCOUNTING SYSTEM
+            </h1>
+            <span className="text-[11px] font-semibold tracking-normal block leading-tight text-cyan-600 dark:text-cyan-400">
+              Philippine Tax & PFRS Books of Accounts
+            </span>
           </div>
         </div>
 
-        {/* CENTER: SELECTED ENTITY SELECTOR */}
-        <div className="relative flex items-center gap-2 flex-1 max-w-md justify-center">
-          <div className="flex items-center gap-2">
-            <span className={`text-[11px] font-black uppercase tracking-wider hidden sm:inline ${
-              isNeon ? 'text-sky-700/70' : themeMode === 'clean' ? 'text-zinc-400' : 'text-cyan-400/70 font-mono'
-            }`}>
-              SELECTED ENTITY:
-            </span>
+        {/* ========================================================================= */}
+        {/* 2. CENTER SECTION: SELECTED ENTITY: [ Select Entity v ]                   */}
+        {/* ========================================================================= */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400">
+            SELECTED ENTITY:
+          </span>
 
-            {/* Dropdown Pill for Company */}
-            <div className="relative">
-              <button
-                onClick={() => setShowCompanyMenu(!showCompanyMenu)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${entityBoxBg}`}
-                title="Switch Active Company / Taxpayer"
-              >
-                <Building2 className={`w-3.5 h-3.5 flex-shrink-0 ${
-                  isNeon ? 'text-cyan-600' : themeMode === 'clean' ? 'text-violet-700' : 'text-cyan-400'
-                }`} />
-                <span className="truncate max-w-[200px] md:max-w-[260px]">
+          <div className="relative">
+            <button
+              onClick={() => setShowCompanyMenu(!showCompanyMenu)}
+              className={`flex items-center justify-between gap-2 px-3 py-1 rounded-md border text-xs font-bold transition cursor-pointer min-w-[140px] max-w-[220px] ${selectBtnBg}`}
+              title="Switch Active Company / Taxpayer Entity"
+            >
+              <div className="flex items-center gap-1.5 truncate">
+                <Building2 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 flex-shrink-0" />
+                <span className="truncate">
                   {activeCompany?.company_name || 'Select Entity'}
                 </span>
-                <ChevronDown className="w-3 h-3 opacity-60 ml-0.5" />
-              </button>
+              </div>
+              <ChevronDown className="w-3.5 h-3.5 opacity-60 flex-shrink-0" />
+            </button>
 
-              {/* Company Picker Dropdown */}
-              {showCompanyMenu && (
-                <div className={`absolute top-full mt-1 left-0 z-50 w-72 rounded-xl border p-1.5 ${dropdownBg}`}>
-                  <div className={`text-[10px] uppercase font-bold px-2 py-1 ${
-                    isNeon ? 'text-sky-700' : themeMode === 'clean' ? 'text-zinc-400' : 'text-cyan-400 font-mono'
-                  }`}>
-                    Registered Tax Entities ({companies.length})
-                  </div>
-                  <div className="max-h-56 overflow-y-auto space-y-1">
-                    {companies.map((comp) => {
-                      const isSelected = activeCompany?.id === comp.id;
-                      return (
-                        <button
-                          key={comp.id}
-                          onClick={() => {
-                            onSelectCompany(comp);
-                            setShowCompanyMenu(false);
-                            triggerAlert(`Switched entity to ${comp.company_name}`, 'success');
-                          }}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
-                            isSelected 
-                              ? (isNeon 
-                                  ? 'bg-sky-100 text-sky-950 font-bold' 
-                                  : themeMode === 'clean' 
-                                  ? 'bg-violet-50 text-violet-950 font-bold' 
-                                  : 'bg-cyan-950/80 text-cyan-300 font-mono font-bold border border-cyan-500/40')
-                              : (isNeon 
-                                  ? 'hover:bg-sky-50 text-slate-700' 
-                                  : themeMode === 'clean' 
-                                  ? 'hover:bg-zinc-100 text-zinc-700' 
-                                  : 'hover:bg-[#0f1d3d] text-blue-200')
-                          }`}
-                        >
-                          <div className="truncate pr-2">
-                            <div className="font-bold truncate">{comp.company_name}</div>
-                            <div className="text-[10px] text-zinc-400 font-mono">TIN: {comp.company_tin || 'N/A'}</div>
-                          </div>
-                          {isSelected && <Check className={`w-3.5 h-3.5 flex-shrink-0 ${
-                            isNeon ? 'text-cyan-600' : themeMode === 'clean' ? 'text-violet-600' : 'text-cyan-400'
-                          }`} />}
-                        </button>
-                      );
-                    })}
-                  </div>
+            {/* ENTITY DROPDOWN */}
+            {showCompanyMenu && (
+              <div className={`absolute top-full mt-1 left-0 z-50 w-72 rounded-xl border p-1.5 shadow-2xl ${dropdownBg}`}>
+                <div className="text-[10px] uppercase font-bold px-2 py-1 text-cyan-700 dark:text-cyan-400">
+                  Select Registered Tax Entity ({companies.length})
                 </div>
-              )}
-            </div>
+                <div className="max-h-56 overflow-y-auto space-y-1">
+                  {companies.map((comp) => {
+                    const isSelected = activeCompany?.id === comp.id;
+                    return (
+                      <button
+                        key={comp.id}
+                        onClick={() => {
+                          onSelectCompany(comp);
+                          setShowCompanyMenu(false);
+                          triggerAlert(`Switched entity to ${comp.company_name}`, 'success');
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
+                          isSelected 
+                            ? 'bg-cyan-50 dark:bg-cyan-950/80 text-cyan-900 dark:text-cyan-300 font-bold border border-cyan-300 dark:border-cyan-700'
+                            : 'hover:bg-black/5 dark:hover:bg-white/5 text-slate-700 dark:text-zinc-300'
+                        }`}
+                      >
+                        <div className="truncate pr-2">
+                          <div className="font-bold truncate">{comp.company_name}</div>
+                          <div className="text-[10px] text-zinc-400 font-mono">TIN: {comp.company_tin || 'N/A'}</div>
+                        </div>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* RIGHT: INFINITYFREE DEPLOYMENT & USER NAME & WINDOW CONTROLS */}
+        {/* ========================================================================= */}
+        {/* 3. RIGHT SECTION: INFINITYFREE PILL + USER NAME + WINDOW CONTROLS         */}
+        {/* ========================================================================= */}
         <div className="flex items-center gap-3 flex-shrink-0">
           
-          {/* INFINITYFREE & CLOUD DB BUTTON */}
-          {onOpenInfinityFreeModal && (
-            <button
-              onClick={onOpenInfinityFreeModal}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                isNeon
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                  : themeMode === 'clean'
-                  ? 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100'
-                  : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50 hover:bg-emerald-900/80 shadow-[0_0_10px_rgba(16,185,129,0.25)] font-mono'
-              }`}
-              title="Open InfinityFree Web Host & MySQL Deployment Center"
-            >
-              <Server className="w-3.5 h-3.5 text-emerald-500" />
-              <span className="hidden sm:inline">InfinityFree & MySQL</span>
-            </button>
-          )}
+          {/* GREEN OUTLINED INFINITYFREE BUTTON */}
+          <button
+            onClick={() => {
+              if (onOpenInfinityFreeModal) onOpenInfinityFreeModal();
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg border border-emerald-500 bg-white dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-50 transition cursor-pointer shadow-2xs"
+            title="InfinityFree & MySQL Cloud Database Connection"
+          >
+            <Server className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>InfinityFree & MySQL</span>
+          </button>
 
-          {/* USER NAME BADGE */}
+          {/* USER PROFILE: (AC) USER NAME \n acsiqnicabss.official */}
           <div className="flex items-center gap-2">
-            <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${
-              isNeon 
-                ? 'bg-sky-100 text-cyan-800 border border-sky-300 font-bold' 
-                : themeMode === 'clean' 
-                ? 'bg-violet-100 text-violet-950 border border-violet-300 font-bold' 
-                : 'bg-[#0b1736] text-cyan-300 border border-cyan-500/50 font-mono font-bold shadow-[0_0_8px_rgba(6,182,212,0.3)]'
-            }`}>
+            <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs bg-sky-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 border border-sky-300 dark:border-cyan-800 flex-shrink-0">
               AC
             </div>
-            <div className="hidden lg:block text-left">
-              <span className={`font-black text-xs block leading-tight ${
-                themeMode === 'dark' ? 'neon-text-blue font-mono' : ''
-              }`}>USER NAME</span>
-              <span className={`text-[10px] block leading-none truncate max-w-[140px] ${
-                isNeon ? 'text-sky-700' : themeMode === 'clean' ? 'text-zinc-500' : 'text-blue-300 font-mono'
-              }`}>
-                acsignicabss.official
+            <div className="text-left">
+              <span className="font-black text-xs block leading-tight text-slate-950 dark:text-white uppercase">
+                USER NAME
+              </span>
+              <span className="text-[10px] block leading-none text-cyan-600 dark:text-cyan-400">
+                acsiqnicabss.official
               </span>
             </div>
           </div>
 
-          {/* WINDOW CONTROL BUTTONS: MINIMIZE, MAXIMIZE, CLOSE */}
-          <div className="flex items-center gap-1 text-zinc-400 dark:text-zinc-400 pl-1 border-l border-black/10 dark:border-white/10">
-            <button
-              onClick={() => triggerAlert('Application minimized to taskbar', 'info')}
-              className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded cursor-pointer transition"
-              title="Minimize"
-            >
+          {/* WINDOW CONTROLS (- [] X) */}
+          <div className="flex items-center gap-2 pl-1 text-slate-500 dark:text-slate-400">
+            <button className="hover:text-slate-900 dark:hover:text-white transition p-0.5 cursor-pointer" title="Minimize">
               <Minus className="w-3.5 h-3.5" />
             </button>
-            <button
-              onClick={() => {
-                if (!document.fullscreenElement) {
-                  document.documentElement.requestFullscreen().catch(() => {});
-                  triggerAlert('Fullscreen window mode active', 'info');
-                } else {
-                  document.exitFullscreen().catch(() => {});
-                  triggerAlert('Exited fullscreen', 'info');
-                }
-              }}
-              className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded cursor-pointer transition"
-              title="Maximize / Fullscreen"
-            >
+            <button className="hover:text-slate-900 dark:hover:text-white transition p-0.5 cursor-pointer" title="Maximize">
               <Square className="w-3 h-3" />
             </button>
-            <button
-              onClick={() => triggerAlert('2OS Workspace locked securely', 'info')}
-              className="p-1 hover:bg-red-500 hover:text-white rounded cursor-pointer transition"
-              title="Close Workspace"
-            >
+            <button className="hover:text-rose-600 transition p-0.5 cursor-pointer" title="Close">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          {/* FAR RIGHT COLLAPSE / CARET TOGGLE */}
+          <button 
+            className="w-5 h-5 rounded bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 text-white flex items-center justify-center transition cursor-pointer"
+            title="Collapse / Expand Ribbon"
+          >
+            <ChevronUp className="w-3 h-3" />
+          </button>
 
         </div>
 
