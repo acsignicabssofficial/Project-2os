@@ -57,6 +57,7 @@ import {
 import { Company } from '../../types';
 import AuditTrailModal from './AuditTrailModal';
 import ModalPromptEntry from './ModalPromptEntry';
+import PeriodModal from './PeriodModal';
 
 interface TwoOSRibbonProps {
   activeTab: string;
@@ -67,6 +68,11 @@ interface TwoOSRibbonProps {
   onExportActiveSheet: () => void;
   onExportAllSheets: () => void;
   onOpenNewEntryModal?: () => void;
+  activeBranchCode?: string;
+  selectedMonthIdx?: number;
+  selectedYear?: number;
+  selectedPrefix?: string;
+  onMonthYearChange?: (monthIdx: number, year: number, prefix: string) => void;
   theme: any;
   themeMode: 'neon_light' | 'clean' | 'dark';
   setThemeMode: (mode: 'neon_light' | 'clean' | 'dark') => void;
@@ -74,6 +80,19 @@ interface TwoOSRibbonProps {
   customersCount?: number;
   providersCount?: number;
 }
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const PERIOD_PREFIXES = [
+  'FOR THE MONTH OF',
+  'FOR THE QUARTER ENDED',
+  'FOR THE YEAR ENDED',
+  'AS OF',
+  'FOR THE PERIOD ENDED'
+];
 
 export default function TwoOSRibbon({
   activeTab,
@@ -84,6 +103,11 @@ export default function TwoOSRibbon({
   onExportActiveSheet,
   onExportAllSheets,
   onOpenNewEntryModal,
+  activeBranchCode = 'ALL',
+  selectedMonthIdx: propMonthIdx,
+  selectedYear: propYear,
+  selectedPrefix: propPrefix,
+  onMonthYearChange,
   theme,
   themeMode,
   setThemeMode,
@@ -98,6 +122,25 @@ export default function TwoOSRibbon({
   const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(true);
   const [pfrsValidationEnabled, setPfrsValidationEnabled] = useState<boolean>(true);
 
+  // Period / Date State for Ribbon Header Card
+  const [localPrefix, setLocalPrefix] = useState<string>('FOR THE MONTH OF');
+  const [localMonthIdx, setLocalMonthIdx] = useState<number>(7); // August
+  const [localYear, setLocalYear] = useState<number>(2026);
+  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
+
+  const selectedPrefix = propPrefix !== undefined ? propPrefix : localPrefix;
+  const selectedMonthIdx = propMonthIdx !== undefined ? propMonthIdx : localMonthIdx;
+  const selectedYear = propYear !== undefined ? propYear : localYear;
+
+  const handleUpdateDate = (newMonth: number, newYear: number, newPrefix: string) => {
+    setLocalMonthIdx(newMonth);
+    setLocalYear(newYear);
+    setLocalPrefix(newPrefix);
+    if (onMonthYearChange) {
+      onMonthYearChange(newMonth, newYear, newPrefix);
+    }
+  };
+
   // Sync category if activeTab changes externally (unless user explicitly viewing Settings tab)
   React.useEffect(() => {
     if (selectedCategory !== 'SETTINGS') {
@@ -107,6 +150,94 @@ export default function TwoOSRibbon({
 
   const currentCategory = RIBBON_CATEGORIES.find(c => c.key === selectedCategory) || RIBBON_CATEGORIES[0];
   const activeTabInfo = getTabInfo(activeTab);
+
+  const branchLabel = activeBranchCode === 'ALL'
+    ? 'CONSOLIDATED (ALL BRANCHES)'
+    : activeBranchCode === '00000'
+    ? 'HEAD OFFICE / MAIN (00000)'
+    : `BRANCH CODE ${activeBranchCode}`;
+
+  const periodDisplayText = `${selectedPrefix} ${MONTH_NAMES[selectedMonthIdx].toUpperCase()} ${selectedYear}`;
+  const companyDisplayName = activeCompany?.company_name 
+    ? activeCompany.company_name.toUpperCase() 
+    : 'SELECTED ENTITY';
+
+  // Formal Philippine Accounting & Tax Register Title
+  const getFormalJournalTitle = (key: string): string => {
+    switch (key) {
+      case 'sales':
+        return 'SALES JOURNAL / REVENUE REGISTER';
+      case 'collections':
+        return 'CASH RECEIPTS BOOK / COLLECTIONS REGISTER';
+      case 'expenses':
+        return 'PURCHASE BOOK / VENDOR EXPENSES REGISTER';
+      case 'payments':
+        return 'CASH DISBURSEMENTS BOOK / CHECK REGISTER';
+      case 'general_journal':
+        return 'GENERAL JOURNAL / VOUCHER REGISTER';
+      case 'general_ledger':
+        return 'GENERAL LEDGER (T-ACCOUNTS & ENDING BALANCES)';
+      case 'special_entries':
+        return 'SPECIAL JOURNAL VOUCHERS (ADJUSTING & ACCRUAL ENTRIES)';
+      case 'dashboard':
+        return 'EXECUTIVE FINANCIAL MONITORING DASHBOARD';
+      case 'activities':
+      case 'activity_lists':
+      case 'about_app':
+        return 'ACTIVITY LISTS & WORKFLOWS (GANTT, KANBAN, TASKS & DEPARTMENTS)';
+      case 'system_specs':
+      case 'about':
+        return '2OS ACCOUNTING SYSTEM ARCHITECTURE & STANDARDS';
+      case 'companies':
+        return 'TAXPAYER ENTITY MASTER REGISTER & BRANCHES';
+      case 'customers':
+        return 'CUSTOMER MASTERLIST & RECEIVABLES SCHEDULE';
+      case 'providers':
+        return 'SERVICE PROVIDERS & SUPPLIERS REGISTER';
+      case 'related_parties':
+        return 'RELATED PARTIES (CUSTOMERS, SUPPLIERS & CONTRACTORS)';
+      case 'account_titles':
+        return 'CHART OF ACCOUNTS & REAL-TIME BALANCES';
+      case 'tax_calendar':
+        return 'BIR COMPLIANCE FILING SCHEDULE & TAX CALENDAR';
+      case 'employees':
+        return 'EMPLOYEE MASTERLIST & COMPENSATION PROFILES';
+      case 'payroll':
+        return 'PAYROLL REGISTER & STATUTORY REMITTANCES';
+      case 'bir_2316':
+        return 'BIR FORM 2316 COMPENSATION & TAX WITHHELD';
+      case 'contribution_tables':
+        return 'SSS, PHILHEALTH, PAG-IBIG & TRAIN TAX MATRIX';
+      case 'ppe':
+        return 'PROPERTY, PLANT & EQUIPMENT DEPRECIATION SCHEDULE';
+      case 'cwt_customers':
+        return 'BIR FORM 2307 CREDITABLE WITHHOLDING TAX (CLAIMS)';
+      case 'cwt_providers':
+        return 'BIR FORM 2307 CREDITABLE WITHHOLDING TAX (ISSUED)';
+      case 'bir_slsp':
+        return 'SUMMARY LIST OF SALES & PURCHASES (SLSP)';
+      case 'bir_qap':
+        return 'QUARTERLY ALPHALIST OF PAYEES (QAP / 1601-EQ)';
+      case 'bir_sawt':
+        return 'SUMMARY ALPHALIST OF WITHHOLDING AGENTS (SAWT)';
+      case 'tax_reports':
+        return 'BIR TAX COMPUTATION & COMPLIANCE SUITE';
+      case 'reports':
+        return 'REPORTING CENTER & AUDIT WORKBOOK EXPORT';
+      case 'fs_position':
+        return 'STATEMENT OF FINANCIAL POSITION (BALANCE SHEET)';
+      case 'fs_income':
+        return 'STATEMENT OF COMPREHENSIVE INCOME (INCOME STATEMENT)';
+      case 'fs_equity':
+        return 'STATEMENT OF CHANGES IN EQUITY';
+      case 'fs_cashflows':
+        return 'STATEMENT OF CASH FLOWS (INDIRECT METHOD)';
+      case 'fs_notes':
+        return 'NOTES TO FINANCIAL STATEMENTS & DISCLOSURES';
+      default:
+        return `${activeTabInfo.label.toUpperCase()} REGISTER`;
+    }
+  };
 
   const isLight = themeMode !== 'dark';
   const isNeon = themeMode === 'neon_light';
@@ -216,18 +347,89 @@ export default function TwoOSRibbon({
           })}
         </div>
 
-        {/* RIGHT SIDE: SETTINGS TAB (OPTIONAL IF ACCESSED FROM TOP BAR) */}
-        <div className="flex items-center flex-shrink-0 pl-2">
+        {/* RIGHT SIDE: ACTION BUTTONS (EXPORT, IMPORT, WORKBOOK, PRINT, SETTINGS) */}
+        <div className="flex items-center gap-1 flex-shrink-0 pl-2">
+          {/* Export Active Sheet */}
+          <button
+            onClick={() => {
+              onExportActiveSheet();
+              triggerAlert(`Exported ${activeTabInfo.label} to 2OS spreadsheet`, 'success');
+            }}
+            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
+              isNeon 
+                ? 'text-sky-900 hover:bg-white/80 hover:text-cyan-800' 
+                : themeMode === 'clean' 
+                ? 'text-zinc-800 hover:bg-zinc-100' 
+                : 'text-cyan-300 hover:bg-white/10'
+            }`}
+            title="Export Current Sheet to .xlsx"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+            <span>Export</span>
+          </button>
+
+          {/* Import Data */}
+          <button
+            onClick={() => triggerAlert('Import CSV/JSON data dialog: Select file to load', 'info')}
+            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
+              isNeon 
+                ? 'text-rose-900 hover:bg-rose-50 hover:text-rose-700' 
+                : themeMode === 'clean' 
+                ? 'text-zinc-800 hover:bg-zinc-100' 
+                : 'text-rose-300 hover:bg-white/10'
+            }`}
+            title="Import Data from CSV / Excel"
+          >
+            <Upload className="w-3.5 h-3.5 text-rose-500" />
+            <span>Import</span>
+          </button>
+
+          {/* Workbook */}
+          <button
+            onClick={() => {
+              onExportAllSheets();
+              triggerAlert('Exporting full multi-sheet 2OS accounting workbook...', 'success');
+            }}
+            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
+              isNeon 
+                ? 'text-blue-900 hover:bg-blue-50 hover:text-blue-700' 
+                : themeMode === 'clean' 
+                ? 'text-zinc-800 hover:bg-zinc-100' 
+                : 'text-blue-300 hover:bg-white/10'
+            }`}
+            title="Export Full Multi-Sheet 2OS Workbook (.xlsx)"
+          >
+            <Download className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+            <span>Workbook</span>
+          </button>
+
+          {/* Print */}
+          <button
+            onClick={() => window.print()}
+            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
+              isNeon 
+                ? 'text-violet-900 hover:bg-violet-50 hover:text-violet-700' 
+                : themeMode === 'clean' 
+                ? 'text-zinc-800 hover:bg-zinc-100' 
+                : 'text-violet-300 hover:bg-white/10'
+            }`}
+            title="Print Current View"
+          >
+            <Printer className="w-3.5 h-3.5 text-violet-500" />
+            <span>Print</span>
+          </button>
+
+          {/* Settings Tab */}
           <button
             onClick={() => {
               setSelectedCategory('SETTINGS');
             }}
-            className={`px-3 py-1 text-xs tracking-tight transition-all duration-150 rounded-md cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1 text-xs tracking-tight transition-all duration-150 rounded cursor-pointer flex items-center gap-1.5 ${
               selectedCategory === 'SETTINGS'
                 ? settingsTabActive
                 : settingsTabInactive
             }`}
-            title="Open System Settings, Themes, About, Audit Log & Compliance"
+            title="Open System Settings, Themes, About & Architecture"
           >
             <SettingsIcon className={`w-3.5 h-3.5 ${selectedCategory === 'SETTINGS' ? (isNeon ? 'text-cyan-600' : themeMode === 'clean' ? 'text-violet-600' : 'text-cyan-400') : 'text-zinc-400'}`} />
             <span className="font-semibold text-[11px]">Settings</span>
@@ -503,70 +705,61 @@ export default function TwoOSRibbon({
           </div>
         )}
 
-        {/* ========================================================= */}
-        {/* RIGHT SIDE FIXED: EXPORT & CONVERT (BELOW SETTINGS TAB)   */}
-        {/* ========================================================= */}
-        <div className="ml-auto flex items-stretch pl-3 border-l flex-shrink-0" style={{ borderColor: isNeon ? '#bae6fd' : themeMode === 'clean' ? '#e4e4e7' : '#14264F' }}>
-          
-          {/* EXPORT & REPORTING CONVERT GROUP */}
-          <div className="flex flex-col justify-between flex-shrink-0 h-full py-0.5">
-            <div className="flex items-center gap-1">
-              
-              {/* Export Current Sheet (.xlsx) */}
-              <button
-                onClick={() => {
-                  onExportActiveSheet();
-                  triggerAlert(`Exported ${activeTabInfo.label} to 2OS spreadsheet`, 'success');
-                }}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[58px] text-center h-[62px] ${getToolBtnStyle()}`}
-                title="Export Current Sheet to .xlsx"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-cyan-600 dark:text-cyan-400 mb-1" />
-                <span className="text-[10px] leading-tight font-medium whitespace-pre-line text-center">Export{"\n"}Sheet</span>
-              </button>
-
-              {/* Export Full Workbook (.xlsx) */}
-              <button
-                onClick={() => {
-                  onExportAllSheets();
-                  triggerAlert('Exporting full multi-sheet 2OS accounting workbook...', 'success');
-                }}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[62px] text-center h-[62px] ${getToolBtnStyle()}`}
-                title="Export Full 2OS Accounting Workbook (.xlsx)"
-              >
-                <Download className="w-4 h-4 text-blue-600 dark:text-cyan-400 mb-1" />
-                <span className="text-[10px] leading-tight font-medium whitespace-pre-line text-center">Work-{"\n"}book</span>
-              </button>
-
-              {/* Print View */}
-              <button
-                onClick={() => window.print()}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[56px] text-center h-[62px] ${getToolBtnStyle()}`}
-                title="Print Current View / Form"
-              >
-                <Printer className="w-4 h-4 text-violet-500 mb-1" />
-                <span className="text-[10px] leading-tight font-medium">Print</span>
-              </button>
-
-              {/* Import Data */}
-              <button
-                onClick={() => triggerAlert('Import CSV/JSON data dialog ready: Select file to load', 'info')}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[56px] text-center h-[62px] ${getToolBtnStyle()}`}
-                title="Import Data from CSV / 2OS Workbook"
-              >
-                <Upload className="w-4 h-4 text-rose-500 mb-1" />
-                <span className="text-[10px] leading-tight font-medium">Import</span>
-              </button>
-
-            </div>
-
-            <div className="text-center mt-1">
-              <span className={`text-[10px] uppercase font-bold tracking-wider ${groupLabelColor}`}>
-                Export & Convert
+        {/* ========================================================================= */}
+        {/* RIGHT SIDE FIXED: SELECTED ENTITY HEADER CARD (MATCHING IMAGE 2)          */}
+        {/* ========================================================================= */}
+        <div className="ml-auto flex items-center pl-3 flex-shrink-0">
+          <div className={`rounded-xl border px-4 py-2 shadow-2xs flex flex-col items-center justify-center text-center min-w-[320px] max-w-[460px] transition-all duration-150 ${
+            isNeon
+              ? 'bg-white/95 border-sky-200/90 text-slate-900'
+              : themeMode === 'clean'
+              ? 'bg-white border-zinc-200 text-zinc-900'
+              : 'bg-[#08132B] border-[#182F63] text-cyan-100'
+          }`}>
+            
+            {/* 1. SELECTED ENTITY (HIGHEST FONT SIZE) + CONSOLIDATED BADGE */}
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <span className={`text-sm sm:text-base font-black tracking-tight uppercase leading-tight ${
+                isNeon ? 'text-slate-950 font-black' : themeMode === 'clean' ? 'text-zinc-950 font-black' : 'text-white'
+              }`}>
+                {companyDisplayName}
+              </span>
+              <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider uppercase border flex-shrink-0 ${
+                activeBranchCode === 'ALL'
+                  ? (isNeon ? 'bg-sky-100/90 text-sky-900 border-sky-300' : themeMode === 'clean' ? 'bg-violet-100 text-violet-900 border-violet-300' : 'bg-[#0D1E45] text-cyan-300 border-cyan-500/40')
+                  : (isNeon ? 'bg-sky-50 text-cyan-800 border-sky-200' : themeMode === 'clean' ? 'bg-zinc-100 text-zinc-900 border-zinc-300' : 'bg-[#091533] text-cyan-300 border-cyan-500/40')
+              }`}>
+                {branchLabel}
               </span>
             </div>
-          </div>
 
+            {/* 2. DYNAMIC TAB / JOURNAL TITLE (SECONDARY FONT SIZE) */}
+            <h2 className={`text-xs sm:text-[13px] font-bold tracking-wide uppercase text-center leading-tight mt-0.5 ${
+              isNeon ? 'text-sky-700' : themeMode === 'clean' ? 'text-violet-700' : 'text-cyan-400'
+            }`}>
+              {getFormalJournalTitle(activeTab)}
+            </h2>
+
+            {/* 3. PERIOD DROPDOWN BUTTON (FOR THE MONTH OF AUGUST 2026) */}
+            <div className="mt-1">
+              <button
+                onClick={() => setShowDatePicker(true)}
+                className={`group flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-bold tracking-wider uppercase transition cursor-pointer border shadow-2xs ${
+                  isNeon
+                    ? 'bg-white hover:bg-sky-50 border-sky-300 text-cyan-900'
+                    : themeMode === 'clean'
+                    ? 'bg-white hover:bg-violet-50/50 border-zinc-200 text-zinc-800'
+                    : 'bg-[#0A1633] hover:bg-[#0E204A] border-[#182F63] text-cyan-200'
+                }`}
+                title="Click to open reporting period configuration screen"
+              >
+                <Calendar className="w-3.5 h-3.5 text-cyan-600" />
+                <span>{periodDisplayText}</span>
+                <ChevronDown className="w-3 h-3 opacity-60 group-hover:opacity-100" />
+              </button>
+            </div>
+
+          </div>
         </div>
 
       </div>
@@ -588,6 +781,20 @@ export default function TwoOSRibbon({
         activeCompany={activeCompany}
         onSelectTab={onSelectTab}
         triggerAlert={triggerAlert}
+        themeMode={themeMode}
+      />
+
+      {/* POPUP MODAL 3: REPORTING PERIOD POP-OUT SCREEN */}
+      <PeriodModal
+        isOpen={showDatePicker}
+        onClose={() => setShowDatePicker(false)}
+        selectedMonthIdx={selectedMonthIdx}
+        selectedYear={selectedYear}
+        selectedPrefix={selectedPrefix}
+        onApply={(newMonth, newYear, newPrefix) => {
+          handleUpdateDate(newMonth, newYear, newPrefix);
+          triggerAlert(`Reporting period updated: ${newPrefix} ${MONTH_NAMES[newMonth].toUpperCase()} ${newYear}`, 'success');
+        }}
         themeMode={themeMode}
       />
 

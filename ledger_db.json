@@ -98,6 +98,46 @@
       "description": "Income tax payable provision due to BIR"
     },
     {
+      "id": 22,
+      "code": "2035",
+      "title": "Withholding Tax Payable - Compensation (BIR 1601-C)",
+      "type": "Liability",
+      "category": "Current Liabilities",
+      "description": "Withholding tax deducted from employee payroll"
+    },
+    {
+      "id": 23,
+      "code": "2041",
+      "title": "SSS Premium Payable",
+      "type": "Liability",
+      "category": "Current Liabilities",
+      "description": "SSS contributions payable to Social Security System (EE & ER Share)"
+    },
+    {
+      "id": 24,
+      "code": "2042",
+      "title": "PhilHealth Premium Payable",
+      "type": "Liability",
+      "category": "Current Liabilities",
+      "description": "PhilHealth premiums payable to PHIC (EE & ER Share)"
+    },
+    {
+      "id": 25,
+      "code": "2043",
+      "title": "Pag-IBIG Premium Payable",
+      "type": "Liability",
+      "category": "Current Liabilities",
+      "description": "HDMF contributions payable to Pag-IBIG Fund (EE & ER Share)"
+    },
+    {
+      "id": 26,
+      "code": "2050",
+      "title": "Other Employee Payables & Deductions",
+      "type": "Liability",
+      "category": "Current Liabilities",
+      "description": "Other employee payroll deductions and advances"
+    },
+    {
       "id": 12,
       "code": "3010",
       "title": "Capital Stock / Owner's Equity",
@@ -143,7 +183,31 @@
       "title": "Salaries, Wages & Benefits",
       "type": "Expense",
       "category": "Operating Expenses",
-      "description": "Employee compensation and allowances"
+      "description": "Employee gross compensation and allowances"
+    },
+    {
+      "id": 27,
+      "code": "6015",
+      "title": "Employer SSS Contribution Expense",
+      "type": "Expense",
+      "category": "Operating Expenses",
+      "description": "Employer share of SSS & EC contributions"
+    },
+    {
+      "id": 28,
+      "code": "6016",
+      "title": "Employer PhilHealth Contribution Expense",
+      "type": "Expense",
+      "category": "Operating Expenses",
+      "description": "Employer share of PhilHealth premiums"
+    },
+    {
+      "id": 29,
+      "code": "6017",
+      "title": "Employer Pag-IBIG Contribution Expense",
+      "type": "Expense",
+      "category": "Operating Expenses",
+      "description": "Employer share of Pag-IBIG HDMF contributions"
     },
     {
       "id": 18,
@@ -180,5 +244,7 @@
   ],
   "specialEntries": [],
   "incomeTaxRecords": [],
+  "payrollRecords": [],
+  "employees": [],
   "theme": "neon_light"
 }

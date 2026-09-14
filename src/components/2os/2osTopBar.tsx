@@ -4,10 +4,7 @@ import {
   ChevronDown, 
   Check, 
   Server, 
-  Minus, 
-  Square, 
-  X,
-  ChevronUp
+  History
 } from 'lucide-react';
 import { Company } from '../../types';
 
@@ -19,7 +16,10 @@ interface TwoOSTopBarProps {
   onSearchChange?: (val: string) => void;
   onSave?: () => void;
   onExportAll?: () => void;
+  onExportActiveSheet?: () => void;
   onOpenInfinityFreeModal?: () => void;
+  onOpenAuditTrail?: () => void;
+  onOpenConvertModal?: () => void;
   onOpenSettings?: () => void;
   activeTab?: string;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
@@ -33,12 +33,13 @@ export default function TwoOSTopBar({
   companies,
   onSelectCompany,
   onOpenInfinityFreeModal,
+  onOpenAuditTrail,
   triggerAlert,
   themeMode
 }: TwoOSTopBarProps) {
   const [showCompanyMenu, setShowCompanyMenu] = useState<boolean>(false);
 
-  const isLight = themeMode !== 'dark';
+  const isDark = themeMode === 'dark';
   const isNeon = themeMode === 'neon_light';
 
   const topBarBg = isNeon
@@ -77,20 +78,26 @@ export default function TwoOSTopBar({
             2OS
           </div>
           <div>
-            <h1 className="font-black text-sm tracking-tight leading-tight uppercase text-slate-950 dark:text-white">
+            <h1 className={`font-black text-sm tracking-tight leading-tight uppercase ${
+              isDark ? 'text-white' : 'text-slate-950 font-black'
+            }`}>
               2OS ACCOUNTING SYSTEM
             </h1>
-            <span className="text-[11px] font-semibold tracking-normal block leading-tight text-cyan-600 dark:text-cyan-400">
+            <span className={`text-[11px] font-semibold tracking-normal block leading-tight ${
+              isDark ? 'text-cyan-400' : 'text-cyan-700'
+            }`}>
               Philippine Tax & PFRS Books of Accounts
             </span>
           </div>
         </div>
 
         {/* ========================================================================= */}
-        {/* 2. CENTER SECTION: SELECTED ENTITY: [ Select Entity v ]                   */}
+        {/* 2. CENTER SECTION: SELECTED ENTITY + AUDIT TRAIL                          */}
         {/* ========================================================================= */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-xs font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400">
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          <span className={`text-xs font-bold uppercase tracking-wider ${
+            isDark ? 'text-cyan-400' : 'text-cyan-800'
+          }`}>
             SELECTED ENTITY:
           </span>
 
@@ -147,16 +154,34 @@ export default function TwoOSTopBar({
         </div>
 
         {/* ========================================================================= */}
-        {/* 3. RIGHT SECTION: INFINITYFREE PILL + USER NAME + WINDOW CONTROLS         */}
+        {/* 3. RIGHT SECTION: AUDIT TRAIL + INFINITYFREE + USER                       */}
         {/* ========================================================================= */}
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-4 flex-shrink-0">
           
+          {/* AUDIT TRAIL LINK/BUTTON (MATCHING SCREENSHOT) */}
+          <button
+            onClick={() => {
+              if (onOpenAuditTrail) onOpenAuditTrail();
+              else triggerAlert('Opening Audit Trail & Activity Logs...', 'info');
+            }}
+            className={`font-bold text-xs transition cursor-pointer px-1 py-1 hover:underline ${
+              isDark ? 'text-cyan-400 hover:text-cyan-300' : 'text-[#0284c7] hover:text-[#0369a1]'
+            }`}
+            title="Open Audit Trail, Change Logs & History"
+          >
+            Audit Trail
+          </button>
+
           {/* GREEN OUTLINED INFINITYFREE BUTTON */}
           <button
             onClick={() => {
               if (onOpenInfinityFreeModal) onOpenInfinityFreeModal();
             }}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg border border-emerald-500 bg-white dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-50 transition cursor-pointer shadow-2xs"
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-bold transition cursor-pointer shadow-2xs ${
+              isDark
+                ? 'border-emerald-500/60 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/40'
+                : 'border-emerald-500 bg-emerald-50/50 text-emerald-700 hover:bg-emerald-100'
+            }`}
             title="InfinityFree & MySQL Cloud Database Connection"
           >
             <Server className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -165,39 +190,22 @@ export default function TwoOSTopBar({
 
           {/* USER PROFILE: (AC) USER NAME \n acsiqnicabss.official */}
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs bg-sky-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300 border border-sky-300 dark:border-cyan-800 flex-shrink-0">
+            <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs bg-[#0F172A] text-white border border-slate-700 flex-shrink-0">
               AC
             </div>
             <div className="text-left">
-              <span className="font-black text-xs block leading-tight text-slate-950 dark:text-white uppercase">
+              <span className={`font-black text-xs block leading-tight uppercase ${
+                isDark ? 'text-slate-100' : 'text-slate-950 font-black'
+              }`}>
                 USER NAME
               </span>
-              <span className="text-[10px] block leading-none text-cyan-600 dark:text-cyan-400">
+              <span className={`text-[10px] block leading-none font-semibold ${
+                isDark ? 'text-cyan-300' : 'text-cyan-600'
+              }`}>
                 acsiqnicabss.official
               </span>
             </div>
           </div>
-
-          {/* WINDOW CONTROLS (- [] X) */}
-          <div className="flex items-center gap-2 pl-1 text-slate-500 dark:text-slate-400">
-            <button className="hover:text-slate-900 dark:hover:text-white transition p-0.5 cursor-pointer" title="Minimize">
-              <Minus className="w-3.5 h-3.5" />
-            </button>
-            <button className="hover:text-slate-900 dark:hover:text-white transition p-0.5 cursor-pointer" title="Maximize">
-              <Square className="w-3 h-3" />
-            </button>
-            <button className="hover:text-rose-600 transition p-0.5 cursor-pointer" title="Close">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* FAR RIGHT COLLAPSE / CARET TOGGLE */}
-          <button 
-            className="w-5 h-5 rounded bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 text-white flex items-center justify-center transition cursor-pointer"
-            title="Collapse / Expand Ribbon"
-          >
-            <ChevronUp className="w-3 h-3" />
-          </button>
 
         </div>
 

@@ -113,11 +113,11 @@ import ContributionTablesTab from './components/ContributionTablesTab';
 import ActivitiesWorkflow from './components/ActivitiesWorkflow';
 import AboutAppTab from './components/AboutAppTab';
 import TabDescriptionBanner from './components/TabDescriptionBanner';
-import TwoOSDocumentHeader from './components/2os/2osDocumentHeader';
 import TwoOSTopBar from './components/2os/2osTopBar';
 import TwoOSRibbon from './components/2os/2osRibbon';
 import TwoOSSheetBar from './components/2os/2osSheetBar';
 import InfinityFreeModal from './components/InfinityFreeModal';
+import AuditTrailModal from './components/2os/AuditTrailModal';
 import { exportActiveSheetTo2OS, exportFullAccountingWorkbookTo2OS } from './utils/2osExportHelper';
 
 const themeConfigs = {
@@ -229,6 +229,7 @@ export default function App() {
   const [theme, setTheme] = useState<'neon_light' | 'clean' | 'dark'>('neon_light');
   const [isLoaded, setIsLoaded] = useState(false);
   const [isInfinityFreeModalOpen, setIsInfinityFreeModalOpen] = useState(false);
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
 
   // Load backend data
   useEffect(() => {
@@ -541,7 +542,9 @@ export default function App() {
           onSearchChange={setGlobalSearch}
           onSave={handleManualSave}
           onExportAll={handleExportAllSheets}
+          onExportActiveSheet={handleExportActiveSheet}
           onOpenInfinityFreeModal={() => setIsInfinityFreeModalOpen(true)}
+          onOpenAuditTrail={() => setIsAuditModalOpen(true)}
           onOpenSettings={() => {
             setActiveTab('system_specs');
           }}
@@ -563,6 +566,11 @@ export default function App() {
           }}
           onExportActiveSheet={handleExportActiveSheet}
           onExportAllSheets={handleExportAllSheets}
+          activeBranchCode={activeBranchCode}
+          selectedMonthIdx={selectedMonthIdx}
+          selectedYear={selectedYear}
+          selectedPrefix={selectedPrefix}
+          onMonthYearChange={handleMonthYearChange}
           theme={activeTheme}
           themeMode={theme}
           setThemeMode={(m) => setTheme(m as any)}
@@ -590,22 +598,6 @@ export default function App() {
           }}
           className="flex-grow flex flex-col gap-4 transition-transform duration-100"
         >
-          {/* CENTERED 2OS DOCUMENT HEADER (COMPANY, PERIOD, JOURNAL TITLE, BRANCH BADGE) */}
-          <TwoOSDocumentHeader 
-            activeTab={activeTab} 
-            activeCompany={activeCompany}
-            companies={companies}
-            setActiveCompany={setActiveCompany}
-            activeBranchCode={activeBranchCode}
-            theme={activeTheme} 
-            themeMode={theme}
-            triggerAlert={triggerAlert}
-            selectedMonthIdx={selectedMonthIdx}
-            selectedYear={selectedYear}
-            selectedPrefix={selectedPrefix}
-            onMonthYearChange={handleMonthYearChange}
-          />
-
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -1286,6 +1278,15 @@ export default function App() {
           chartOfAccounts: accountTitles,
           payroll: payrollRecords
         }}
+      />
+
+      {/* 2OS AUDIT TRAIL & ACTIVITY LOGS MODAL */}
+      <AuditTrailModal
+        isOpen={isAuditModalOpen}
+        onClose={() => setIsAuditModalOpen(false)}
+        activeTab={activeTab}
+        activeCompany={activeCompany}
+        themeMode={theme}
       />
 
     </div>
