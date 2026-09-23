@@ -259,80 +259,112 @@ export default function App() {
   const [isInfinityFreeModalOpen, setIsInfinityFreeModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
 
-  // Load backend data
+  // Load backend data (with localStorage fallback for static hosting like GitHub Pages)
   useEffect(() => {
     async function loadData() {
+      let loaded = false;
       try {
         const res = await fetch('/api/ledger-data');
         if (res.ok) {
           const data = await res.json();
-          if (data.companies && data.companies.length > 0) {
-            setCompanies(data.companies);
-            let found = null;
-            if (data.activeCompanyId) {
-              found = data.companies.find((c: any) => String(c.id) === String(data.activeCompanyId));
-            }
-            setActiveCompany(found || data.companies[0]);
-          }
-          if (data.customers) setCustomers(data.customers);
-          if (data.contractors) setContractors(data.contractors);
-          if (data.sales) setSales(data.sales);
-          if (data.collections) setCollections(data.collections);
-          if (data.expenses) setExpenses(data.expenses);
-          if (data.payments) setPayments(data.payments);
-          if (data.ppeAssets) setPpeAssets(data.ppeAssets);
-          if (data.employees) setEmployees(data.employees);
-          if (data.payrollRecords) setPayrollRecords(data.payrollRecords);
-          if (data.sssBrackets) setSssBrackets(data.sssBrackets);
-          if (data.philhealthConfig) setPhilhealthConfig(data.philhealthConfig);
-          if (data.pagibigConfig) setPagibigConfig(data.pagibigConfig);
-          if (data.taxBrackets) setTaxBrackets(data.taxBrackets);
-          if (data.accountTitles) setAccountTitles(data.accountTitles);
-          if (data.specialEntries) setSpecialEntries(data.specialEntries);
-          if (data.incomeTaxRecords) setIncomeTaxRecords(data.incomeTaxRecords);
-          if (data.theme && ['neon_light', 'clean', 'dark', 'trial_layout'].includes(data.theme)) {
-            setTheme(data.theme);
+          if (data && typeof data === 'object') {
+            applyData(data);
+            loaded = true;
           }
         }
       } catch (e) {
-        console.warn("API load failed, using initial state:", e);
-      } finally {
-        setIsLoaded(true);
+        console.warn("API load unavailable (static host), falling back to browser storage:", e);
+      }
+
+      // If backend API wasn't available (e.g. GitHub Pages), load from localStorage
+      if (!loaded) {
+        try {
+          const localSaved = localStorage.getItem('2os_accounting_ledger_data');
+          if (localSaved) {
+            const parsed = JSON.parse(localSaved);
+            applyData(parsed);
+          }
+        } catch (err) {
+          console.warn("Failed to load from localStorage:", err);
+        }
+      }
+
+      setIsLoaded(true);
+    }
+
+    function applyData(data: any) {
+      if (data.companies && data.companies.length > 0) {
+        setCompanies(data.companies);
+        let found = null;
+        if (data.activeCompanyId) {
+          found = data.companies.find((c: any) => String(c.id) === String(data.activeCompanyId));
+        }
+        setActiveCompany(found || data.companies[0]);
+      }
+      if (data.customers) setCustomers(data.customers);
+      if (data.contractors) setContractors(data.contractors);
+      if (data.sales) setSales(data.sales);
+      if (data.collections) setCollections(data.collections);
+      if (data.expenses) setExpenses(data.expenses);
+      if (data.payments) setPayments(data.payments);
+      if (data.ppeAssets) setPpeAssets(data.ppeAssets);
+      if (data.employees) setEmployees(data.employees);
+      if (data.payrollRecords) setPayrollRecords(data.payrollRecords);
+      if (data.sssBrackets) setSssBrackets(data.sssBrackets);
+      if (data.philhealthConfig) setPhilhealthConfig(data.philhealthConfig);
+      if (data.pagibigConfig) setPagibigConfig(data.pagibigConfig);
+      if (data.taxBrackets) setTaxBrackets(data.taxBrackets);
+      if (data.accountTitles) setAccountTitles(data.accountTitles);
+      if (data.specialEntries) setSpecialEntries(data.specialEntries);
+      if (data.incomeTaxRecords) setIncomeTaxRecords(data.incomeTaxRecords);
+      if (data.theme && ['neon_light', 'clean', 'dark', 'trial_layout'].includes(data.theme)) {
+        setTheme(data.theme);
       }
     }
+
     loadData();
   }, []);
 
-  // Save to Express backend
+  // Save to Express backend AND localStorage (ensures offline/GitHub Pages persistence)
   useEffect(() => {
     if (!isLoaded) return;
 
     const timer = setTimeout(() => {
+      const payload = {
+        companies,
+        activeCompanyId: activeCompany?.id,
+        customers,
+        contractors,
+        sales,
+        collections,
+        expenses,
+        payments,
+        ppeAssets,
+        employees,
+        payrollRecords,
+        sssBrackets,
+        philhealthConfig,
+        pagibigConfig,
+        taxBrackets,
+        accountTitles,
+        specialEntries,
+        incomeTaxRecords,
+        theme,
+      };
+
+      try {
+        localStorage.setItem('2os_accounting_ledger_data', JSON.stringify(payload));
+      } catch (e) {
+        console.warn('Failed to save to localStorage:', e);
+      }
+
       fetch('/api/ledger-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companies,
-          activeCompanyId: activeCompany?.id,
-          customers,
-          contractors,
-          sales,
-          collections,
-          expenses,
-          payments,
-          ppeAssets,
-          employees,
-          payrollRecords,
-          sssBrackets,
-          philhealthConfig,
-          pagibigConfig,
-          taxBrackets,
-          accountTitles,
-          specialEntries,
-          incomeTaxRecords,
-          theme,
-        }),
-      }).catch((e) => console.warn('Failed to sync to backend file database:', e));
+        body: JSON.stringify(payload),
+      }).catch(() => {
+        // Backend optional in static hosting like GitHub Pages
+      });
     }, 500);
 
     return () => clearTimeout(timer);
