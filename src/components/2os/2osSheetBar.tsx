@@ -13,7 +13,7 @@ import {
   Layers,
   Sparkles
 } from 'lucide-react';
-import { Company, CompanyBranch } from '../../types';
+import { Company, CompanyBranch, ThemeMode } from '../../types';
 import { RIBBON_CATEGORIES, getCategoryForTab } from './2osTypes';
 
 interface TwoOSSheetBarProps {
@@ -26,7 +26,7 @@ interface TwoOSSheetBarProps {
   activeBranchCode: string; // 'ALL' (Consolidated), '00000' (Main/Head Office), or branch_code
   onSelectBranch: (branchCode: string) => void;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
-  themeMode?: 'neon_light' | 'clean' | 'dark';
+  themeMode?: ThemeMode;
 }
 
 export default function TwoOSSheetBar({
@@ -57,14 +57,19 @@ export default function TwoOSSheetBar({
 
   const isLight = themeMode !== 'dark';
   const isNeon = themeMode === 'neon_light';
+  const isTrial = themeMode === 'trial_layout';
 
-  const sheetBarBg = isNeon
+  const sheetBarBg = isTrial
+    ? 'bg-[#f1f5f9] border-t border-slate-300 text-slate-800'
+    : isNeon
     ? 'bg-[#edf6fc]/95 border-t border-sky-200 text-slate-800 backdrop-blur-xs'
     : themeMode === 'clean'
     ? 'bg-[#fafaff] border-t border-zinc-200 text-zinc-800'
     : 'bg-[#060D1F] border-t border-[#14264F] text-cyan-200';
 
-  const statusBarBg = isNeon
+  const statusBarBg = isTrial
+    ? 'bg-[#00a8ff] text-white font-bold'
+    : isNeon
     ? 'bg-sky-700 text-white'
     : themeMode === 'clean'
     ? 'bg-zinc-950 text-white border-t border-violet-950'
@@ -154,13 +159,17 @@ export default function TwoOSSheetBar({
               const isActive = activeBranchCode === tab.code;
               const Icon = tab.icon;
 
-              const activeTabClass = isNeon
+              const activeTabClass = isTrial
+                ? 'bg-[#00a8ff] text-white font-bold shadow-xs border border-sky-400'
+                : isNeon
                 ? 'bg-sky-600 text-white font-bold shadow-xs border border-cyan-500'
                 : themeMode === 'clean'
                 ? 'bg-zinc-900 text-white font-bold shadow-xs border border-violet-600'
                 : 'bg-[#0D214D] text-cyan-300 font-mono font-bold shadow-[0_0_10px_rgba(6,182,212,0.4)] border border-cyan-400';
 
-              const inactiveTabClass = isNeon
+              const inactiveTabClass = isTrial
+                ? 'bg-white hover:bg-slate-100 text-slate-800 hover:text-slate-950 border border-slate-300 font-bold shadow-2xs'
+                : isNeon
                 ? 'bg-white hover:bg-sky-50 text-slate-800 hover:text-sky-950 border border-sky-200 font-semibold shadow-2xs'
                 : themeMode === 'clean'
                 ? 'bg-white hover:bg-violet-50/50 text-zinc-800 hover:text-violet-950 border border-zinc-200 font-semibold shadow-2xs'

@@ -7,6 +7,7 @@ import {
   Sparkles,
   FileText
 } from 'lucide-react';
+import { ThemeMode } from '../../types';
 
 interface PeriodModalProps {
   isOpen: boolean;
@@ -15,7 +16,7 @@ interface PeriodModalProps {
   selectedYear: number;
   selectedPrefix: string;
   onApply: (monthIdx: number, year: number, prefix: string) => void;
-  themeMode: 'neon_light' | 'clean' | 'dark';
+  themeMode: ThemeMode;
 }
 
 const MONTHS = [

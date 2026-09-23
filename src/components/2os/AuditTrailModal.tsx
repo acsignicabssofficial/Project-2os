@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   Building2
 } from 'lucide-react';
-import { Company } from '../../types';
+import { Company, ThemeMode } from '../../types';
 import { getTabInfo } from './2osTypes';
 
 interface AuditTrailModalProps {
@@ -22,7 +22,7 @@ interface AuditTrailModalProps {
   onClose: () => void;
   activeTab: string;
   activeCompany: Company | null;
-  themeMode: 'neon_light' | 'clean' | 'dark';
+  themeMode: ThemeMode;
 }
 
 interface AuditLogItem {

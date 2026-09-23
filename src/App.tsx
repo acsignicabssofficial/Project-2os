@@ -119,6 +119,7 @@ import TwoOSSheetBar from './components/2os/2osSheetBar';
 import InfinityFreeModal from './components/InfinityFreeModal';
 import AuditTrailModal from './components/2os/AuditTrailModal';
 import { exportActiveSheetTo2OS, exportFullAccountingWorkbookTo2OS } from './utils/2osExportHelper';
+import { ThemeMode } from './types';
 
 const themeConfigs = {
   neon_light: {
@@ -147,6 +148,33 @@ const themeConfigs = {
     tableHeaderBg: 'bg-sky-50/70',
     tableRowHover: 'hover:bg-sky-50/40',
     tableBorder: 'border-sky-100',
+  },
+  trial_layout: {
+    isLight: true,
+    bgMain: 'bg-[#f1f5f9]',
+    bgCard: 'bg-white border border-slate-200/90 shadow-xs shadow-slate-400/10',
+    bgInput: 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500',
+    textMain: 'text-slate-900',
+    textMuted: 'text-slate-600',
+    textMutedLight: 'text-slate-400',
+    textTitle: 'text-slate-950 font-bold',
+    borderCard: 'border-slate-200',
+    borderInput: 'border-slate-300',
+    accentText: 'text-[#00a8ff] font-bold',
+    accentBg: 'bg-gradient-to-r from-[#00a8ff] to-[#7c3aed] hover:from-[#0096e6] hover:to-[#6d28d9] text-white font-extrabold shadow-sm',
+    accentBorder: 'border-[#00a8ff]/50',
+    accentFocus: 'focus:border-[#00a8ff] focus:ring-1 focus:ring-[#00a8ff]',
+    accentBadge: 'bg-[#00a8ff]/15 text-[#0284c7] border border-[#00a8ff]/40 font-bold',
+    accentLight: 'text-[#00a8ff] font-medium',
+    gradientFrom: 'from-cyan-400/15',
+    bannerBg: 'bg-gradient-to-r from-purple-700 via-indigo-700 to-blue-700 text-white font-medium shadow-sm',
+    headerBg: 'bg-white border-b border-slate-200 shadow-xs text-slate-900',
+    headerIsDark: false,
+    headerTextTitle: 'text-slate-950',
+    headerTextMuted: 'text-[#0284c7] font-medium',
+    tableHeaderBg: 'bg-slate-100/90',
+    tableRowHover: 'hover:bg-sky-50/50',
+    tableBorder: 'border-slate-200',
   },
   clean: {
     isLight: true,
@@ -226,7 +254,7 @@ export default function App() {
   const [taxBrackets, setTaxBrackets] = useState<TaxBracket[]>(INITIAL_WITHHOLDING_TAX_TABLE);
   const [notesToFS, setNotesToFS] = useState<NoteToFS[]>([]);
 
-  const [theme, setTheme] = useState<'neon_light' | 'clean' | 'dark'>('neon_light');
+  const [theme, setTheme] = useState<ThemeMode>('trial_layout');
   const [isLoaded, setIsLoaded] = useState(false);
   const [isInfinityFreeModalOpen, setIsInfinityFreeModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
@@ -262,7 +290,7 @@ export default function App() {
           if (data.accountTitles) setAccountTitles(data.accountTitles);
           if (data.specialEntries) setSpecialEntries(data.specialEntries);
           if (data.incomeTaxRecords) setIncomeTaxRecords(data.incomeTaxRecords);
-          if (data.theme && ['neon_light', 'clean', 'dark'].includes(data.theme)) {
+          if (data.theme && ['neon_light', 'clean', 'dark', 'trial_layout'].includes(data.theme)) {
             setTheme(data.theme);
           }
         }
@@ -584,6 +612,8 @@ export default function App() {
       <main className={`flex-grow w-full flex flex-col px-3 sm:px-6 py-4 overflow-x-hidden ${
         theme === 'dark' 
           ? 'bg-[#0a0a0d]' 
+          : theme === 'trial_layout'
+          ? 'bg-[#f1f5f9]'
           : theme === 'neon_light'
           ? 'bg-slate-50'
           : 'bg-zinc-50'
@@ -623,6 +653,7 @@ export default function App() {
                   incomeTaxRecords={incomeTaxRecords}
                   activeCompany={activeCompany}
                   theme={activeTheme}
+                  themeMode={theme}
                   triggerAlert={triggerAlert}
                   selectedMonthIdx={selectedMonthIdx}
                   selectedYear={selectedYear}

@@ -528,3 +528,5 @@ export interface BankReconSession {
   status: 'Draft' | 'Reconciled' | 'Posted';
   reconciliation_notes?: string;
 }
+
+export type ThemeMode = 'neon_light' | 'clean' | 'dark' | 'trial_layout';

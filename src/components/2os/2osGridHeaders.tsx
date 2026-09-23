@@ -1,7 +1,8 @@
 import React from 'react';
+import { ThemeMode } from '../../types';
 
 interface TwoOSGridHeadersProps {
-  themeMode: 'neon_light' | 'clean' | 'dark';
+  themeMode: ThemeMode;
 }
 
 const COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
@@ -9,14 +10,19 @@ const COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'
 export default function TwoOSGridHeaders({ themeMode }: TwoOSGridHeadersProps) {
   const isLight = themeMode !== 'dark';
   const isNeon = themeMode === 'neon_light';
+  const isTrial = themeMode === 'trial_layout';
 
-  const containerBg = isNeon
+  const containerBg = isTrial
+    ? 'bg-[#f8fafc] border-b border-slate-200 text-slate-700'
+    : isNeon
     ? 'bg-[#edf6fc] border-b border-sky-200 text-sky-800'
     : themeMode === 'clean'
     ? 'bg-[#fafaff] border-b border-zinc-200 text-zinc-700'
     : 'bg-[#060D1F] border-b border-[#14264F] text-cyan-300/80';
 
-  const cellBorder = isNeon
+  const cellBorder = isTrial
+    ? 'border-r border-slate-200'
+    : isNeon
     ? 'border-r border-sky-200'
     : themeMode === 'clean'
     ? 'border-r border-zinc-200'
@@ -26,9 +32,9 @@ export default function TwoOSGridHeaders({ themeMode }: TwoOSGridHeadersProps) {
     <div className={`flex items-center text-[10px] font-mono select-none overflow-x-hidden transition-colors duration-200 ${containerBg}`}>
       {/* Corner Select All Box */}
       <div className={`w-9 h-5 flex items-center justify-center flex-shrink-0 border-r border-black/10 dark:border-white/10 ${
-        isNeon ? 'bg-sky-100' : themeMode === 'clean' ? 'bg-zinc-100' : 'bg-[#091228]'
+        isTrial ? 'bg-slate-200' : isNeon ? 'bg-sky-100' : themeMode === 'clean' ? 'bg-zinc-100' : 'bg-[#091228]'
       }`}>
-        <span className="w-1.5 h-1.5 border-r border-b border-cyan-400 opacity-60"></span>
+        <span className={`w-1.5 h-1.5 border-r border-b ${isTrial ? 'border-sky-500' : 'border-cyan-400'} opacity-60`}></span>
       </div>
 
       {/* Columns Strip */}
@@ -38,7 +44,9 @@ export default function TwoOSGridHeaders({ themeMode }: TwoOSGridHeadersProps) {
             key={col}
             className={`h-5 min-w-[58px] flex-1 flex items-center justify-center font-semibold tracking-wider ${cellBorder} ${
               idx === 0 ? (
-                isNeon 
+                isTrial
+                  ? 'bg-sky-100 text-sky-950 font-bold'
+                  : isNeon 
                   ? 'bg-sky-200/80 text-sky-950 font-bold' 
                   : themeMode === 'clean' 
                   ? 'bg-violet-100 text-violet-950 font-bold' 

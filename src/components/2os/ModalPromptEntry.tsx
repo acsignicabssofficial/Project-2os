@@ -19,7 +19,7 @@ import {
   Calendar,
   BookMarked
 } from 'lucide-react';
-import { Company } from '../../types';
+import { Company, ThemeMode } from '../../types';
 import { getTabInfo } from './2osTypes';
 
 interface ModalPromptEntryProps {
@@ -29,7 +29,7 @@ interface ModalPromptEntryProps {
   activeCompany: Company | null;
   onSelectTab: (tabKey: string) => void;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
-  themeMode: 'neon_light' | 'clean' | 'dark';
+  themeMode: ThemeMode;
 }
 
 export default function ModalPromptEntry({

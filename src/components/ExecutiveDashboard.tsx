@@ -70,7 +70,8 @@ import {
   Employee,
   PPEAsset,
   SpecialEntry,
-  IncomeTaxRecord
+  IncomeTaxRecord,
+  ThemeMode
 } from '../types';
 import ActivitiesWorkflow from './ActivitiesWorkflow';
 
@@ -89,6 +90,7 @@ interface ExecutiveDashboardProps {
   incomeTaxRecords?: IncomeTaxRecord[];
   activeCompany: Company | null;
   theme: any;
+  themeMode?: ThemeMode;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   selectedMonthIdx?: number;
   selectedYear?: number;
@@ -116,12 +118,15 @@ export default function ExecutiveDashboard({
   incomeTaxRecords = [],
   activeCompany,
   theme,
+  themeMode,
   triggerAlert,
   selectedMonthIdx: propMonthIdx = 7,
   selectedYear: propYear = 2026,
   selectedPrefix: propPrefix = 'FOR THE MONTH OF',
   onMonthYearChange
 }: ExecutiveDashboardProps) {
+  const isTrial = themeMode === 'trial_layout';
+
   // Executive Dashboard Controls
   const [privacyMode, setPrivacyMode] = useState(false);
   const [currentMonthIdx, setCurrentMonthIdx] = useState(propMonthIdx);
@@ -649,14 +654,18 @@ export default function ExecutiveDashboard({
 
       {/* 2. TABULATED NAVIGATION CONTROLS: TRANSACTIONS | TOP | ACTIVITIES */}
       <div className="flex items-center justify-between gap-3 flex-wrap border-b border-black/5 dark:border-white/5 pb-2.5">
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
+        <div className={`flex items-center gap-1.5 p-1 rounded-xl ${isTrial ? 'bg-slate-200/70 border border-slate-300' : 'bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5'}`}>
           <button
             onClick={() => {
               setActiveDashTab('TRANSACTIONS');
               triggerAlert('Viewing TRANSACTIONS tab', 'info');
             }}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeDashTab === 'TRANSACTIONS'
+              isTrial
+                ? activeDashTab === 'TRANSACTIONS'
+                  ? 'bg-[#00a8ff] text-white shadow-xs font-bold'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold'
+                : activeDashTab === 'TRANSACTIONS'
                 ? 'bg-cyan-600 text-white shadow-xs'
                 : `${theme.textMuted} hover:text-cyan-600 hover:bg-black/5 dark:hover:bg-white/5`
             }`}
@@ -671,7 +680,11 @@ export default function ExecutiveDashboard({
               triggerAlert('Viewing TOP metrics tab', 'info');
             }}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeDashTab === 'TOP'
+              isTrial
+                ? activeDashTab === 'TOP'
+                  ? 'bg-[#00a8ff] text-white shadow-xs font-bold'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold'
+                : activeDashTab === 'TOP'
                 ? 'bg-cyan-600 text-white shadow-xs'
                 : `${theme.textMuted} hover:text-cyan-600 hover:bg-black/5 dark:hover:bg-white/5`
             }`}
@@ -686,7 +699,11 @@ export default function ExecutiveDashboard({
               triggerAlert('Viewing ACTIVITIES workflow tab', 'info');
             }}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeDashTab === 'ACTIVITIES'
+              isTrial
+                ? activeDashTab === 'ACTIVITIES'
+                  ? 'bg-[#7c3aed] text-white shadow-xs font-bold'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold'
+                : activeDashTab === 'ACTIVITIES'
                 ? 'bg-cyan-600 text-white shadow-xs'
                 : `${theme.textMuted} hover:text-cyan-600 hover:bg-black/5 dark:hover:bg-white/5`
             }`}
@@ -695,7 +712,9 @@ export default function ExecutiveDashboard({
             <span>ACTIVITIES</span>
             {taskCounts.pending > 0 && (
               <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                activeDashTab === 'ACTIVITIES' ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-500'
+                isTrial
+                  ? 'bg-white/25 text-white'
+                  : activeDashTab === 'ACTIVITIES' ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-500'
               }`}>
                 {taskCounts.pending}
               </span>
@@ -703,12 +722,12 @@ export default function ExecutiveDashboard({
           </button>
         </div>
 
-        <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-400">
+        <div className={`flex items-center gap-3 text-[11px] font-mono ${isTrial ? 'text-slate-600 font-semibold' : 'text-zinc-400'}`}>
           <span>Completed: <strong className="text-emerald-500 font-bold">{taskCounts.completedPercent}%</strong></span>
           <span>•</span>
-          <span>Uncollected AR: <strong className="text-amber-500 font-bold">{fmtShortMoney(stats.outstandingAR)}</strong></span>
+          <span>Uncollected AR: <strong className={isTrial ? 'text-amber-600 font-bold' : 'text-amber-500 font-bold'}>{fmtShortMoney(stats.outstandingAR)}</strong></span>
           <span>•</span>
-          <span>Unpaid Taxes: <strong className="text-purple-400 font-bold">{fmtShortMoney(stats.totalUnpaidTaxLiabilities)}</strong></span>
+          <span>Unpaid Taxes: <strong className={isTrial ? 'text-purple-600 font-bold' : 'text-purple-400 font-bold'}>{fmtShortMoney(stats.totalUnpaidTaxLiabilities)}</strong></span>
         </div>
       </div>
 
@@ -719,93 +738,143 @@ export default function ExecutiveDashboard({
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
             
             {/* PILLAR 1: UNCOLLECTED SALES (AR) */}
-            <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs hover:border-amber-500/40 transition flex flex-col justify-between`}>
+            <div className={`p-3 rounded-xl transition flex flex-col justify-between ${
+              isTrial
+                ? 'bg-[#f97316] text-white border-0 shadow-sm'
+                : `border ${theme.borderCard} ${theme.bgCard} shadow-xs hover:border-amber-500/40`
+            }`}>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500 font-mono flex items-center gap-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider font-mono flex items-center gap-1 ${
+                  isTrial ? 'text-white' : 'text-amber-500'
+                }`}>
                   <AlertCircle className="w-3 h-3" />
                   Uncollected Sales
                 </span>
-                <span className="text-[9px] font-mono font-bold bg-amber-500/10 text-amber-500 px-1.5 py-0.2 rounded">
+                <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                  isTrial ? 'bg-white/20 text-white' : 'bg-amber-500/10 text-amber-500'
+                }`}>
                   AR
                 </span>
               </div>
               
               <div className="my-1.5">
-                <div className="text-base sm:text-lg font-black font-mono tracking-tight text-amber-500">
+                <div className={`text-base sm:text-lg font-black font-mono tracking-tight ${
+                  isTrial ? 'text-white' : 'text-amber-500'
+                }`}>
                   {fmtMoney(stats.outstandingAR)}
                 </div>
-                <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400 mt-0.5">
-                  <span>Overdue: <strong className="text-rose-500">{fmtShortMoney(stats.overdueAR)}</strong></span>
-                  <span>Current: {fmtShortMoney(stats.notDueAR)}</span>
+                <div className={`flex justify-between items-center text-[10px] font-mono mt-0.5 ${
+                  isTrial ? 'text-white/80' : 'text-zinc-400'
+                }`}>
+                  <span>Overdue: <strong className={isTrial ? 'text-white underline font-bold' : 'text-rose-500'}>{fmtShortMoney(stats.overdueAR)}</strong></span>
+                  <span>Current: <strong className={isTrial ? 'text-white font-bold' : ''}>{fmtShortMoney(stats.notDueAR)}</strong></span>
                 </div>
               </div>
             </div>
 
             {/* PILLAR 2: UNPAID EXPENSES (AP) */}
-            <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs hover:border-rose-500/40 transition flex flex-col justify-between`}>
+            <div className={`p-3 rounded-xl transition flex flex-col justify-between ${
+              isTrial
+                ? 'bg-[#e11d48] text-white border-0 shadow-sm'
+                : `border ${theme.borderCard} ${theme.bgCard} shadow-xs hover:border-rose-500/40`
+            }`}>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 font-mono flex items-center gap-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider font-mono flex items-center gap-1 ${
+                  isTrial ? 'text-white' : 'text-rose-500'
+                }`}>
                   <Receipt className="w-3 h-3" />
                   Unpaid Expenses
                 </span>
-                <span className="text-[9px] font-mono font-bold bg-rose-500/10 text-rose-500 px-1.5 py-0.2 rounded">
+                <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                  isTrial ? 'bg-white/20 text-white' : 'bg-rose-500/10 text-rose-500'
+                }`}>
                   AP
                 </span>
               </div>
               
               <div className="my-1.5">
-                <div className="text-base sm:text-lg font-black font-mono tracking-tight text-rose-500">
+                <div className={`text-base sm:text-lg font-black font-mono tracking-tight ${
+                  isTrial ? 'text-white' : 'text-rose-500'
+                }`}>
                   {fmtMoney(stats.outstandingAP)}
                 </div>
-                <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400 mt-0.5">
-                  <span>Incurred: {fmtShortMoney(stats.grossExpenses)}</span>
-                  <span>Paid: <strong className="text-emerald-500">{fmtShortMoney(stats.cashPaid)}</strong></span>
+                <div className={`flex justify-between items-center text-[10px] font-mono mt-0.5 ${
+                  isTrial ? 'text-white/80' : 'text-zinc-400'
+                }`}>
+                  <span>Incurred: <strong className={isTrial ? 'text-white font-bold' : ''}>{fmtShortMoney(stats.grossExpenses)}</strong></span>
+                  <span>Paid: <strong className={isTrial ? 'text-white underline font-bold' : 'text-emerald-500'}>{fmtShortMoney(stats.cashPaid)}</strong></span>
                 </div>
               </div>
             </div>
 
             {/* PILLAR 3: UNPAID TAX LIABILITIES */}
-            <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs hover:border-purple-500/40 transition flex flex-col justify-between`}>
+            <div className={`p-3 rounded-xl transition flex flex-col justify-between ${
+              isTrial
+                ? 'bg-[#7c3aed] text-white border-0 shadow-sm'
+                : `border ${theme.borderCard} ${theme.bgCard} shadow-xs hover:border-purple-500/40`
+            }`}>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 font-mono flex items-center gap-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider font-mono flex items-center gap-1 ${
+                  isTrial ? 'text-white' : 'text-purple-400'
+                }`}>
                   <ShieldAlert className="w-3 h-3" />
                   Unpaid Taxes
                 </span>
-                <span className="text-[9px] font-mono font-bold bg-purple-500/10 text-purple-400 px-1.5 py-0.2 rounded">
+                <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                  isTrial ? 'bg-white/20 text-white' : 'bg-purple-500/10 text-purple-400'
+                }`}>
                   BIR
                 </span>
               </div>
               
               <div className="my-1.5">
-                <div className="text-base sm:text-lg font-black font-mono tracking-tight text-purple-400">
+                <div className={`text-base sm:text-lg font-black font-mono tracking-tight ${
+                  isTrial ? 'text-white' : 'text-purple-400'
+                }`}>
                   {fmtMoney(stats.totalUnpaidTaxLiabilities)}
                 </div>
-                <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400 mt-0.5">
-                  <span>VAT: {fmtShortMoney(stats.netVatPayable)}</span>
-                  <span>1601C/SSS: {fmtShortMoney(stats.withholdingTaxCompPayable + stats.statutoryPayable)}</span>
+                <div className={`flex justify-between items-center text-[10px] font-mono mt-0.5 ${
+                  isTrial ? 'text-white/80' : 'text-zinc-400'
+                }`}>
+                  <span>VAT: <strong className={isTrial ? 'text-white font-bold' : ''}>{fmtShortMoney(stats.netVatPayable)}</strong></span>
+                  <span>1601C/SSS: <strong className={isTrial ? 'text-white font-bold' : ''}>{fmtShortMoney(stats.withholdingTaxCompPayable + stats.statutoryPayable)}</strong></span>
                 </div>
               </div>
             </div>
 
             {/* PILLAR 4: BREAKEVEN POINT (BEP) */}
-            <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs hover:border-cyan-500/40 transition flex flex-col justify-between`}>
+            <div className={`p-3 rounded-xl transition flex flex-col justify-between ${
+              isTrial
+                ? 'bg-[#10b981] text-white border-0 shadow-sm'
+                : `border ${theme.borderCard} ${theme.bgCard} shadow-xs hover:border-cyan-500/40`
+            }`}>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-500 font-mono flex items-center gap-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider font-mono flex items-center gap-1 ${
+                  isTrial ? 'text-white' : 'text-cyan-500'
+                }`}>
                   <Target className="w-3 h-3" />
                   Breakeven (BEP)
                 </span>
-                <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded ${stats.isAboveBreakeven ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                  isTrial 
+                    ? 'bg-white/20 text-white' 
+                    : stats.isAboveBreakeven ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'
+                }`}>
                   {stats.isAboveBreakeven ? 'Profitable' : 'Below BEP'}
                 </span>
               </div>
               
               <div className="my-1.5">
-                <div className={`text-base sm:text-lg font-black font-mono tracking-tight ${theme.textTitle}`}>
+                <div className={`text-base sm:text-lg font-black font-mono tracking-tight ${
+                  isTrial ? 'text-white' : theme.textTitle
+                }`}>
                   {fmtMoney(stats.breakevenSales, { maximumFractionDigits: 0 })}
                 </div>
-                <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400 mt-0.5">
-                  <span>Safety: <strong className="text-emerald-500">+{stats.marginOfSafetyPercent.toFixed(0)}%</strong></span>
-                  <span>CMR: {(stats.contributionMarginRatio * 100).toFixed(0)}%</span>
+                <div className={`flex justify-between items-center text-[10px] font-mono mt-0.5 ${
+                  isTrial ? 'text-white/80' : 'text-zinc-400'
+                }`}>
+                  <span>Safety: <strong className={isTrial ? 'text-white font-bold' : 'text-emerald-500'}>+{stats.marginOfSafetyPercent.toFixed(0)}%</strong></span>
+                  <span>CMR: <strong className={isTrial ? 'text-white font-bold' : ''}>{(stats.contributionMarginRatio * 100).toFixed(0)}%</strong></span>
                 </div>
               </div>
             </div>

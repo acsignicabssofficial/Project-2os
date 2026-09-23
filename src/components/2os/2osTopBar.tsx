@@ -6,7 +6,7 @@ import {
   Server, 
   History
 } from 'lucide-react';
-import { Company } from '../../types';
+import { Company, ThemeMode } from '../../types';
 
 interface TwoOSTopBarProps {
   activeCompany: Company | null;
@@ -24,8 +24,8 @@ interface TwoOSTopBarProps {
   activeTab?: string;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   theme: any;
-  themeMode: 'neon_light' | 'clean' | 'dark';
-  setThemeMode: (mode: 'neon_light' | 'clean' | 'dark') => void;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
 }
 
 export default function TwoOSTopBar({
@@ -41,20 +41,25 @@ export default function TwoOSTopBar({
 
   const isDark = themeMode === 'dark';
   const isNeon = themeMode === 'neon_light';
+  const isTrial = themeMode === 'trial_layout';
 
-  const topBarBg = isNeon
+  const topBarBg = isTrial
+    ? 'bg-[#f8fafc] border-b border-slate-200 text-slate-900 shadow-2xs'
+    : isNeon
     ? 'bg-[#EBF5FF] border-b border-sky-200 text-slate-900'
     : themeMode === 'clean'
     ? 'bg-white border-b border-zinc-200 text-zinc-900'
     : 'bg-[#060D1F] border-b border-[#14264F] text-cyan-100';
 
-  const selectBtnBg = isNeon
+  const selectBtnBg = isTrial
+    ? 'bg-[#00a8ff] border-sky-400 text-white hover:bg-[#0096e6] shadow-xs'
+    : isNeon
     ? 'bg-white border-sky-300 text-slate-900 hover:border-cyan-500 shadow-2xs'
     : themeMode === 'clean'
     ? 'bg-white border-zinc-300 text-zinc-900 hover:border-violet-400 shadow-2xs'
     : 'bg-[#091228] border-[#182F63] text-cyan-200 hover:border-cyan-400';
 
-  const dropdownBg = isNeon
+  const dropdownBg = (isTrial || isNeon)
     ? 'bg-white border-sky-200 shadow-xl text-slate-900'
     : themeMode === 'clean'
     ? 'bg-white border-zinc-200 shadow-xl text-zinc-900'
@@ -172,23 +177,25 @@ export default function TwoOSTopBar({
             Audit Trail
           </button>
 
-          {/* GREEN OUTLINED INFINITYFREE BUTTON */}
+          {/* INFINITYFREE BUTTON (PURPLE GRADIENT IN TRIAL LAYOUT TO MATCH IMAGE) */}
           <button
             onClick={() => {
               if (onOpenInfinityFreeModal) onOpenInfinityFreeModal();
             }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-bold transition cursor-pointer shadow-2xs ${
-              isDark
-                ? 'border-emerald-500/60 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/40'
-                : 'border-emerald-500 bg-emerald-50/50 text-emerald-700 hover:bg-emerald-100'
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs ${
+              isTrial
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#6366f1] hover:from-[#6d28d9] hover:to-[#4f46e5] text-white border-0 shadow-xs'
+                : isDark
+                ? 'border-emerald-500/60 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/40 border'
+                : 'border-emerald-500 bg-emerald-50/50 text-emerald-700 hover:bg-emerald-100 border'
             }`}
             title="InfinityFree & MySQL Cloud Database Connection"
           >
-            <Server className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <Server className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
             <span>InfinityFree & MySQL</span>
           </button>
 
-          {/* USER PROFILE: (AC) USER NAME \n acsiqnicabss.official */}
+          {/* USER PROFILE: (AC) USER NAME \n acsignicabss.official */}
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs bg-[#0F172A] text-white border border-slate-700 flex-shrink-0">
               AC
@@ -200,9 +207,9 @@ export default function TwoOSTopBar({
                 USER NAME
               </span>
               <span className={`text-[10px] block leading-none font-semibold ${
-                isDark ? 'text-cyan-300' : 'text-cyan-600'
+                isTrial ? 'text-[#00a8ff]' : isDark ? 'text-cyan-300' : 'text-cyan-600'
               }`}>
-                acsiqnicabss.official
+                acsignicabss.official
               </span>
             </div>
           </div>

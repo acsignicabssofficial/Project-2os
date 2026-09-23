@@ -6,13 +6,14 @@ import {
   Sparkles
 } from 'lucide-react';
 import { getTabInfo } from './2osTypes';
+import { ThemeMode } from '../../types';
 
 interface TwoOSFormulaBarProps {
   activeTab: string;
   globalSearch: string;
   onSearchChange: (val: string) => void;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
-  themeMode: 'neon_light' | 'clean' | 'dark';
+  themeMode: ThemeMode;
 }
 
 export default function TwoOSFormulaBar({
@@ -26,20 +27,27 @@ export default function TwoOSFormulaBar({
 
   const isLight = themeMode !== 'dark';
   const isNeon = themeMode === 'neon_light';
+  const isTrial = themeMode === 'trial_layout';
 
-  const containerBg = isNeon
+  const containerBg = isTrial
+    ? 'bg-[#f8fafc] border-b border-slate-200 text-slate-900'
+    : isNeon
     ? 'bg-[#edf6fc] border-b border-sky-200 text-slate-900'
     : themeMode === 'clean'
     ? 'bg-[#fafaff] border-b border-zinc-200 text-zinc-900'
     : 'bg-[#060D1F] border-b border-[#14264F] text-cyan-100';
 
-  const nameBoxClass = isNeon
+  const nameBoxClass = isTrial
+    ? 'bg-white border border-slate-300 text-slate-800 font-mono font-bold shadow-2xs'
+    : isNeon
     ? 'bg-white border border-sky-200 text-slate-800 font-mono font-bold'
     : themeMode === 'clean'
     ? 'bg-white border border-zinc-300 text-zinc-900 font-mono font-bold'
     : 'bg-[#091228] border border-[#182F63] text-cyan-300 font-mono font-bold shadow-[0_0_8px_rgba(6,182,212,0.2)]';
 
-  const formulaInputClass = isNeon
+  const formulaInputClass = isTrial
+    ? 'bg-white border border-slate-300 text-slate-800 placeholder:text-slate-400 focus:border-[#00a8ff] focus:ring-1 focus:ring-[#00a8ff] font-mono'
+    : isNeon
     ? 'bg-white border border-sky-200 text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
     : themeMode === 'clean'
     ? 'bg-white border border-zinc-300 text-zinc-900 placeholder:text-zinc-400 focus:border-violet-500 focus:ring-1 focus:ring-violet-500'
