@@ -566,6 +566,11 @@ export default function App() {
             setActiveCompany(c);
             triggerAlert(`Active Company switched to: ${c.company_name}`, 'success');
           }}
+          activeBranchCode={activeBranchCode}
+          selectedMonthIdx={selectedMonthIdx}
+          selectedYear={selectedYear}
+          selectedPrefix={selectedPrefix}
+          onMonthYearChange={handleMonthYearChange}
           globalSearch={globalSearch}
           onSearchChange={setGlobalSearch}
           onSave={handleManualSave}

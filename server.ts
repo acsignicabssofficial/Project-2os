@@ -777,6 +777,18 @@ app.post("/api/ledger-data", (req, res) => {
 async function start() {
   await initSqliteDatabase();
 
+  // Explicitly serve public assets for PWA, manifest, and icons
+  app.use("/sw.js", (req, res, next) => {
+    res.setHeader("Service-Worker-Allowed", "/");
+    res.setHeader("Content-Type", "application/javascript");
+    res.sendFile(path.join(process.cwd(), "public", "sw.js"));
+  });
+  app.use("/manifest.json", (req, res, next) => {
+    res.setHeader("Content-Type", "application/manifest+json");
+    res.sendFile(path.join(process.cwd(), "public", "manifest.json"));
+  });
+  app.use(express.static(path.join(process.cwd(), "public")));
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

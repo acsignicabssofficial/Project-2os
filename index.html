@@ -7,10 +7,31 @@
     <meta name="description" content="2OS Accounting System (Tagalog Pagtutuos / Tuos: 2 Parties, Orient, Support) — Full Philippine Double-Entry Accounting & BIR/PFRS Compliance Suite." />
     <meta property="og:title" content="2OS Accounting System" />
     <meta property="og:description" content="2OS Accounting System (Tagalog Pagtutuos / Tuos: 2 Parties, Orient, Support) — Full Philippine Double-Entry Accounting & BIR/PFRS Compliance Suite." />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
+    <meta name="theme-color" content="#0284c7" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="2OS" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then((registration) => {
+              console.log('2OS PWA ServiceWorker registration successful:', registration.scope);
+            })
+            .catch((err) => {
+              console.warn('2OS PWA ServiceWorker registration failed: ', err);
+            });
+        });
+      }
+    </script>
   </body>
 </html>
 
