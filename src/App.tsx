@@ -56,7 +56,8 @@ import {
   SssBracket,
   PhilHealthConfig,
   PagIbigConfig,
-  TaxBracket
+  TaxBracket,
+  UniformBookRecord
 } from './types';
 
 import { 
@@ -79,6 +80,9 @@ import {
   INITIAL_WITHHOLDING_TAX_TABLE
 } from './data';
 
+import UniformBookTab from './components/UniformBookTab';
+import SalesTransactionTab from './components/SalesTransactionTab';
+import PurchaseTransactionTab from './components/PurchaseTransactionTab';
 import ExecutiveDashboard from './components/ExecutiveDashboard';
 import SalesTab from './components/SalesTab';
 import CollectionsTab from './components/CollectionsTab';
@@ -232,16 +236,250 @@ const themeConfigs = {
   }
 };
 
+function mapSaleToUniform(s: any): UniformBookRecord {
+  const isVat = s.output_vat > 0 || (s.vat_or_nonvat && !s.vat_or_nonvat.includes('NON'));
+  const amount = Number(s.amount || s.invoice_amount) || 0;
+  const vatable = Number(s.vatable_amount || s.vatable_sales) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
+  const vat = Number(s.vat_amount || s.output_vat || s.vat) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
+  const netOfVat = Number(s.total_amount_net_of_vat || s.amount_net_of_vat) || (amount - vat);
+  const discount = Number(s.discount || s.discounts || s.less_discount) || 0;
+  const withheld = Number(s.tax_withheld || s.withholding_2307 || s.less_withholding_tax) || 0;
+  const totalDue = Number(s.total_amount_due) || (amount - discount - withheld);
+
+  return {
+    id: s.id || Date.now(),
+    company_name: s.company_name,
+    registered_name: s.registered_name || s.customer_name || 'Customer',
+    vat_or_nonvat: isVat ? 'VAT' : 'NONVAT',
+    tin: s.tin || s.customer_tin || s.client_TIN || '000-000-000-00000',
+    address: s.address || s.client_Address || '',
+    type_of_transaction: (s.type_of_transaction || (s.sales_status === 'Paid' ? 'CASH' : 'ON ACCOUNT')) as any,
+    date: s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0],
+    invoice_type: s.invoice_type || 'SALES INVOICE',
+    voucher_number: s.voucher_number || '',
+    invoice_number: s.invoice_number || `SI-${s.id}`,
+    particulars: s.particulars || s.description || 'Sales Transaction',
+    qty: Number(s.qty) || 1,
+    unit_price: Number(s.unit_price) || amount,
+    amount: amount,
+    vatable_amount: vatable,
+    vat_amount: vat,
+    zero_rated_amount: Number(s.zero_rated_amount || s.zero_rated) || 0,
+    vat_exempt_amount: Number(s.vat_exempt_amount || s.vat_exempt) || 0,
+    total_amount_vat_inclusive: Number(s.total_amount_vat_inclusive || s.total_sale_vat_inclusive) || amount,
+    total_amount_net_of_vat: netOfVat,
+    discount: discount,
+    tax_withheld: withheld,
+    total_amount_due: totalDue,
+    is_cancelled: Boolean(s.is_cancelled || s.sales_status === 'Cancelled'),
+    created_at: s.created_at || new Date().toISOString(),
+    customer_name: s.registered_name || s.customer_name,
+    customer_tin: s.tin || s.customer_tin || s.client_TIN,
+    client_TIN: s.tin || s.customer_tin || s.client_TIN,
+    client_Address: s.address || s.client_Address,
+    invoice_amount: amount,
+    vatable_sales: vatable,
+    output_vat: vat,
+    withholding_2307: withheld
+  };
+}
+
+function mapExpenseToUniform(e: any): UniformBookRecord {
+  const isVat = e.vat_input_amount > 0 || (e.nonvat_or_vat !== 'NON-VATABLE' && e.vat_or_nonvat !== 'NONVAT');
+  const amount = Number(e.amount || e.expense_invoice_amount) || 0;
+  const vatable = Number(e.vatable_amount || e.vatable_expense) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
+  const vat = Number(e.vat_amount || e.vat_input_amount || e.vat) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
+  const netOfVat = Number(e.total_amount_net_of_vat || e.amount_net_of_vat) || (amount - vat);
+  const discount = Number(e.discount || e.discounts || e.less_discount) || 0;
+  const withheld = Number(e.tax_withheld || e.withholding_2307_2306 || e.less_withholding_tax) || 0;
+  const totalDue = Number(e.total_amount_due) || (amount - discount - withheld);
+
+  return {
+    id: e.id || Date.now(),
+    company_name: e.company_name,
+    registered_name: e.registered_name || e.service_provider_name || 'Vendor',
+    vat_or_nonvat: isVat ? 'VAT' : 'NONVAT',
+    tin: e.tin || e.service_provider_tin || e.sp_tin || '000-000-000-00000',
+    address: e.address || e.sp_address || '',
+    type_of_transaction: (e.type_of_transaction || (e.expense_status === 'Paid' ? 'CASH' : 'ON ACCOUNT')) as any,
+    date: e.date || e.expense_date || new Date().toISOString().split('T')[0],
+    invoice_type: e.invoice_type || 'OFFICIAL RECEIPT',
+    voucher_number: e.voucher_number || e.voucher_no || '',
+    invoice_number: e.invoice_number || e.voucher_number || `EXP-${e.id}`,
+    particulars: e.particulars || e.description || e.expense_type || 'Purchases / Expenses',
+    qty: Number(e.qty) || 1,
+    unit_price: Number(e.unit_price) || amount,
+    amount: amount,
+    vatable_amount: vatable,
+    vat_amount: vat,
+    zero_rated_amount: Number(e.zero_rated_amount || e.zero_rated) || 0,
+    vat_exempt_amount: Number(e.vat_exempt_amount || e.vat_exempt) || 0,
+    total_amount_vat_inclusive: Number(e.total_amount_vat_inclusive || e.total_expenses_vat_inclusive) || amount,
+    total_amount_net_of_vat: netOfVat,
+    discount: discount,
+    tax_withheld: withheld,
+    total_amount_due: totalDue,
+    is_cancelled: Boolean(e.is_cancelled || e.expense_status === 'Cancelled'),
+    created_at: e.created_at || new Date().toISOString(),
+    service_provider_name: e.registered_name || e.service_provider_name,
+    service_provider_tin: e.tin || e.service_provider_tin || e.sp_tin,
+    sp_tin: e.tin || e.service_provider_tin || e.sp_tin,
+    expense_invoice_amount: amount,
+    vat_input_amount: vat,
+    withholding_2307_2306: withheld
+  };
+}
+
+function mapCollectionToUniform(c: any): UniformBookRecord {
+  const amount = Number(c.amount || c.amount_collected) || 0;
+  const isVat = c.vat_or_nonvat !== 'NONVAT';
+  const vatable = Number(c.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
+  const vat = Number(c.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
+  const withheld = Number(c.tax_withheld || c.amount_withheld_2307) || 0;
+  const discount = Number(c.discount) || 0;
+  const totalDue = Number(c.total_amount_due) || (amount - discount - withheld);
+
+  return {
+    id: c.id || Date.now(),
+    company_name: c.company_name,
+    registered_name: c.registered_name || c.customer_name || 'Customer',
+    vat_or_nonvat: isVat ? 'VAT' : 'NONVAT',
+    tin: c.tin || c.customer_tin || c.client_TIN || '000-000-000-00000',
+    address: c.address || '',
+    type_of_transaction: (c.type_of_transaction || 'CASH') as any,
+    date: c.date || c.collection_date || new Date().toISOString().split('T')[0],
+    invoice_type: c.invoice_type || 'OFFICIAL RECEIPT',
+    voucher_number: c.voucher_number || c.entry_number || '',
+    invoice_number: c.invoice_number || c.OR_PR_number || `CR-${c.id}`,
+    particulars: c.particulars || c.notes || `Collection for Invoice #${c.invoice_number || ''}`,
+    qty: Number(c.qty) || 1,
+    unit_price: Number(c.unit_price) || amount,
+    amount: amount,
+    vatable_amount: vatable,
+    vat_amount: vat,
+    zero_rated_amount: Number(c.zero_rated_amount) || 0,
+    vat_exempt_amount: Number(c.vat_exempt_amount) || 0,
+    total_amount_vat_inclusive: Number(c.total_amount_vat_inclusive) || amount,
+    total_amount_net_of_vat: Number(c.total_amount_net_of_vat) || (amount - vat),
+    discount: discount,
+    tax_withheld: withheld,
+    total_amount_due: totalDue,
+    is_cancelled: Boolean(c.is_cancelled),
+    created_at: c.created_at || new Date().toISOString(),
+    amount_collected: amount,
+    amount_withheld_2307: withheld
+  };
+}
+
+function mapPaymentToUniform(p: any): UniformBookRecord {
+  const amount = Number(p.amount || p.amount_paid) || 0;
+  const isVat = p.vat_or_nonvat !== 'NONVAT';
+  const vatable = Number(p.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
+  const vat = Number(p.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
+  const withheld = Number(p.tax_withheld || p.withholding_tax_2307) || 0;
+  const discount = Number(p.discount) || 0;
+  const totalDue = Number(p.total_amount_due) || (amount - discount - withheld);
+
+  return {
+    id: p.id || Date.now(),
+    company_name: p.company_name,
+    registered_name: p.registered_name || p.service_provider_name || p.payee_name || 'Payee',
+    vat_or_nonvat: isVat ? 'VAT' : 'NONVAT',
+    tin: p.tin || p.sp_tin || p.service_provider_TIN || '000-000-000-00000',
+    address: p.address || p.sp_address || '',
+    type_of_transaction: (p.type_of_transaction || 'CASH') as any,
+    date: p.date || p.payment_date || new Date().toISOString().split('T')[0],
+    invoice_type: p.invoice_type || 'OFFICIAL RECEIPT',
+    voucher_number: p.voucher_number || p.check_voucher_number || '',
+    invoice_number: p.invoice_number || p.voucher_number || `CD-${p.id}`,
+    particulars: p.particulars || p.notes || `Disbursement for Voucher #${p.voucher_number || ''}`,
+    qty: Number(p.qty) || 1,
+    unit_price: Number(p.unit_price) || amount,
+    amount: amount,
+    vatable_amount: vatable,
+    vat_amount: vat,
+    zero_rated_amount: Number(p.zero_rated_amount) || 0,
+    vat_exempt_amount: Number(p.vat_exempt_amount) || 0,
+    total_amount_vat_inclusive: Number(p.total_amount_vat_inclusive) || amount,
+    total_amount_net_of_vat: Number(p.total_amount_net_of_vat) || (amount - vat),
+    discount: discount,
+    tax_withheld: withheld,
+    total_amount_due: totalDue,
+    is_cancelled: Boolean(p.is_cancelled),
+    created_at: p.created_at || new Date().toISOString(),
+    amount_paid: amount,
+    withholding_tax_2307: withheld
+  };
+}
+
 export default function App() {
   const [companies, setCompanies] = useState<Company[]>(INITIAL_COMPANIES);
   const [activeCompany, setActiveCompany] = useState<Company | null>(INITIAL_COMPANIES[0] || null);
   const [activeBranchCode, setActiveBranchCode] = useState<string>('ALL');
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [contractors, setContractors] = useState<Contractor[]>(INITIAL_CONTRACTORS);
+
+  // Legacy arrays kept in sync
   const [sales, setSales] = useState<Sale[]>(INITIAL_SALES);
   const [collections, setCollections] = useState<Collection[]>(INITIAL_COLLECTIONS);
   const [expenses, setExpenses] = useState<Expense[]>(INITIAL_EXPENSES);
   const [payments, setPayments] = useState<Payment[]>(INITIAL_PAYMENTS);
+
+  // 2OS Uniform Books of Accounts (Exact 21 uniform database headers)
+  const [subsidiarySales, setSubsidiarySales] = useState<UniformBookRecord[]>(() => INITIAL_SALES.map(mapSaleToUniform));
+  const [subsidiaryPurchases, setSubsidiaryPurchases] = useState<UniformBookRecord[]>(() => INITIAL_EXPENSES.map(mapExpenseToUniform));
+  const [cashReceipts, setCashReceipts] = useState<UniformBookRecord[]>(() => INITIAL_COLLECTIONS.map(mapCollectionToUniform));
+  const [cashDisbursements, setCashDisbursements] = useState<UniformBookRecord[]>(() => INITIAL_PAYMENTS.map(mapPaymentToUniform));
+  const [collectionsRecords, setCollectionsRecords] = useState<UniformBookRecord[]>(() => INITIAL_COLLECTIONS.map(mapCollectionToUniform));
+  const [paymentsRecords, setPaymentsRecords] = useState<UniformBookRecord[]>(() => INITIAL_PAYMENTS.map(mapPaymentToUniform));
+
+  const handleUpdateSubsidiarySales = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
+    setSubsidiarySales(prev => {
+      const next = updater(prev);
+      setSales(next as any);
+      return next;
+    });
+  };
+
+  const handleUpdateSubsidiaryPurchases = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
+    setSubsidiaryPurchases(prev => {
+      const next = updater(prev);
+      setExpenses(next as any);
+      return next;
+    });
+  };
+
+  const handleUpdateCashReceipts = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
+    setCashReceipts(prev => {
+      const next = updater(prev);
+      setCollections(next as any);
+      return next;
+    });
+  };
+
+  const handleUpdateCashDisbursements = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
+    setCashDisbursements(prev => {
+      const next = updater(prev);
+      setPayments(next as any);
+      return next;
+    });
+  };
+
+  const handleUpdateCollectionsRecords = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
+    setCollectionsRecords(prev => {
+      const next = updater(prev);
+      setCollections(next as any);
+      return next;
+    });
+  };
+
+  const handleUpdatePaymentsRecords = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
+    setPaymentsRecords(prev => {
+      const next = updater(prev);
+      setPayments(next as any);
+      return next;
+    });
+  };
   const [accountTitles, setAccountTitles] = useState<AccountTitle[]>(INITIAL_ACCOUNT_TITLES);
   const [ppeAssets, setPpeAssets] = useState<PPEAsset[]>(INITIAL_PPE);
   const [specialEntries, setSpecialEntries] = useState<SpecialEntry[]>(INITIAL_SPECIAL_ENTRIES);
@@ -303,10 +541,63 @@ export default function App() {
       }
       if (data.customers) setCustomers(data.customers);
       if (data.contractors) setContractors(data.contractors);
-      if (data.sales) setSales(data.sales);
-      if (data.collections) setCollections(data.collections);
-      if (data.expenses) setExpenses(data.expenses);
-      if (data.payments) setPayments(data.payments);
+
+      if (data.subsidiarySales && data.subsidiarySales.length > 0) {
+        const mapped = data.subsidiarySales.map(mapSaleToUniform);
+        setSubsidiarySales(mapped);
+        setSales(mapped as any);
+      } else if (data.sales) {
+        const mapped = data.sales.map(mapSaleToUniform);
+        setSubsidiarySales(mapped);
+        setSales(data.sales);
+      }
+
+      if (data.subsidiaryPurchases && data.subsidiaryPurchases.length > 0) {
+        const mapped = data.subsidiaryPurchases.map(mapExpenseToUniform);
+        setSubsidiaryPurchases(mapped);
+        setExpenses(mapped as any);
+      } else if (data.expenses) {
+        const mapped = data.expenses.map(mapExpenseToUniform);
+        setSubsidiaryPurchases(mapped);
+        setExpenses(data.expenses);
+      }
+
+      if (data.cashReceipts && data.cashReceipts.length > 0) {
+        const mapped = data.cashReceipts.map(mapCollectionToUniform);
+        setCashReceipts(mapped);
+        setCollections(mapped as any);
+      } else if (data.collections) {
+        const mapped = data.collections.map(mapCollectionToUniform);
+        setCashReceipts(mapped);
+        setCollections(data.collections);
+      }
+
+      if (data.collectionsRecords && data.collectionsRecords.length > 0) {
+        const mapped = data.collectionsRecords.map(mapCollectionToUniform);
+        setCollectionsRecords(mapped);
+      } else if (data.collections) {
+        const mapped = data.collections.map(mapCollectionToUniform);
+        setCollectionsRecords(mapped);
+      }
+
+      if (data.cashDisbursements && data.cashDisbursements.length > 0) {
+        const mapped = data.cashDisbursements.map(mapPaymentToUniform);
+        setCashDisbursements(mapped);
+        setPayments(mapped as any);
+      } else if (data.payments) {
+        const mapped = data.payments.map(mapPaymentToUniform);
+        setCashDisbursements(mapped);
+        setPayments(data.payments);
+      }
+
+      if (data.paymentsRecords && data.paymentsRecords.length > 0) {
+        const mapped = data.paymentsRecords.map(mapPaymentToUniform);
+        setPaymentsRecords(mapped);
+      } else if (data.payments) {
+        const mapped = data.payments.map(mapPaymentToUniform);
+        setPaymentsRecords(mapped);
+      }
+
       if (data.ppeAssets) setPpeAssets(data.ppeAssets);
       if (data.employees) setEmployees(data.employees);
       if (data.payrollRecords) setPayrollRecords(data.payrollRecords);
@@ -335,10 +626,16 @@ export default function App() {
         activeCompanyId: activeCompany?.id,
         customers,
         contractors,
-        sales,
-        collections,
-        expenses,
-        payments,
+        subsidiarySales,
+        subsidiaryPurchases,
+        cashReceipts,
+        cashDisbursements,
+        collectionsRecords,
+        paymentsRecords,
+        sales: subsidiarySales,
+        collections: cashReceipts,
+        expenses: subsidiaryPurchases,
+        payments: cashDisbursements,
         ppeAssets,
         employees,
         payrollRecords,
@@ -373,6 +670,8 @@ export default function App() {
   // NAVIGATION ACTIVE TAB
   const [activeTab, setActiveTab] = useState<
     | 'sales' | 'collections' | 'expenses' | 'payments' | 'general_journal' | 'general_ledger' // Group 1
+    | 'subsidiary_sales' | 'subsidiary_purchases' | 'cash_receipts' | 'cash_disbursements' | 'cash_receipt' | 'cash_disbursement' | 'special_ledger'
+    | 'sales_transaction' | 'purchase_transaction'
     | 'companies' | 'customers' | 'providers' | 'related_parties' | 'employees' // Group 2
     | 'dashboard' | 'account_titles' | 'tax_calendar' | 'activities' | 'activity_lists' | 'about_app' | 'system_specs' | 'about' // Group 3
     | 'tax_reports' | 'income_tax' | 'ppe' | 'payroll' | 'contribution_tables' | 'cwt_customers' | 'cwt_providers' | 'special_entries' // Group 4
@@ -699,61 +998,127 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'sales' && (
-                <SalesTab 
-                  sales={companySales}
-                  setSales={setSales}
-                  setCollections={setCollections}
-                  customers={customers}
+              {(activeTab === 'sales' || activeTab === 'subsidiary_sales') && (
+                <UniformBookTab 
+                  bookType="subsidiary_sales"
+                  records={subsidiarySales}
+                  setRecords={handleUpdateSubsidiarySales}
                   activeCompany={activeCompany}
+                  customers={customers}
+                  contractors={contractors}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
-                  setShowAddCustomerPrompt={setShowAddCustomerPrompt}
                   globalSearch={globalSearch}
+                  onSyncLegacy={(list) => setSales(list as any)}
+                />
+              )}
+
+              {(activeTab === 'cash_receipt' || activeTab === 'cash_receipts') && (
+                <UniformBookTab 
+                  bookType="cash_receipt"
+                  records={cashReceipts}
+                  setRecords={handleUpdateCashReceipts}
+                  activeCompany={activeCompany}
+                  customers={customers}
+                  contractors={contractors}
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                  globalSearch={globalSearch}
+                  onSyncLegacy={(list) => setCollections(list as any)}
                 />
               )}
 
               {activeTab === 'collections' && (
-                <CollectionsTab 
-                  collections={companyCollections}
-                  setCollections={setCollections}
-                  sales={sales}
-                  setSales={setSales}
-                  customers={customers}
+                <UniformBookTab 
+                  bookType="collections"
+                  records={collectionsRecords}
+                  setRecords={handleUpdateCollectionsRecords}
                   activeCompany={activeCompany}
+                  customers={customers}
+                  contractors={contractors}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
-                  setShowAddCustomerPrompt={setShowAddCustomerPrompt}
                   globalSearch={globalSearch}
+                  onSyncLegacy={(list) => setCollections(list as any)}
                 />
               )}
 
-              {activeTab === 'expenses' && (
-                <ExpensesTab 
-                  expenses={companyExpenses}
-                  setExpenses={setExpenses}
-                  setPayments={setPayments}
-                  serviceProviders={contractors as any}
+              {(activeTab === 'expenses' || activeTab === 'subsidiary_purchases') && (
+                <UniformBookTab 
+                  bookType="subsidiary_purchases"
+                  records={subsidiaryPurchases}
+                  setRecords={handleUpdateSubsidiaryPurchases}
                   activeCompany={activeCompany}
+                  customers={customers}
+                  contractors={contractors}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
-                  setShowAddProviderPrompt={setShowAddProviderPrompt}
                   globalSearch={globalSearch}
+                  onSyncLegacy={(list) => setExpenses(list as any)}
+                />
+              )}
+
+              {(activeTab === 'cash_disbursement' || activeTab === 'cash_disbursements') && (
+                <UniformBookTab 
+                  bookType="cash_disbursement"
+                  records={cashDisbursements}
+                  setRecords={handleUpdateCashDisbursements}
+                  activeCompany={activeCompany}
+                  customers={customers}
+                  contractors={contractors}
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                  globalSearch={globalSearch}
+                  onSyncLegacy={(list) => setPayments(list as any)}
                 />
               )}
 
               {activeTab === 'payments' && (
-                <PaymentsTab 
-                  payments={companyPayments}
-                  setPayments={setPayments}
-                  expenses={expenses}
-                  setExpenses={setExpenses}
-                  serviceProviders={contractors as any}
+                <UniformBookTab 
+                  bookType="payments"
+                  records={paymentsRecords}
+                  setRecords={handleUpdatePaymentsRecords}
+                  activeCompany={activeCompany}
+                  customers={customers}
+                  contractors={contractors}
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                  globalSearch={globalSearch}
+                  onSyncLegacy={(list) => setPayments(list as any)}
+                />
+              )}
+
+              {activeTab === 'sales_transaction' && (
+                <SalesTransactionTab 
+                  subsidiarySales={subsidiarySales}
+                  setSubsidiarySales={handleUpdateSubsidiarySales}
+                  cashReceipts={cashReceipts}
+                  setCashReceipts={handleUpdateCashReceipts}
+                  collections={collectionsRecords}
+                  setCollections={handleUpdateCollectionsRecords}
+                  customers={customers}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
-                  setShowAddProviderPrompt={setShowAddProviderPrompt}
                   globalSearch={globalSearch}
+                  onNavigateToTab={(tab) => setActiveTab(tab as any)}
+                />
+              )}
+
+              {activeTab === 'purchase_transaction' && (
+                <PurchaseTransactionTab 
+                  subsidiaryPurchases={subsidiaryPurchases}
+                  setSubsidiaryPurchases={handleUpdateSubsidiaryPurchases}
+                  cashDisbursements={cashDisbursements}
+                  setCashDisbursements={handleUpdateCashDisbursements}
+                  payments={paymentsRecords}
+                  setPayments={handleUpdatePaymentsRecords}
+                  contractors={contractors}
+                  activeCompany={activeCompany}
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                  globalSearch={globalSearch}
+                  onNavigateToTab={(tab) => setActiveTab(tab as any)}
                 />
               )}
 

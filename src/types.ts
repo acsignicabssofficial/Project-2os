@@ -530,3 +530,120 @@ export interface BankReconSession {
 }
 
 export type ThemeMode = 'neon_light' | 'clean' | 'dark' | 'trial_layout';
+
+/**
+ * 2OS UNIFORM 21-HEADER BOOKS OF ACCOUNTS
+ * Applies uniformly across:
+ * - Cash Receipt (cash_receipts)
+ * - Cash Disbursement (cash_disbursements)
+ * - Subsidiary Sales (subsidiary_sales)
+ * - Subsidiary Purchases (subsidiary_purchases)
+ */
+export const UNIFORM_BOOK_HEADERS = [
+  'REGISTERED NAME',
+  'VAT OR NONVAT',
+  'TIN',
+  'ADDRESS',
+  'TYPE OF TRANSACTION (CASH OR ON ACCOUNT)',
+  'DATE',
+  'INVOICE TYPE (SALES INVOICE OR OFFICIAL RECEIPT)',
+  'VOUCHER #',
+  'INVOICE #',
+  'PARTICULARS',
+  'QTY',
+  'UNIT PRICE',
+  'AMOUNT',
+  'VATABLE AMOUNT',
+  'VAT AMOUNT',
+  'ZERO RATED AMOUNT',
+  'VAT EXEMPT AMOUNT',
+  'TOTAL AMOUNT-VAT INCLUSIVE',
+  'TOTAL AMOUNT-NET OF VAT',
+  'DISCOUNT',
+  'TAX WITHHELD',
+  'TOTAL AMOUNT DUE'
+] as const;
+
+export type UniformBookType = 
+  | 'cash_receipt'
+  | 'cash_disbursement'
+  | 'subsidiary_sales'
+  | 'subsidiary_purchases'
+  | 'collections'
+  | 'payments';
+
+export interface UniformBookRecord {
+  id: number;
+  company_name?: string;
+  // Uniform 21 headers
+  registered_name: string; // 1. REGISTERED NAME
+  vat_or_nonvat: 'VAT' | 'NONVAT'; // 2. VAT OR NONVAT
+  tin: string; // 3. TIN
+  address: string; // 4. ADDRESS
+  type_of_transaction: 'CASH' | 'ON ACCOUNT'; // 5. TYPE OF TRANSACTION (CASH OR ON ACCOUNT)
+  date: string; // 6. DATE
+  invoice_type: string; // 7. INVOICE TYPE (SALES INVOICE OR OFFICIAL RECEIPT)
+  voucher_number?: string; // 7.1 VOUCHER # [FOR EXPENSE AND CASH DISBURSEMENTS ONLY]
+  invoice_number: string; // 8. INVOICE #
+  particulars: string; // 9. PARTICULARS
+  qty: number; // 10. QTY
+  unit_price: number; // 11. UNIT PRICE
+  amount: number; // 12. AMOUNT
+  vatable_amount: number; // 13. VATABLE AMOUNT
+  vat_amount: number; // 14. VAT AMOUNT
+  zero_rated_amount: number; // 15. ZERO RATED AMOUNT
+  vat_exempt_amount: number; // 16. VAT EXEMPT AMOUNT
+  total_amount_vat_inclusive: number; // 17. TOTAL AMOUNT-VAT INCLUSIVE
+  total_amount_net_of_vat: number; // 18. TOTAL AMOUNT-NET OF VAT
+  discount: number; // 19. DISCOUNT
+  tax_withheld: number; // 20. TAX WITHHELD
+  total_amount_due: number; // 21. TOTAL AMOUNT DUE
+
+  // Status & metadata
+  status?: 'Cash' | 'On Account' | 'Partial' | 'Paid' | 'Unpaid' | string;
+  is_cancelled?: boolean;
+  created_at?: string;
+
+  // Inter-compatibility properties for existing components/reports
+  client_TIN?: string;
+  customer_name?: string;
+  customer_tin?: string;
+  client_Address?: string;
+  issue_date?: string;
+  invoice_date?: string;
+  collection_date?: string;
+  payment_date?: string;
+  expense_date?: string;
+  description?: string;
+  payment_type?: string;
+  vatable_sales?: number;
+  vat?: number;
+  zero_rated?: number;
+  vat_exempt?: number;
+  total_sale_vat_inclusive?: number;
+  less_vat?: number;
+  amount_net_of_vat?: number;
+  less_discount?: number;
+  add_vat?: number;
+  less_withholding_tax?: number;
+  down_payment?: number;
+  collection_status?: string;
+  expense_type?: string;
+  service_provider_name?: string;
+  service_provider_tin?: string;
+  service_provider_TIN?: string;
+  sp_tin?: string;
+  sp_address?: string;
+  voucher_no?: string;
+  amount_collected?: number;
+  amount_withheld_2307?: number;
+  amount_paid?: number;
+  withholding_tax_2307?: number;
+  withholding_2307?: number;
+  withholding_2307_2306?: number;
+  expense_invoice_amount?: number;
+  vat_input_amount?: number;
+  output_vat?: number;
+  invoice_amount?: number;
+}
+

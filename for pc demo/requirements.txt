@@ -1,0 +1,5 @@
+# 2OS Accounting System - PC Demo Requirements
+# NOTE: Standard Python 3.8+ works OUT-OF-THE-BOX with zero pip installations!
+#
+# (Optional) If you want an embedded native OS WebView2 window instead of Edge/Chrome App Mode:
+pywebview>=5.0

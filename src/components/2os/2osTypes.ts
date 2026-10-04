@@ -180,8 +180,28 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
         icon: Receipt,
         isBookOfAccount: true,
         cellRef: 'SALES!A1',
-        description: 'Subsidiary Sales: Detailed register of cash sales, on account sales, invoices, VATable amounts, exempt sales, and output VAT.',
-        formula: '=SUBSIDIARY_SALES(InvoiceNo, CustomerTIN, CustomerName, InvoiceAmount, OutputVat)'
+        description: 'Subsidiary Sales: Detailed register of all sales (Cash, On Account, and Partial), VAT classifications, invoice amounts, and collection status.',
+        formula: '=SUBSIDIARY_SALES(InvoiceNo, CustomerTIN, CustomerName, InvoiceAmount, Status)'
+      },
+      {
+        key: 'cash_receipts',
+        label: 'Cash Receipts Book (Cash-Only)',
+        shortLabel: 'Cash\nReceipts',
+        icon: Coins,
+        isBookOfAccount: true,
+        cellRef: 'RECEIPTS!A1',
+        description: 'Cash Receipts: Register of strictly cash-only receipts, immediate cash sales, and cleared invoice settlements.',
+        formula: '=CASH_RECEIPTS(CollectionDate, InvoiceNo, CustomerName, AmountCollected, Withholding2307)'
+      },
+      {
+        key: 'collections',
+        label: 'Collections Book (Cross-Matching)',
+        shortLabel: 'Collections\nBook',
+        icon: Coins,
+        isBookOfAccount: true,
+        cellRef: 'COLLECTIONS!A1',
+        description: 'Collections Book: Cross-matching register of all customer payments, down payments, installments, and 2307 withholding certificates.',
+        formula: '=COLLECTIONS_BOOK(CollectionDate, InvoiceNo, CustomerName, AmountCollected, Withholding2307)'
       },
       {
         key: 'expenses',
@@ -190,28 +210,28 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
         icon: Receipt,
         isBookOfAccount: true,
         cellRef: 'PURCHASES!A1',
-        description: 'Subsidiary Purchases: Detailed register of purchases, expense vouchers, vendor TIN, input VAT claims, and payment status.',
-        formula: '=SUBSIDIARY_PURCHASES(VoucherNo, ProviderTIN, ProviderName, ExpenseAmount, InputVat)'
+        description: 'Subsidiary Purchases: Detailed register of all purchases and expenses (Cash, On Account, and Partial), input VAT, and payment status.',
+        formula: '=SUBSIDIARY_PURCHASES(VoucherNo, ProviderTIN, ProviderName, ExpenseAmount, Status)'
       },
       {
-        key: 'collections',
-        label: 'Cash Receipts / Collections Book',
-        shortLabel: 'Cash\nReceipts',
-        icon: Coins,
-        isBookOfAccount: true,
-        cellRef: 'RECEIPTS!A1',
-        description: 'Cash Receipts: Register of customer collections, payment modes, official receipt numbers, 2307 withholding tax, and deposit records.',
-        formula: '=CASH_RECEIPTS(CollectionDate, InvoiceNo, CustomerName, AmountCollected, Withholding2307)'
-      },
-      {
-        key: 'payments',
-        label: 'Cash Disbursements / Payments Book',
+        key: 'cash_disbursements',
+        label: 'Cash Disbursements Book (Cash-Only)',
         shortLabel: 'Cash\nDisbursements',
         icon: DollarSign,
         isBookOfAccount: true,
         cellRef: 'DISBURSEMENTS!A1',
-        description: 'Cash Disbursements: Summary of check and cash disbursement vouchers, payee TIN, amount paid, and EWT deductions at source.',
+        description: 'Cash Disbursements: Summary of strictly cash-only disbursements, immediate cash expenses, check vouchers, and settled payables.',
         formula: '=CASH_DISBURSEMENTS(PaymentDate, VoucherNo, PayeeName, AmountPaid, WithholdingTax)'
+      },
+      {
+        key: 'payments',
+        label: 'Payments Book (Cross-Matching)',
+        shortLabel: 'Payments\nBook',
+        icon: DollarSign,
+        isBookOfAccount: true,
+        cellRef: 'PAYMENTS!A1',
+        description: 'Payments Book: Cross-matching register of all vendor payments, partial disbursements, check issuances, and EWT deductions.',
+        formula: '=PAYMENTS_BOOK(PaymentDate, VoucherNo, PayeeName, AmountPaid, WithholdingTax)'
       },
       {
         key: 'general_journal',
@@ -262,6 +282,24 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
     label: 'Other Transactions',
     icon: Layers,
     subTabs: [
+      {
+        key: 'sales_transaction',
+        label: 'Sales Transaction Hub (Record Sales & Invoices)',
+        shortLabel: 'Sales\nTransaction',
+        icon: Receipt,
+        cellRef: 'TRX_SALES!A1',
+        description: 'Sales Transaction Hub: Primary recording of sales (Cash, On Account, or Partial). Automatically routes to Subsidiary Sales, Cash Receipts, and Collections.',
+        formula: '=SALES_TRANSACTION_HUB(CustomerName, InvoiceNo, SaleMode, TotalDue, DownPayment)'
+      },
+      {
+        key: 'purchase_transaction',
+        label: 'Purchase Transaction Hub (Record Purchases & Expenses)',
+        shortLabel: 'Purchase\nTransaction',
+        icon: DollarSign,
+        cellRef: 'TRX_PURCHASE!A1',
+        description: 'Purchase Transaction Hub: Primary recording of purchases (Cash, On Account, or Partial). Automatically routes to Subsidiary Purchases, Cash Disbursements, and Payments.',
+        formula: '=PURCHASE_TRANSACTION_HUB(ProviderName, VoucherNo, PurchaseMode, TotalDue, DownPayment)'
+      },
       {
         key: 'payroll',
         label: 'Payroll Computation & Contribution Slips',
