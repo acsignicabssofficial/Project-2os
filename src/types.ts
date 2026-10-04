@@ -26,6 +26,7 @@ export interface Company {
   client_status?: string;
   date_of_entry?: string;
   // Compatibility properties
+  address?: string;
   registered_address?: string;
   business_address?: string;
   secondary_email?: string;

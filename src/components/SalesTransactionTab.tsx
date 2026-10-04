@@ -16,9 +16,11 @@ import {
   Check,
   CreditCard,
   Layers,
-  ArrowUpRight
+  ArrowUpRight,
+  Eye
 } from 'lucide-react';
-import { UniformBookRecord, Customer, Company } from '../types';
+import DocumentPreviewModal from './DocumentPreviewModal';
+import { UniformBookRecord, Customer, Company, SpecialEntry } from '../types';
 import { computeSaleFormulas } from '../utils/accounting';
 
 interface SalesTransactionTabProps {
@@ -34,6 +36,8 @@ interface SalesTransactionTabProps {
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
   onNavigateToTab?: (tabKey: string) => void;
+  specialEntries?: SpecialEntry[];
+  setSpecialEntries?: (updater: (prev: SpecialEntry[]) => SpecialEntry[]) => void;
 }
 
 export default function SalesTransactionTab({
@@ -48,7 +52,9 @@ export default function SalesTransactionTab({
   theme,
   triggerAlert,
   globalSearch = '',
-  onNavigateToTab
+  onNavigateToTab,
+  specialEntries,
+  setSpecialEntries
 }: SalesTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
 
@@ -91,6 +97,37 @@ export default function SalesTransactionTab({
 
   // Search filter for open invoices
   const [openSearch, setOpenSearch] = useState('');
+
+  // Official BIR Document Preview Modal State
+  const [previewRecord, setPreviewRecord] = useState<any | null>(null);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
+
+  const handlePreviewCurrentForm = () => {
+    setPreviewRecord({
+      invoice_number: invoiceNo.trim() || '001',
+      date: date,
+      registered_name: customerName || 'CUSTOMER NAME',
+      tin: tin || '000-000-000-00000',
+      address: address || '',
+      type_of_transaction: saleMode === 'ON CASH' ? 'CASH' : 'CHARGE',
+      invoice_type: invoiceType,
+      particulars: particulars || 'Sales / Service Revenue',
+      qty: Number(qty) || 1,
+      unit_price: Number(unitPrice) || 0,
+      amount: liveFormulas.amount,
+      vatable_amount: liveFormulas.vatable_sales,
+      vat_amount: liveFormulas.vat,
+      zero_rated_amount: Number(zeroRated) || 0,
+      vat_exempt_amount: Number(vatExempt) || 0,
+      total_amount_vat_inclusive: liveFormulas.total_sale_vat_inclusive,
+      total_amount_net_of_vat: liveFormulas.amount_net_of_vat,
+      discount: liveFormulas.less_discount,
+      tax_withheld: liveFormulas.less_withholding_tax,
+      total_amount_due: liveFormulas.total_amount_due,
+      vat_or_nonvat: vatStatus
+    });
+    setIsPreviewModalOpen(true);
+  };
 
   // Auto-fill TIN & Customer details
   const handleSelectCustomer = (custName: string) => {
@@ -351,6 +388,108 @@ export default function SalesTransactionTab({
       }
     }
 
+    // 3. Record Journal Entry to Special Journal (Step 2 of user's specification)
+    if (setSpecialEntries) {
+      const vatable = liveFormulas.vatable_sales;
+      const vatOut = liveFormulas.vat;
+      const zeroR = liveFormulas.zero_rated;
+      const vatEx = liveFormulas.vat_exempt;
+      const totalSalesGross = Math.round((vatable + vatOut + zeroR + vatEx) * 100) / 100;
+      const disc = liveFormulas.less_discount;
+      const wtax = liveFormulas.less_withholding_tax;
+
+      // ENTRY 1: Sales Recognition
+      // (dr) Accounts Receivable = totalSalesGross
+      // (cr) Vatable Sales = vatable
+      // (cr) VAT Output = vatOut
+      // (cr) Zero-Rated Sales = zeroR
+      // (cr) VAT-Exempt Sales = vatEx
+      const entry1Lines: any[] = [
+        { type: 'Debit', account_code: '1020', account_title: 'Accounts Receivable', amount: totalSalesGross },
+        { type: 'Credit', account_code: '4010', account_title: vatStatus === 'VAT' ? 'Vatable Sales' : 'Sales Revenue', amount: vatable }
+      ];
+
+      if (vatOut > 0) {
+        entry1Lines.push({ type: 'Credit', account_code: '2020', account_title: 'Output VAT Payable', amount: vatOut });
+      }
+      if (zeroR > 0) {
+        entry1Lines.push({ type: 'Credit', account_code: '4020', account_title: 'Zero-Rated Sales', amount: zeroR });
+      }
+      if (vatEx > 0) {
+        entry1Lines.push({ type: 'Credit', account_code: '4030', account_title: 'VAT-Exempt Sales', amount: vatEx });
+      }
+
+      const journalEntry1: SpecialEntry = {
+        id: commonId + 10,
+        voucher_no: `SJ-SLS-${invoiceNo.trim()}`,
+        entry_number: `SJ-SLS-${invoiceNo.trim()}`,
+        entry_date: date,
+        entry_type: 'Sales',
+        company_name: activeCompanyName,
+        description: `Sales Recognition - Invoice #${invoiceNo.trim()} (${customerName.trim()})`,
+        lines: entry1Lines,
+        created_at: nowIso
+      };
+
+      const newEntriesToAdd: SpecialEntry[] = [journalEntry1];
+
+      // ENTRY 2 (for collections or for full payments/cash sales):
+      // (dr) cash, (dr) discounts, (dr) withholding tax from customers, (cr) accounts receivable
+      if (saleMode === 'ON CASH') {
+        const cashAmt = totalDue;
+        const entry2Lines: any[] = [
+          { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt }
+        ];
+
+        if (disc > 0) {
+          entry2Lines.push({ type: 'Debit', account_code: '4015', account_title: 'Sales Discounts', amount: disc });
+        }
+        if (wtax > 0) {
+          entry2Lines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: wtax });
+        }
+
+        entry2Lines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: totalSalesGross });
+
+        const journalEntry2: SpecialEntry = {
+          id: commonId + 11,
+          voucher_no: `SJ-COL-${invoiceNo.trim()}`,
+          entry_number: `SJ-COL-${invoiceNo.trim()}`,
+          entry_date: date,
+          entry_type: 'Collection',
+          company_name: activeCompanyName,
+          description: `Cash Settlement / Collection - Invoice #${invoiceNo.trim()} (${customerName.trim()})`,
+          lines: entry2Lines,
+          created_at: nowIso
+        };
+        newEntriesToAdd.push(journalEntry2);
+      } else if (saleMode === 'ON PARTIAL') {
+        const downPmt = parseFloat(downPaymentAmount) || 0;
+        const downWtax = parseFloat(downPaymentWithholding) || 0;
+        const entry2Lines: any[] = [
+          { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: downPmt }
+        ];
+        if (downWtax > 0) {
+          entry2Lines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: downWtax });
+        }
+        entry2Lines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: downPmt + downWtax });
+
+        const journalEntry2: SpecialEntry = {
+          id: commonId + 11,
+          voucher_no: `SJ-COL-${invoiceNo.trim()}-DP`,
+          entry_number: `SJ-COL-${invoiceNo.trim()}-DP`,
+          entry_date: date,
+          entry_type: 'Collection',
+          company_name: activeCompanyName,
+          description: `Down Payment Collection - Invoice #${invoiceNo.trim()} (${customerName.trim()})`,
+          lines: entry2Lines,
+          created_at: nowIso
+        };
+        newEntriesToAdd.push(journalEntry2);
+      }
+
+      setSpecialEntries(prev => [...newEntriesToAdd, ...prev]);
+    }
+
     // Reset Form for next entry
     setInvoiceNo(`SI-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
     setParticulars('');
@@ -454,6 +593,31 @@ export default function SalesTransactionTab({
         `Recorded partial collection of ₱${paymentAmt.toLocaleString()} for Invoice #${inv.invoice_number}. Remaining: ₱${(invTotalDue - newTotalCollected).toLocaleString()}.`,
         'info'
       );
+    }
+
+    // 4. Record Entry 2 to Special Journal for Collection
+    // (dr) cash, (dr) withholding tax from customers, (cr) accounts receivable
+    if (setSpecialEntries) {
+      const entry2Lines: any[] = [
+        { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: paymentAmt }
+      ];
+      if (wtaxAmt > 0) {
+        entry2Lines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: wtaxAmt });
+      }
+      entry2Lines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: paymentAmt + wtaxAmt });
+
+      const collectionJournalEntry: SpecialEntry = {
+        id: commonId + 10,
+        voucher_no: `SJ-COL-${inv.invoice_number}-${Date.now().toString().slice(-4)}`,
+        entry_number: `SJ-COL-${inv.invoice_number}-${Date.now().toString().slice(-4)}`,
+        entry_date: collectDate,
+        entry_type: 'Collection',
+        company_name: activeCompanyName,
+        description: `Receivable Collection - Invoice #${inv.invoice_number} (${inv.registered_name})`,
+        lines: entry2Lines,
+        created_at: nowIso
+      };
+      setSpecialEntries(prev => [collectionJournalEntry, ...prev]);
     }
 
     setSelectedInvoiceToCollect(null);
@@ -947,13 +1111,24 @@ export default function SalesTransactionTab({
                 )}
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-3.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-cyan-600/20 transition cursor-pointer flex items-center justify-center gap-2 mt-2"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Save & Route Sales Transaction</span>
-              </button>
+              <div className="flex flex-col gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={handlePreviewCurrentForm}
+                  className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-cyan-300 border border-zinc-700 font-bold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Eye className="w-4 h-4 text-cyan-400" />
+                  <span>Preview Official BIR Document ({vatStatus})</span>
+                </button>
+
+                <button
+                  type="submit"
+                  className="w-full py-3.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-cyan-600/20 transition cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Save & Route Sales Transaction</span>
+                </button>
+              </div>
             </div>
           </div>
         </form>
@@ -1046,18 +1221,31 @@ export default function SalesTransactionTab({
                           </span>
                         </td>
                         <td className="p-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedInvoiceToCollect(inv);
-                              setCollectAmount(String(balance));
-                              setCollectRefNo(`OR-${Date.now().toString().slice(-4)}`);
-                            }}
-                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 ml-auto"
-                          >
-                            <Coins className="w-3.5 h-3.5" />
-                            <span>Collect Payment</span>
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5 ml-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPreviewRecord(inv);
+                                setIsPreviewModalOpen(true);
+                              }}
+                              className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-cyan-400 border border-zinc-700 font-bold text-xs transition cursor-pointer"
+                              title="Preview Official BIR Document"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedInvoiceToCollect(inv);
+                                setCollectAmount(String(balance));
+                                setCollectRefNo(`OR-${Date.now().toString().slice(-4)}`);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1"
+                            >
+                              <Coins className="w-3.5 h-3.5" />
+                              <span>Collect Payment</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1170,6 +1358,17 @@ export default function SalesTransactionTab({
           </div>
         </div>
       )}
+
+      {/* OFFICIAL BIR DOCUMENT PREVIEW MODAL */}
+      <DocumentPreviewModal
+        isOpen={isPreviewModalOpen}
+        onClose={() => setIsPreviewModalOpen(false)}
+        record={previewRecord}
+        activeCompany={activeCompany}
+        theme={theme}
+        transactionCategory="sales"
+        bookType="subsidiary_sales"
+      />
     </div>
   );
 }

@@ -1,21 +1,9 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import initSqlJs, { Database } from "sql.js";
+import initSqlJs from "sql.js";
+import type { Database } from "sql.js";
 import { createServer as createViteServer } from "vite";
-import {
-  INITIAL_COMPANIES,
-  INITIAL_CUSTOMERS,
-  INITIAL_CONTRACTORS,
-  INITIAL_SALES,
-  INITIAL_COLLECTIONS,
-  INITIAL_EXPENSES,
-  INITIAL_PAYMENTS,
-  INITIAL_PPE,
-  INITIAL_ACCOUNT_TITLES,
-  INITIAL_SPECIAL_ENTRIES,
-  INITIAL_INCOME_TAX_RECORDS
-} from "./src/data";
 
 const app = express();
 const PORT = 3000;
@@ -374,24 +362,52 @@ async function initSqliteDatabase() {
   const count = compRes[0]?.values[0]?.[0] || 0;
   if (count === 0) {
     console.log("Seeding initial dataset into SQLite database...");
-    const seedData = {
-      companies: INITIAL_COMPANIES,
-      activeCompanyId: INITIAL_COMPANIES[0]?.id || null,
-      customers: INITIAL_CUSTOMERS,
-      contractors: INITIAL_CONTRACTORS,
-      sales: INITIAL_SALES,
-      collections: INITIAL_COLLECTIONS,
-      expenses: INITIAL_EXPENSES,
-      payments: INITIAL_PAYMENTS,
-      ppeAssets: INITIAL_PPE,
-      accountTitles: INITIAL_ACCOUNT_TITLES,
-      specialEntries: INITIAL_SPECIAL_ENTRIES,
-      incomeTaxRecords: INITIAL_INCOME_TAX_RECORDS,
-      payrollRecords: [],
-      employees: [],
-      theme: "neon_light"
-    };
-    saveLedgerToSqlite(seedData);
+    let seedData: any = null;
+    if (fs.existsSync(DB_JSON_BACKUP)) {
+      try {
+        seedData = JSON.parse(fs.readFileSync(DB_JSON_BACKUP, "utf-8"));
+      } catch (e) {
+        console.warn("Could not read backup json:", e);
+      }
+    }
+    if (!seedData || !Array.isArray(seedData.accountTitles) || seedData.accountTitles.length === 0) {
+      seedData = {
+        companies: [],
+        activeCompanyId: null,
+        customers: [],
+        contractors: [],
+        sales: [],
+        collections: [],
+        expenses: [],
+        payments: [],
+        ppeAssets: [],
+        accountTitles: [
+          { id: 1, code: "1010", title: "Cash and Cash Equivalents", type: "Asset", category: "Current Assets", description: "Cash on hand and bank deposits" },
+          { id: 2, code: "1020", title: "Accounts Receivable", type: "Asset", category: "Current Assets", description: "Trade receivables from clients" },
+          { id: 3, code: "1030", title: "Input VAT", type: "Asset", category: "Current Assets", description: "12% Creditable Input VAT from purchases" },
+          { id: 4, code: "1040", title: "Creditable Withholding Tax (BIR 2307)", type: "Asset", category: "Current Assets", description: "Prepaid income tax withheld by customers" },
+          { id: 5, code: "1050", title: "Prepaid Expenses", type: "Asset", category: "Current Assets", description: "Advance payments for rent, insurance, etc." },
+          { id: 6, code: "1510", title: "Property, Plant & Equipment", type: "Asset", category: "Non-Current Assets", description: "Office furniture, computers, vehicles, machineries" },
+          { id: 7, code: "1520", title: "Accumulated Depreciation", type: "Asset", category: "Non-Current Assets", description: "Contra-asset for cumulative depreciation" },
+          { id: 8, code: "2010", title: "Accounts Payable", type: "Liability", category: "Current Liabilities", description: "Trade payables to suppliers and service providers" },
+          { id: 9, code: "2020", title: "Output VAT Payable", type: "Liability", category: "Current Liabilities", description: "12% Output VAT collected on sales" },
+          { id: 10, code: "2030", title: "Expanded Withholding Tax Payable (BIR 0619-E)", type: "Liability", category: "Current Liabilities", description: "Withholding tax payable to BIR for vendors" },
+          { id: 11, code: "2040", title: "Income Tax Payable (BIR 1702/1701)", type: "Liability", category: "Current Liabilities", description: "Income tax payable provision due to BIR" },
+          { id: 12, code: "3010", title: "Capital Stock / Owner's Equity", type: "Equity", category: "Equity", description: "Contributed capital by stockholders or owner" },
+          { id: 13, code: "3020", title: "Retained Earnings", type: "Equity", category: "Equity", description: "Cumulative net earnings retained in business" },
+          { id: 14, code: "4010", title: "Sales / Service Revenue", type: "Revenue", category: "Operating Revenue", description: "Gross revenues from sales and services" },
+          { id: 17, code: "6010", title: "Salaries, Wages & Benefits", type: "Expense", category: "Operating Expenses", description: "Employee gross compensation and allowances" }
+        ],
+        specialEntries: [],
+        incomeTaxRecords: [],
+        payrollRecords: [],
+        employees: [],
+        theme: "neon_light"
+      };
+    }
+    if (seedData) {
+      saveLedgerToSqlite(seedData);
+    }
   } else {
     persistSqliteBuffer();
   }

@@ -51,89 +51,181 @@ export default function GeneralJournalTab({
 
     const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
-    // 1. Sales Entries
-    // Note: Creditable Withholding Tax (2307) is only realized/recognized once
-    // actually withheld by the customer at the time of collection. For sales
-    // that are already fully "Paid" at invoicing (and have no separate
-    // Collection entries logged against them), that happens concurrently, so
-    // CWT is booked directly here. For "Partial"/"Pending" sales - and for any
-    // "Paid" sale that unexpectedly already has Collection entries recorded
-    // against it - CWT is recognized later via the matching Collection entry
-    // (see below) instead, so it is not double-counted here.
+    const specialEntryInvoices = new Set(
+      specialEntries.map(s => normalizeDocNo(s.voucher_no || s.entry_number || '')).filter(Boolean)
+    );
+
+    // 1. Sales Entries (ENTRY 1: Sales Recognition)
+    // Concept strictly following user formula:
+    // (dr) Accounts Receivable [1020]
+    // (cr) Vatable Sales [4010]
+    // (cr) Output VAT Payable [2020]
+    // (cr) Zero-Rated Sales [4020]
+    // (cr) VAT-Exempt Sales [4030]
+    // Total Dr = Total Cr
     sales.forEach(s => {
-      const invAmt = Number(s.invoice_amount) || 0;
-      const w2307 = Number(s.withholding_2307) || 0;
-      const vatExempt = Number(s.vat_exempt_amount) || 0;
-      const discounts = Number(s.discounts) || 0;
-      const downPayment = Number(s.down_payment) || 0;
-      const hasCollections = collections.some(c => normalizeDocNo(c.invoice_number) === normalizeDocNo(s.invoice_number));
+      const norm = normalizeDocNo(s.invoice_number);
+      if (norm && (specialEntryInvoices.has(`sjsls${norm}`) || specialEntryInvoices.has(`gjsls${norm}`))) return;
 
-      const { vatable_amount: vatable, output_vat: outVat, net_of_discount: netInvoice } = computeSalesVAT(invAmt, vatExempt, discounts);
+      const customerName = s.customer_name || (s as any).registered_name || (s as any).client_name || 'Customer';
+      const isVat = (s as any).vat_or_nonvat === 'VAT' || (s as any).vat_status === 'VAT';
 
-      const entry: JournalEntry = {
+      // Read segmented components
+      const zeroRated = Number((s as any).zero_rated_amount ?? (s as any).zero_rated) || 0;
+      const vatExempt = Number((s as any).vat_exempt_amount ?? (s as any).vat_exempt) || 0;
+      const discounts = Number((s as any).discount ?? (s as any).discounts) || 0;
+      const w2307 = Number((s as any).tax_withheld ?? (s as any).withholding_2307 ?? (s as any).amount_withheld_2307) || 0;
+
+      let vatableSales = Number((s as any).vatable_amount ?? (s as any).vatable_sales) || 0;
+      let vatOutput = Number((s as any).vat_amount ?? (s as any).output_vat) || 0;
+
+      const rawInvoiceAmt = Number((s as any).total_amount_vat_inclusive ?? (s as any).amount ?? s.invoice_amount) || 0;
+
+      if (isVat) {
+        if (!vatableSales && rawInvoiceAmt > 0) {
+          const grossSubjectToVat = Math.max(0, rawInvoiceAmt - zeroRated - vatExempt);
+          vatableSales = Math.round((grossSubjectToVat / 1.12) * 100) / 100;
+          vatOutput = Math.round((grossSubjectToVat - vatableSales) * 100) / 100;
+        }
+      } else {
+        vatableSales = Math.max(0, rawInvoiceAmt - zeroRated - vatExempt);
+        vatOutput = 0;
+      }
+
+      // Total Gross Sales (VAT Inclusive) = Vatable Sales + VAT Output + Zero-Rated Sales + VAT-Exempt Sales
+      const totalGrossSales = Math.round((vatableSales + vatOutput + zeroRated + vatExempt) * 100) / 100 || rawInvoiceAmt;
+
+      // ENTRY 1: SALES RECOGNITION
+      const entry1: JournalEntry = {
         id: idCounter++,
-        company_name: activeCompany?.company_name || '',
+        company_name: s.company_name || activeCompany?.company_name || '',
         entry_no: `GJ-SLS-${s.invoice_number}`,
-        date: s.invoice_date || new Date().toISOString().split('T')[0],
+        date: s.invoice_date || (s as any).date || new Date().toISOString().split('T')[0],
         ref_type: 'Sales',
         ref_no: s.invoice_number,
-        description: `Sales Invoice #${s.invoice_number} - Customer: ${s.customer_name}`,
-        debits: [],
-        credits: []
-      };
-
-      if (s.sales_status === 'Paid' && !hasCollections) {
-        entry.debits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: Math.max(0, netInvoice - w2307) });
-        if (w2307 > 0) {
-          entry.debits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
-        }
-      } else if (s.sales_status === 'Partial' && downPayment > 0) {
-        entry.debits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents (Down Payment)', amount: Math.min(downPayment, netInvoice) });
-        entry.debits.push({ account_code: '1020', account_title: 'Accounts Receivable', amount: Math.max(0, netInvoice - downPayment) });
-      } else {
-        entry.debits.push({ account_code: '1020', account_title: 'Accounts Receivable', amount: netInvoice });
-      }
-
-      // Sales Revenue is booked gross (before the trade discount), and the
-      // discount is posted as its own contra-revenue debit line so it stays
-      // visible in the books instead of being silently netted away.
-      entry.credits.push({ account_code: '4010', account_title: 'Sales / Service Revenue', amount: vatable + vatExempt + discounts });
-
-      if (discounts > 0) {
-        entry.debits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discounts });
-      }
-
-      if (outVat > 0) {
-        entry.credits.push({ account_code: '2020', account_title: 'Output VAT Payable', amount: outVat });
-      }
-
-      entries.push(entry);
-    });
-
-    // 2. Cash Receipt / Collections Entries
-    collections.forEach(c => {
-      const amtCol = Number(c.amount_collected) || 0;
-      const w2307 = Number(c.amount_withheld_2307) || 0;
-
-      const entry: JournalEntry = {
-        id: idCounter++,
-        company_name: activeCompany?.company_name || '',
-        entry_no: `GJ-COL-${c.entry_number || c.id}`,
-        date: c.collection_date || new Date().toISOString().split('T')[0],
-        ref_type: 'Collection',
-        ref_no: c.invoice_number,
-        description: `Cash Collection for Invoice #${c.invoice_number} - Customer: ${c.customer_name}`,
+        description: `Sales Invoice #${s.invoice_number} - Customer: ${customerName}`,
         debits: [
-          { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: amtCol }
+          { account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
         ],
         credits: [
-          { account_code: '1020', account_title: 'Accounts Receivable', amount: amtCol + w2307 }
+          { account_code: '4010', account_title: isVat ? 'Vatable Sales' : 'Sales Revenue', amount: vatableSales }
         ]
       };
 
-      if (w2307 > 0) {
-        entry.debits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
+      if (vatOutput > 0) {
+        entry1.credits.push({ account_code: '2020', account_title: 'Output VAT Payable', amount: vatOutput });
       }
+      if (zeroRated > 0) {
+        entry1.credits.push({ account_code: '4020', account_title: 'Zero-Rated Sales', amount: zeroRated });
+      }
+      if (vatExempt > 0) {
+        entry1.credits.push({ account_code: '4030', account_title: 'VAT-Exempt Sales', amount: vatExempt });
+      }
+
+      entries.push(entry1);
+
+      // If Cash Sale and NO separate collection record exists, generate ENTRY 2 here:
+      // (dr) Cash and Cash Equivalents
+      // (dr) Sales Discounts
+      // (dr) Creditable Withholding Tax (BIR 2307)
+      // (cr) Accounts Receivable
+      const isCashSale = (s as any).type_of_transaction === 'CASH' || s.sales_status === 'Paid' || (s as any).status === 'Cash' || (s as any).status === 'Paid';
+      const hasCollections = collections.some(c => normalizeDocNo(c.invoice_number) === normalizeDocNo(s.invoice_number));
+
+      if (isCashSale && !hasCollections) {
+        const cashAmt = Math.round((totalGrossSales - discounts - w2307) * 100) / 100;
+        const entry2Debits: Array<{ account_code: string; account_title: string; amount: number }> = [
+          { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt }
+        ];
+
+        if (discounts > 0) {
+          entry2Debits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discounts });
+        }
+        if (w2307 > 0) {
+          entry2Debits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
+        }
+
+        const entry2: JournalEntry = {
+          id: idCounter++,
+          company_name: s.company_name || activeCompany?.company_name || '',
+          entry_no: `GJ-CR-${s.invoice_number}`,
+          date: s.invoice_date || (s as any).date || new Date().toISOString().split('T')[0],
+          ref_type: 'Collection',
+          ref_no: s.invoice_number,
+          description: `Cash Settlement for Invoice #${s.invoice_number} - Customer: ${customerName}`,
+          debits: entry2Debits,
+          credits: [
+            { account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
+          ]
+        };
+        entries.push(entry2);
+      }
+    });
+
+    // 2. Cash Receipt / Collections Entries (ENTRY 2: Collection & Settlement)
+    // Concept strictly following user formula:
+    // (dr) Cash and Cash Equivalents [1010]
+    // (dr) Sales Discounts [4015]
+    // (dr) Creditable Withholding Tax (BIR 2307) [1040]
+    // (cr) Accounts Receivable [1020]
+    // Total Dr = Total Cr; Accounts Receivable is cleared to net 0
+    collections.forEach(c => {
+      const norm = normalizeDocNo(c.invoice_number);
+      if (norm && (specialEntryInvoices.has(`sjcol${norm}`) || specialEntryInvoices.has(`gjcol${norm}`))) return;
+
+      const customerName = c.customer_name || (c as any).registered_name || (c as any).client_name || 'Customer';
+      const w2307 = Number((c as any).amount_withheld_2307 ?? (c as any).tax_withheld ?? (c as any).wtax_2307) || 0;
+      const discounts = Number((c as any).discount ?? (c as any).discounts) || 0;
+
+      // Find matching sales record to determine total invoice A/R
+      const matchingSale = sales.find(s => normalizeDocNo(s.invoice_number) === normalizeDocNo(c.invoice_number));
+      const saleGross = matchingSale 
+        ? Number((matchingSale as any).total_amount_vat_inclusive ?? (matchingSale as any).amount ?? matchingSale.invoice_amount) || 0
+        : 0;
+
+      const rawAmount = Number(c.amount_collected ?? (c as any).amount) || 0;
+      const totalDue = Number((c as any).total_amount_due ?? (c as any).invoice_amount) || saleGross || rawAmount;
+
+      let arCredit = 0;
+      let cashAmt = 0;
+
+      const isPaidOrCash = (c as any).status === 'Paid' || (c as any).status === 'Cash' || (c as any).type_of_transaction === 'CASH';
+
+      if (isPaidOrCash) {
+        // Full collection: A/R is credited for the entire invoice amount
+        arCredit = totalDue;
+        cashAmt = Math.round((arCredit - discounts - w2307) * 100) / 100;
+        if (cashAmt <= 0) cashAmt = rawAmount;
+      } else {
+        // Partial collection
+        cashAmt = rawAmount;
+        arCredit = Math.round((cashAmt + discounts + w2307) * 100) / 100;
+      }
+
+      const debits: Array<{ account_code: string; account_title: string; amount: number }> = [
+        { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt }
+      ];
+
+      if (discounts > 0) {
+        debits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discounts });
+      }
+      if (w2307 > 0) {
+        debits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
+      }
+
+      const entry: JournalEntry = {
+        id: idCounter++,
+        company_name: c.company_name || activeCompany?.company_name || '',
+        entry_no: `GJ-COL-${c.entry_number || c.id}`,
+        date: c.collection_date || (c as any).date || new Date().toISOString().split('T')[0],
+        ref_type: 'Collection',
+        ref_no: c.invoice_number,
+        description: `Cash Collection for Invoice #${c.invoice_number} - Customer: ${customerName}`,
+        debits,
+        credits: [
+          { account_code: '1020', account_title: 'Accounts Receivable', amount: arCredit }
+        ]
+      };
 
       entries.push(entry);
     });
@@ -284,14 +376,14 @@ export default function GeneralJournalTab({
     specialEntries.forEach(s => {
       const entry: JournalEntry = {
         id: idCounter++,
-        company_name: activeCompany?.company_name || '',
-        entry_no: s.voucher_no,
-        date: s.entry_date,
-        ref_type: s.entry_type || 'Manual',
-        ref_no: s.voucher_no,
-        description: `[${s.entry_type}] ${s.description}`,
-        debits: s.lines.filter(l => l.type === 'Debit').map(l => ({ account_code: l.account_code, account_title: l.account_title, amount: Number(l.amount) || 0 })),
-        credits: s.lines.filter(l => l.type === 'Credit').map(l => ({ account_code: l.account_code, account_title: l.account_title, amount: Number(l.amount) || 0 }))
+        company_name: s.company_name || activeCompany?.company_name || '',
+        entry_no: s.voucher_no || s.entry_number || `SJ-${s.id}`,
+        date: s.entry_date || new Date().toISOString().split('T')[0],
+        ref_type: s.entry_type || 'Sales',
+        ref_no: s.voucher_no || s.entry_number || `SJ-${s.id}`,
+        description: s.description ? (s.description.startsWith('[') ? s.description : `[${s.entry_type || 'Special'}] ${s.description}`) : `Special Entry #${s.voucher_no || s.id}`,
+        debits: (s.lines || []).filter(l => l.type?.toLowerCase() === 'debit').map(l => ({ account_code: l.account_code, account_title: l.account_title, amount: Number(l.amount) || 0 })),
+        credits: (s.lines || []).filter(l => l.type?.toLowerCase() === 'credit').map(l => ({ account_code: l.account_code, account_title: l.account_title, amount: Number(l.amount) || 0 }))
       };
       entries.push(entry);
     });

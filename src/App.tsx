@@ -122,6 +122,7 @@ import TwoOSRibbon from './components/2os/2osRibbon';
 import TwoOSSheetBar from './components/2os/2osSheetBar';
 import InfinityFreeModal from './components/InfinityFreeModal';
 import AuditTrailModal from './components/2os/AuditTrailModal';
+import DocumentPreviewModal from './components/DocumentPreviewModal';
 import { exportActiveSheetTo2OS, exportFullAccountingWorkbookTo2OS } from './utils/2osExportHelper';
 import { ThemeMode } from './types';
 
@@ -496,6 +497,48 @@ export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isInfinityFreeModalOpen, setIsInfinityFreeModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [documentPreviewRecord, setDocumentPreviewRecord] = useState<any | null>(null);
+  const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
+
+  const handleOpenDocumentPreview = (record?: any) => {
+    if (record) {
+      setDocumentPreviewRecord(record);
+    } else if (subsidiarySales.length > 0) {
+      setDocumentPreviewRecord(subsidiarySales[0]);
+    } else if (sales.length > 0) {
+      setDocumentPreviewRecord(sales[0]);
+    } else {
+      setDocumentPreviewRecord({
+        id: 1,
+        company_name: activeCompany?.company_name || 'ANNYEONG SEYOH & CO',
+        registered_name: 'SAMPLE CLIENT CORP.',
+        vat_or_nonvat: activeCompany?.vat_or_non_vat === 'NON-VATABLE' ? 'NONVAT' : 'VAT',
+        tin: '000-123-456-00000',
+        address: '4TH FLOOR, BIR BLDG, SEN. MIRIAM P. DEFENSOR-SANTIAGO AVE., PINYAHAN, QUEZON CITY 1000',
+        type_of_transaction: 'CASH',
+        date: new Date().toISOString().split('T')[0],
+        invoice_type: 'SALES INVOICE',
+        voucher_number: '',
+        invoice_number: '001',
+        particulars: 'Professional Accounting & Bookkeeping Services',
+        qty: 1,
+        unit_price: 25000,
+        amount: 25000,
+        vatable_amount: 22321.43,
+        vat_amount: 2678.57,
+        zero_rated_amount: 0,
+        vat_exempt_amount: 0,
+        total_amount_vat_inclusive: 25000,
+        total_amount_net_of_vat: 22321.43,
+        discount: 0,
+        tax_withheld: 500,
+        total_amount_due: 24500,
+        is_cancelled: 0,
+        created_at: new Date().toISOString()
+      });
+    }
+    setIsDocumentPreviewOpen(true);
+  };
 
   // Load backend data (with localStorage fallback for static hosting like GitHub Pages)
   useEffect(() => {
@@ -1102,6 +1145,8 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onNavigateToTab={(tab) => setActiveTab(tab as any)}
+                  specialEntries={specialEntries}
+                  setSpecialEntries={setSpecialEntries}
                 />
               )}
 
@@ -1720,6 +1765,17 @@ export default function App() {
         activeTab={activeTab}
         activeCompany={activeCompany}
         themeMode={theme}
+      />
+
+      {/* OFFICIAL BIR INVOICE & RECEIPT PREVIEW MODAL (VAT & NON-VAT STYLES) */}
+      <DocumentPreviewModal
+        isOpen={isDocumentPreviewOpen}
+        onClose={() => setIsDocumentPreviewOpen(false)}
+        record={documentPreviewRecord}
+        activeCompany={activeCompany}
+        theme={activeTheme}
+        themeMode={theme}
+        bookType={activeTab}
       />
 
     </div>

@@ -46,7 +46,8 @@ import {
   Moon, 
   Palette, 
   ShieldAlert, 
-  HardDrive 
+  HardDrive,
+  Eye 
 } from 'lucide-react';
 import { 
   RIBBON_CATEGORIES, 

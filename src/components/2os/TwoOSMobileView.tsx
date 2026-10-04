@@ -33,8 +33,10 @@ import {
   X,
   Trash2,
   Save,
-  Upload
+  Upload,
+  Eye
 } from 'lucide-react';
+import DocumentPreviewModal from '../DocumentPreviewModal';
 import {
   Company,
   Customer,
@@ -154,6 +156,8 @@ export default function TwoOSMobileView({
   const [selectedBirForm, setSelectedBirForm] = useState<string | null>(null);
 
   // Mobile Function Modals & State
+  const [mobilePreviewRecord, setMobilePreviewRecord] = useState<any | null>(null);
+  const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
   const [showAddSaleModal, setShowAddSaleModal] = useState(false);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [showAddCollectionModal, setShowAddCollectionModal] = useState(false);
@@ -1370,6 +1374,16 @@ export default function TwoOSMobileView({
                         {fmt(sale.invoice_amount || 12500)}
                       </span>
                       <button
+                        onClick={() => {
+                          setMobilePreviewRecord(sale);
+                          setIsMobilePreviewOpen(true);
+                        }}
+                        className="text-blue-600 hover:text-blue-800 p-1"
+                        title="Preview Official BIR Document"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button
                         onClick={() => handleDeleteSale(sale.id)}
                         className="text-slate-400 hover:text-rose-600 p-1"
                         title="Delete sale"
@@ -1410,6 +1424,16 @@ export default function TwoOSMobileView({
                       <span className="text-xs font-black text-rose-600">
                         {fmt(exp.expense_invoice_amount || 8750)}
                       </span>
+                      <button
+                        onClick={() => {
+                          setMobilePreviewRecord(exp);
+                          setIsMobilePreviewOpen(true);
+                        }}
+                        className="text-rose-600 hover:text-rose-800 p-1"
+                        title="Preview Official BIR Document"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => handleDeleteExpense(exp.id)}
                         className="text-slate-400 hover:text-rose-600 p-1"
@@ -2024,6 +2048,15 @@ export default function TwoOSMobileView({
         monthName={activeMonthName}
         year={selectedYear}
         onExport={onExportActiveSheet}
+      />
+
+      {/* OFFICIAL BIR INVOICE & RECEIPT PREVIEW MODAL */}
+      <DocumentPreviewModal
+        isOpen={isMobilePreviewOpen}
+        onClose={() => setIsMobilePreviewOpen(false)}
+        record={mobilePreviewRecord}
+        activeCompany={activeCompany}
+        theme={{ isLight: true }}
       />
 
     </div>
