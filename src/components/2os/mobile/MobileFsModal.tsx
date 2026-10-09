@@ -40,14 +40,14 @@ export function MobileFsModal({
   const totalPaid = payments.reduce((sum, p) => sum + (Number(p.amount_paid || p.net_paid) || 0), 0);
 
   // Balance sheet items
-  const cashOnBank = Math.max(25000, 50000 + totalCollected - totalPaid);
+  const cashOnBank = Math.max(0, totalCollected - totalPaid);
   const accountsReceivable = Math.max(0, totalSales - totalCollected);
   const inputVatCreditable = expenses.reduce((sum, e) => sum + (Number(e.vat_input_amount || e.input_vat) || 0), 0);
   const cwtCreditable = sales.reduce((sum, s) => sum + (Number(s.ewt_amount || s.withholding_2307) || 0), 0);
   const totalCurrentAssets = cashOnBank + accountsReceivable + inputVatCreditable + cwtCreditable;
 
-  const ppeCost = ppeAssets.reduce((sum, a) => sum + (Number(a.acquisition_cost) || 0), 0) || 120000;
-  const ppeBookValue = ppeAssets.reduce((sum, a) => sum + (Number(a.net_book_value) || 0), 0) || 95000;
+  const ppeCost = ppeAssets.reduce((sum, a) => sum + (Number(a.acquisition_cost) || 0), 0);
+  const ppeBookValue = ppeAssets.reduce((sum, a) => sum + (Number(a.net_book_value) || 0), 0);
   const totalAssets = totalCurrentAssets + ppeBookValue;
 
   const accountsPayable = Math.max(0, totalExpenses - totalPaid);

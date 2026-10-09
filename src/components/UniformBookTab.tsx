@@ -16,7 +16,7 @@ import {
   FileText,
   Eye
 } from 'lucide-react';
-import DocumentPreviewModal from './DocumentPreviewModal';
+import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import { 
   UniformBookRecord, 
   UniformBookType, 
@@ -75,48 +75,7 @@ export default function UniformBookTab({
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState<number | null>(null);
-
-  // Document Preview State (Official BIR Invoice / Receipt Preview)
   const [previewRecord, setPreviewRecord] = useState<UniformBookRecord | null>(null);
-  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
-
-  const handleOpenPreview = (record?: UniformBookRecord) => {
-    if (record) {
-      setPreviewRecord(record);
-    } else if (records.length > 0) {
-      setPreviewRecord(records[0]);
-    } else {
-      setPreviewRecord({
-        id: 1,
-        company_name: activeCompanyName || 'ANNYEONG SEYOH & CO',
-        registered_name: 'SAMPLE CLIENT CORP.',
-        vat_or_nonvat: activeCompany?.vat_or_non_vat === 'NON-VATABLE' ? 'NONVAT' : 'VAT',
-        tin: '000-123-456-00000',
-        address: '4TH FLOOR, BIR BLDG, SEN. MIRIAM P. DEFENSOR-SANTIAGO AVE., PINYAHAN, QUEZON CITY 1000',
-        type_of_transaction: 'CASH',
-        date: new Date().toISOString().split('T')[0],
-        invoice_type: isDisbursementOrPurchase ? 'OFFICIAL RECEIPT' : 'SALES INVOICE',
-        voucher_number: isDisbursementOrPurchase ? 'CV-001' : '',
-        invoice_number: '001',
-        particulars: 'Professional Accounting & Bookkeeping Services',
-        qty: 1,
-        unit_price: 25000,
-        amount: 25000,
-        vatable_amount: 22321.43,
-        vat_amount: 2678.57,
-        zero_rated_amount: 0,
-        vat_exempt_amount: 0,
-        total_amount_vat_inclusive: 25000,
-        total_amount_net_of_vat: 22321.43,
-        discount: 0,
-        tax_withheld: 500,
-        total_amount_due: 24500,
-        is_cancelled: 0,
-        created_at: new Date().toISOString()
-      });
-    }
-    setIsPreviewModalOpen(true);
-  };
 
   // Import State
   const [importedPreview, setImportedPreview] = useState<UniformBookRecord[]>([]);
@@ -395,7 +354,7 @@ export default function UniformBookTab({
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
               <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-              <span>Viewing & Audit Mode • Click any row to <strong>Preview BIR Document</strong></span>
+              <span>Viewing & Audit Mode • Encode via <strong>Other Transactions</strong></span>
             </div>
 
             <button
@@ -606,9 +565,7 @@ export default function UniformBookTab({
                   return (
                     <tr 
                       key={r.id} 
-                      onClick={() => handleOpenPreview(r)}
-                      title="Click this transaction to preview official BIR document"
-                      className={`${isCancelled ? 'bg-rose-950/20 text-zinc-500 line-through' : theme.isLight ? 'hover:bg-blue-50/60' : 'hover:bg-zinc-800/60'} transition-colors cursor-pointer`}
+                      className={`${isCancelled ? 'bg-rose-950/20 text-zinc-500 line-through' : theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/40'} transition-colors`}
                     >
                       <td className="p-3 text-center text-zinc-400 text-[10px] font-mono">{idx + 1}</td>
                       <td className="p-3">
@@ -658,18 +615,15 @@ export default function UniformBookTab({
                       <td className={`p-3 font-mono font-semibold ${r.voucher_number ? 'text-amber-400' : 'text-zinc-500'}`}>
                         {r.voucher_number || '-'}
                       </td>
-                      <td className="p-3 font-mono font-bold">
+                      <td className="p-3 font-mono font-bold text-cyan-400">
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenPreview(r);
-                          }}
-                          className="text-cyan-400 hover:text-cyan-300 hover:underline flex items-center gap-1 cursor-pointer"
-                          title="Click to view official BIR Document Preview"
+                          onClick={() => setPreviewRecord(r)}
+                          className="hover:underline inline-flex items-center gap-1.5 cursor-pointer text-left text-cyan-400 hover:text-cyan-300"
+                          title="Click to preview official BIR Invoice / Receipt (VAT or Non-VAT)"
                         >
-                          <span>{r.invoice_number || '-'}</span>
-                          <Eye className="w-3 h-3 opacity-70" />
+                          <span>{r.invoice_number}</span>
+                          <Eye className="w-3 h-3 opacity-60 hover:opacity-100" />
                         </button>
                       </td>
                       <td className="p-3 text-zinc-300 max-w-[240px] truncate" title={r.particulars}>{r.particulars}</td>
@@ -708,40 +662,28 @@ export default function UniformBookTab({
                       <td className="p-3 text-center sticky right-0 bg-zinc-950/80 backdrop-blur-xs border-l border-zinc-800">
                         <div className="flex items-center justify-center gap-1">
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenPreview(r);
-                            }}
-                            title="Preview BIR Official Invoice / Receipt"
+                            onClick={() => setPreviewRecord(r)}
+                            title="Preview Official BIR Invoice / Receipt (VAT or Non-VAT)"
                             className="p-1 rounded text-emerald-400 hover:bg-emerald-500/20 cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenEditModal(r);
-                            }}
+                            onClick={() => handleOpenEditModal(r)}
                             title="Edit Record"
                             className="p-1 rounded text-cyan-400 hover:bg-cyan-500/20 cursor-pointer"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleCancel(r.id);
-                            }}
+                            onClick={() => handleToggleCancel(r.id)}
                             title={isCancelled ? "Restore" : "Cancel"}
                             className="p-1 rounded text-amber-400 hover:bg-amber-500/20 cursor-pointer"
                           >
                             {isCancelled ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
                           </button>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteRecord(r.id);
-                            }}
+                            onClick={() => handleDeleteRecord(r.id)}
                             title="Delete"
                             className="p-1 rounded text-rose-400 hover:bg-rose-500/20 cursor-pointer"
                           >
@@ -1263,14 +1205,12 @@ export default function UniformBookTab({
         </div>
       )}
 
-      {/* DOCUMENT PREVIEW MODAL (BIR INVOICE / RECEIPT) */}
-      <DocumentPreviewModal
-        isOpen={isPreviewModalOpen}
-        onClose={() => setIsPreviewModalOpen(false)}
+      {/* INVOICE / RECEIPT OFFICIAL PREVIEW MODAL (VAT & NON-VAT) */}
+      <InvoiceReceiptPreviewModal
+        isOpen={Boolean(previewRecord)}
+        onClose={() => setPreviewRecord(null)}
         record={previewRecord}
         activeCompany={activeCompany}
-        theme={theme}
-        bookType={bookType}
       />
     </div>
   );

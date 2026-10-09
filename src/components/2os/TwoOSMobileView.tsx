@@ -217,7 +217,7 @@ export default function TwoOSMobileView({
   const withholdingTax = companySales.reduce((sum, s) => sum + (Number(s.ewt_amount || s.withholding_2307) || 0), 0);
   const incomeTaxEst = Math.max(0, (totalSalesAmount - totalExpensesAmount) * 0.20);
 
-  const bepAmount = totalExpensesAmount > 0 ? totalExpensesAmount * 1.35 : 83077;
+  const bepAmount = totalExpensesAmount > 0 && totalSalesAmount > 0 ? totalExpensesAmount * 1.35 : 0;
   const netProfit = totalSalesAmount - totalExpensesAmount;
 
   const fmt = (n: number) => '₱' + (Number(n) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -854,7 +854,7 @@ export default function TwoOSMobileView({
                 </div>
                 <div>
                   <span className="text-[10px] text-purple-700 font-semibold block">Employees</span>
-                  <span className="text-base font-black text-purple-950">{employees.length || 24}</span>
+                  <span className="text-base font-black text-purple-950">{employees.length}</span>
                 </div>
               </div>
 
@@ -867,7 +867,7 @@ export default function TwoOSMobileView({
                 </div>
                 <div>
                   <span className="text-[10px] text-blue-700 font-semibold block">Customers</span>
-                  <span className="text-base font-black text-blue-950">{customers.length || 58}</span>
+                  <span className="text-base font-black text-blue-950">{customers.length}</span>
                 </div>
               </div>
 
@@ -880,7 +880,7 @@ export default function TwoOSMobileView({
                 </div>
                 <div>
                   <span className="text-[10px] text-sky-700 font-semibold block">Suppliers</span>
-                  <span className="text-base font-black text-sky-950">{contractors.length || 32}</span>
+                  <span className="text-base font-black text-sky-950">{contractors.length}</span>
                 </div>
               </div>
 
@@ -893,7 +893,7 @@ export default function TwoOSMobileView({
                 </div>
                 <div>
                   <span className="text-[10px] text-indigo-700 font-semibold block">Branches</span>
-                  <span className="text-base font-black text-indigo-950">{companies.length || 3}</span>
+                  <span className="text-base font-black text-indigo-950">{companies.length}</span>
                 </div>
               </div>
             </div>
@@ -1206,19 +1206,19 @@ export default function TwoOSMobileView({
                 <div className="divide-y divide-slate-100 text-xs">
                   <div className="py-2 flex items-center justify-between">
                     <span className="text-slate-600 font-medium">Cash and Cash Equivalents</span>
-                    <span className="font-bold text-slate-900">{fmt(totalCollectionsAmount || 250000)}</span>
+                    <span className="font-bold text-slate-900">{fmt(totalCollectionsAmount)}</span>
                   </div>
                   <div className="py-2 flex items-center justify-between">
                     <span className="text-slate-600 font-medium">Accounts Receivable</span>
-                    <span className="font-bold text-amber-600">{fmt(overdueAR || 180450)}</span>
+                    <span className="font-bold text-amber-600">{fmt(overdueAR)}</span>
                   </div>
                   <div className="py-2 flex items-center justify-between">
                     <span className="text-slate-600 font-medium">Accounts Payable</span>
-                    <span className="font-bold text-rose-600">{fmt(unpaidAP || 95320)}</span>
+                    <span className="font-bold text-rose-600">{fmt(unpaidAP)}</span>
                   </div>
                   <div className="py-2 flex items-center justify-between">
                     <span className="text-slate-600 font-medium">Property, Plant & Equipment</span>
-                    <span className="font-bold text-slate-900">{fmt(420000)}</span>
+                    <span className="font-bold text-slate-900">{fmt(ppeAssets.reduce((sum, a) => sum + (Number(a.net_book_value || a.acquisition_cost) || 0), 0))}</span>
                   </div>
                 </div>
               </div>
@@ -1366,12 +1366,12 @@ export default function TwoOSMobileView({
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500 mt-0.5">
-                        {sale.invoice_date || sale.issue_date || 'Aug 27, 2026'} • {sale.customer_name || sale.registered_name || 'Customer'}
+                        {sale.invoice_date || sale.issue_date || 'N/A'} • {sale.customer_name || sale.registered_name || 'Customer'}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-black text-slate-900">
-                        {fmt(sale.invoice_amount || 12500)}
+                        {fmt(sale.invoice_amount || 0)}
                       </span>
                       <button
                         onClick={() => {
@@ -1417,12 +1417,12 @@ export default function TwoOSMobileView({
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500 mt-0.5">
-                        {exp.expense_date || exp.issue_date || 'Aug 26, 2026'} • {exp.service_provider_name || exp.registered_name || 'Vendor'}
+                        {exp.expense_date || exp.issue_date || 'N/A'} • {exp.service_provider_name || exp.registered_name || 'Vendor'}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-black text-rose-600">
-                        {fmt(exp.expense_invoice_amount || 8750)}
+                        {fmt(exp.expense_invoice_amount || 0)}
                       </span>
                       <button
                         onClick={() => {
@@ -1545,23 +1545,23 @@ export default function TwoOSMobileView({
             <div className="divide-y divide-slate-100 text-xs">
               <div className="py-2 flex items-center justify-between">
                 <span className="text-slate-600">Output VAT (12%)</span>
-                <span className="font-bold text-slate-900">{fmt(totalOutputVat || 120500)}</span>
+                <span className="font-bold text-slate-900">{fmt(totalOutputVat)}</span>
               </div>
               <div className="py-2 flex items-center justify-between">
                 <span className="text-slate-600">Input VAT (Creditable)</span>
-                <span className="font-bold text-emerald-600">-{fmt(totalInputVat || 78200)}</span>
+                <span className="font-bold text-emerald-600">-{fmt(totalInputVat)}</span>
               </div>
               <div className="py-2 flex items-center justify-between bg-rose-50/60 px-2 -mx-2 rounded-lg">
                 <span className="font-bold text-rose-800">VAT Payable</span>
-                <span className="font-black text-rose-600 text-sm">{fmt(netVatPayable || 42300)}</span>
+                <span className="font-black text-rose-600 text-sm">{fmt(netVatPayable)}</span>
               </div>
               <div className="py-2 flex items-center justify-between">
                 <span className="text-slate-600">Withholding Tax (Creditable / 2307)</span>
-                <span className="font-bold text-slate-900">{fmt(withholdingTax || 18750)}</span>
+                <span className="font-bold text-slate-900">{fmt(withholdingTax)}</span>
               </div>
               <div className="py-2 flex items-center justify-between">
                 <span className="text-slate-600">Estimated Income Tax (20%)</span>
-                <span className="font-bold text-slate-900">{fmt(incomeTaxEst || 35000)}</span>
+                <span className="font-bold text-slate-900">{fmt(incomeTaxEst)}</span>
               </div>
             </div>
           </div>

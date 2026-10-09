@@ -176,10 +176,19 @@ export default function ModalPromptEntry({
     ? 'text-violet-700 font-bold'
     : 'text-cyan-400 font-mono';
 
+  const hasEntity = Boolean(activeCompany && activeCompany.company_name && activeCompany.company_name.trim().length > 0 && activeCompany.company_name !== 'Select Company...');
+
   const handleLaunch = (key: string, title: string) => {
+    const isTransactionTab = ['sales', 'collections', 'expenses', 'payments', 'general_journal', 'special_entries', 'cwt_customers', 'cwt_providers', 'payroll'].includes(key);
+    if (isTransactionTab && !hasEntity) {
+      triggerAlert('Strict requirement: Please set up an Entity Profile first before entering transactions! Saan mapupunta ang transaction kung wala naman itong designated entity?', 'error');
+      onSelectTab('companies');
+      onClose();
+      return;
+    }
     onSelectTab(key);
     onClose();
-    triggerAlert(`Opened modal entry workspace for ${title}`, 'success');
+    triggerAlert(`Opened workspace for ${title}`, 'success');
   };
 
   return (
@@ -222,6 +231,31 @@ export default function ModalPromptEntry({
         </div>
 
         {/* ACTIVE SUBMENU DIRECT QUICK-ADD SHORTCUT */}
+        {!hasEntity && (
+          <div className="mx-6 mt-4 p-4 rounded-xl bg-amber-500/15 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-300">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-amber-200">Strict Requirement: Entity Profile Required Before Entering Transactions</p>
+                <p className="text-[11px] text-amber-300/80 mt-0.5">
+                  Bago ka makapag-enter ng transactions, kailangan mo munang mag-setup ng entity profile. Saan mapupunta ang transaction kung wala naman itong designated entity?
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                onSelectTab('companies');
+                onClose();
+              }}
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer transition shadow-xs"
+            >
+              Set Up Entity Profile Now
+            </button>
+          </div>
+        )}
+
         <div className={`px-6 py-3 border-b flex items-center justify-between text-xs ${
           isNeon
             ? 'bg-sky-50/90 border-sky-200'

@@ -64,61 +64,9 @@ export const INITIAL_SPECIAL_ENTRIES: SpecialEntry[] = [];
 
 export const INITIAL_INCOME_TAX_RECORDS: IncomeTaxRecord[] = [];
 
-export const INITIAL_EMPLOYEES: any[] = [
-  {
-    id: 1,
-    company_name: 'Active Workspace',
-    employee_id: 'EMP-001',
-    full_name: 'Juan Dela Cruz',
-    tin: '123-456-789-00000',
-    position: 'Senior Accountant',
-    daily_rate: 1000,
-    monthly_rate: 25000,
-    sss_no: '34-1234567-8',
-    philhealth_no: '12-345678901-2',
-    pagibig_no: '1212-3434-5656',
-    tax_status: 'Single',
-    subject_to_contributions: true
-  },
-  {
-    id: 2,
-    company_name: 'Active Workspace',
-    employee_id: 'EMP-002',
-    full_name: 'Maria Clara Santos',
-    tin: '987-654-321-00000',
-    position: 'Operations Manager',
-    daily_rate: 1400,
-    monthly_rate: 35000,
-    sss_no: '34-9876543-1',
-    philhealth_no: '98-765432109-8',
-    pagibig_no: '9898-7676-5454',
-    tax_status: 'Married',
-    subject_to_contributions: true
-  }
-];
+export const INITIAL_EMPLOYEES: any[] = [];
 
-export const INITIAL_PAYROLL_RECORDS: any[] = [
-  {
-    id: 1,
-    company_name: 'Active Workspace',
-    employee_id: 'EMP-001',
-    full_name: 'Juan Dela Cruz',
-    payroll_period: '2026-01',
-    subject_to_contributions: true,
-    basic_pay: 25000,
-    overtime_pay: 2500,
-    allowances: 1000,
-    gross_pay: 28500,
-    sss_deduction: 1237.50,
-    philhealth_deduction: 625,
-    pagibig_deduction: 200,
-    withholding_tax: 1500,
-    other_deductions: 0,
-    total_deductions: 3562.50,
-    net_pay: 24937.50,
-    status: 'Processed'
-  }
-];
+export const INITIAL_PAYROLL_RECORDS: any[] = [];
 
 export const INITIAL_SSS_TABLE: any[] = [
   { id: 1, min_salary: 0, max_salary: 4249.99, msc: 4000, ee_share: 180.00, er_share: 380.00 },

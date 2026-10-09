@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   BarChart, 
   Bar, 
@@ -163,11 +163,11 @@ export default function ExecutiveDashboard({
 
   // Activity Tasks Summary State (synchronized with ActivitiesWorkflow)
   const [taskCounts, setTaskCounts] = useState({
-    total: 10,
-    pending: 6,
-    overdue: 1,
-    completed: 3,
-    completedPercent: 30
+    total: 0,
+    pending: 0,
+    overdue: 0,
+    completed: 0,
+    completedPercent: 0
   });
 
   // Tabulated Dashboard state: TRANSACTIONS, TOP, ACTIVITIES
@@ -198,41 +198,61 @@ export default function ExecutiveDashboard({
     return `₱${val.toLocaleString()}`;
   };
 
+  const compName = activeCompany?.company_name || '';
+
+  const isDateMatch = useCallback((dateStr?: string) => {
+    if (!dateStr) return true;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return true;
+    if (currentYear !== undefined && d.getFullYear() !== currentYear) return false;
+    if (periodFilterMode === 'month' && currentMonthIdx !== undefined && d.getMonth() !== currentMonthIdx) return false;
+    return true;
+  }, [currentYear, periodFilterMode, currentMonthIdx]);
+
+  // Company-scoped transactions
+  const companyRawSales = useMemo(() => sales.filter(s => !compName || s.company_name === compName), [sales, compName]);
+  const companyRawColls = useMemo(() => collections.filter(c => !compName || c.company_name === compName), [collections, compName]);
+  const companyRawExp = useMemo(() => expenses.filter(e => !compName || e.company_name === compName), [expenses, compName]);
+  const companyRawPay = useMemo(() => payments.filter(p => !compName || p.company_name === compName), [payments, compName]);
+
+  // Selected period transactions (month or year)
+  const compSales = useMemo(() => companyRawSales.filter(s => isDateMatch(s.invoice_date || s.issue_date)), [companyRawSales, isDateMatch]);
+  const compColls = useMemo(() => companyRawColls.filter(c => isDateMatch(c.collection_date)), [companyRawColls, isDateMatch]);
+  const compExp = useMemo(() => companyRawExp.filter(e => isDateMatch(e.expense_date || e.issue_date)), [companyRawExp, isDateMatch]);
+  const compPay = useMemo(() => companyRawPay.filter(p => isDateMatch(p.payment_date)), [companyRawPay, isDateMatch]);
+
+  // Entire active year transactions for multi-period line and area charts
+  const compYearSales = useMemo(() => companyRawSales.filter(s => {
+    if (currentYear === undefined) return true;
+    const d = s.invoice_date || s.issue_date;
+    if (!d) return true;
+    const dt = new Date(d);
+    return !isNaN(dt.getTime()) ? dt.getFullYear() === currentYear : true;
+  }), [companyRawSales, currentYear]);
+
+  const compYearColls = useMemo(() => companyRawColls.filter(c => {
+    if (currentYear === undefined) return true;
+    const d = c.collection_date || c.date;
+    if (!d) return true;
+    const dt = new Date(d);
+    return !isNaN(dt.getTime()) ? dt.getFullYear() === currentYear : true;
+  }), [companyRawColls, currentYear]);
+
+  const compYearExp = useMemo(() => companyRawExp.filter(e => {
+    if (currentYear === undefined) return true;
+    const d = e.expense_date || e.issue_date;
+    if (!d) return true;
+    const dt = new Date(d);
+    return !isNaN(dt.getTime()) ? dt.getFullYear() === currentYear : true;
+  }), [companyRawExp, currentYear]);
+
+  const compPayroll = useMemo(() => payrollRecords.filter(p => !compName || p.company_name === compName), [payrollRecords, compName]);
+  const compEmps = useMemo(() => employees.filter(e => !compName || e.company_name === compName), [employees, compName]);
+  const compPpe = useMemo(() => ppeAssets.filter(p => !compName || p.company_name === compName), [ppeAssets, compName]);
+  const compTax = useMemo(() => incomeTaxRecords.filter(t => !compName || t.company_name === compName), [incomeTaxRecords, compName]);
+
   // 1. Comprehensive Calculations across all accounting aspects
   const stats = useMemo(() => {
-    const compName = activeCompany?.company_name || '';
-
-    const isDateMatch = (dateStr?: string) => {
-      if (!dateStr) return true;
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return true;
-      if (currentYear !== undefined && d.getFullYear() !== currentYear) return false;
-      if (periodFilterMode === 'month' && currentMonthIdx !== undefined && d.getMonth() !== currentMonthIdx) return false;
-      return true;
-    };
-    
-    // Filtered by active company and selected month/year
-    const rawSales = sales.filter(s => s.company_name === compName);
-    const periodSales = rawSales.filter(s => isDateMatch(s.invoice_date || s.issue_date));
-    const compSales = periodSales.length > 0 ? periodSales : (rawSales.length > 0 && periodFilterMode === 'year' ? rawSales : (rawSales.length > 0 ? periodSales : []));
-
-    const rawColls = collections.filter(c => c.company_name === compName);
-    const periodColls = rawColls.filter(c => isDateMatch(c.collection_date));
-    const compColls = periodColls.length > 0 ? periodColls : (rawColls.length > 0 && periodFilterMode === 'year' ? rawColls : (rawColls.length > 0 ? periodColls : []));
-
-    const rawExp = expenses.filter(e => e.company_name === compName);
-    const periodExp = rawExp.filter(e => isDateMatch(e.expense_date || e.issue_date));
-    const compExp = periodExp.length > 0 ? periodExp : (rawExp.length > 0 && periodFilterMode === 'year' ? rawExp : (rawExp.length > 0 ? periodExp : []));
-
-    const rawPay = payments.filter(p => p.company_name === compName);
-    const periodPay = rawPay.filter(p => isDateMatch(p.payment_date));
-    const compPay = periodPay.length > 0 ? periodPay : (rawPay.length > 0 && periodFilterMode === 'year' ? rawPay : (rawPay.length > 0 ? periodPay : []));
-
-    const compPayroll = payrollRecords.filter(p => p.company_name === compName);
-    const compEmps = employees.filter(e => e.company_name === compName);
-    const compPpe = ppeAssets.filter(p => p.company_name === compName);
-    const compTax = incomeTaxRecords.filter(t => t.company_name === compName);
-
     // Sales & AR
     const grossSales = compSales.reduce((sum, s) => sum + (s.invoice_amount - (s.discounts || 0)), 0);
     const outputVat = compSales.reduce((sum, s) => sum + s.output_vat, 0);
@@ -288,7 +308,7 @@ export default function ExecutiveDashboard({
     const outstandingAR = overdueAR + notDueAR;
 
     // Invoices Paid Section
-    const paidLast30Days = cashCollected * 0.45 || 3692.22;
+    const paidLast30Days = cashCollected * 0.45;
     const notDeposited = paidLast30Days * 0.56;
     const deposited = paidLast30Days - notDeposited;
 
@@ -364,13 +384,7 @@ export default function ExecutiveDashboard({
         });
       }
     } else {
-      topExpensePieData = [
-        { name: 'Subcontractors & Labor', value: grossExpenses * 0.52 || 52000, color: '#02B8AC', percent: 52 },
-        { name: 'Rent & Facilities Lease', value: grossExpenses * 0.20 || 20000, color: '#3B82F6', percent: 20 },
-        { name: 'Logistics & Fuel', value: grossExpenses * 0.14 || 14000, color: '#F59E0B', percent: 14 },
-        { name: 'Utilities & Telecom', value: grossExpenses * 0.08 || 8000, color: '#EC4899', percent: 8 },
-        { name: 'Other Expenses', value: grossExpenses * 0.06 || 6000, color: '#64748B', percent: 6 }
-      ];
+      topExpensePieData = [];
     }
 
     const currentTotalExpensePeriod = topExpensePieData.reduce((acc, curr) => acc + curr.value, 0);
@@ -432,22 +446,22 @@ export default function ExecutiveDashboard({
     const totalUnpaidTaxLiabilities = netVatPayable + withholdingTaxCompPayable + expandedWithholdingTaxPayable + statutoryPayable;
 
     // Breakeven Analysis (BEP)
-    const estimatedFixedCosts = (grossExpenses * 0.35) + payrollGross + totalERContributions || 45000;
-    const estimatedVariableCosts = (grossExpenses * 0.65) || 55000;
-    const totalRevenueForBEP = grossSales || 120000;
-    const variableCostRatio = totalRevenueForBEP > 0 ? Math.min(0.85, Math.max(0.20, estimatedVariableCosts / totalRevenueForBEP)) : 0.55;
-    const contributionMarginRatio = 1 - variableCostRatio;
-    const breakevenSales = contributionMarginRatio > 0 ? (estimatedFixedCosts / contributionMarginRatio) : estimatedFixedCosts * 2;
+    const estimatedFixedCosts = (grossExpenses * 0.35) + payrollGross + totalERContributions;
+    const estimatedVariableCosts = grossExpenses * 0.65;
+    const totalRevenueForBEP = grossSales;
+    const variableCostRatio = totalRevenueForBEP > 0 ? Math.min(0.85, Math.max(0.20, estimatedVariableCosts / totalRevenueForBEP)) : 0;
+    const contributionMarginRatio = variableCostRatio > 0 ? 1 - variableCostRatio : 0;
+    const breakevenSales = (contributionMarginRatio > 0 && estimatedFixedCosts > 0) ? (estimatedFixedCosts / contributionMarginRatio) : 0;
     const marginOfSafety = Math.max(0, totalRevenueForBEP - breakevenSales);
-    const marginOfSafetyPercent = totalRevenueForBEP > 0 ? (marginOfSafety / totalRevenueForBEP) * 100 : 0;
-    const isAboveBreakeven = totalRevenueForBEP >= breakevenSales;
+    const marginOfSafetyPercent = (totalRevenueForBEP > 0 && breakevenSales > 0) ? (marginOfSafety / totalRevenueForBEP) * 100 : 0;
+    const isAboveBreakeven = totalRevenueForBEP >= breakevenSales && totalRevenueForBEP > 0;
 
     // Cash Position & Working Capital
     const netOperatingCashFlow = cashCollected - cashPaid - payrollNet;
     const totalOperatingCost = grossExpenses + payrollGross + totalERContributions;
-    const netIncomePnl = grossSales - totalOperatingCost > 0 ? (grossSales - totalOperatingCost) : 20000;
-    const pnlIncomeDisplay = grossSales || 100000;
-    const pnlExpenseDisplay = totalOperatingCost || 80000;
+    const netIncomePnl = grossSales - totalOperatingCost;
+    const pnlIncomeDisplay = grossSales;
+    const pnlExpenseDisplay = totalOperatingCost;
 
     return {
       grossSales,
@@ -455,28 +469,22 @@ export default function ExecutiveDashboard({
       cashCollected,
       withholdingCollected,
       totalCollected,
-      overdueAR: overdueAR || 1525.50,
-      notDueAR: notDueAR || 3756.02,
-      totalUnpaidAR: (overdueAR || 1525.50) + (notDueAR || 3756.02),
+      overdueAR,
+      notDueAR,
+      totalUnpaidAR: overdueAR + notDueAR,
       paidLast30Days,
       notDeposited,
       deposited,
-      outstandingAR: outstandingAR || 5281.52,
+      outstandingAR,
       grossExpenses,
       inputVat,
       cashPaid,
       withholdingPaid,
       totalPaid,
-      outstandingAP: outstandingAP || 4200.00,
+      outstandingAP,
       topExpensePieData,
       currentTotalExpensePeriod,
-      topCustomersList: topCustomersList.length > 0 ? topCustomersList : [
-        { name: 'Megaworld Prime Holdings', tin: '008-124-991-000', totalInvoiced: 48500, totalCollected: 42000, outstanding: 6500, invoiceCount: 4, collectionRate: 86.6 },
-        { name: 'Robinsons Land Infra', tin: '004-982-113-000', totalInvoiced: 35000, totalCollected: 35000, outstanding: 0, invoiceCount: 3, collectionRate: 100 },
-        { name: 'Ayala Land Logistics', tin: '001-345-678-000', totalInvoiced: 28000, totalCollected: 18000, outstanding: 10000, invoiceCount: 2, collectionRate: 64.3 },
-        { name: 'SM Prime Properties', tin: '002-881-229-000', totalInvoiced: 21500, totalCollected: 21500, outstanding: 0, invoiceCount: 2, collectionRate: 100 },
-        { name: 'DMCI Homes Const.', tin: '003-772-551-000', totalInvoiced: 15400, totalCollected: 10000, outstanding: 5400, invoiceCount: 1, collectionRate: 64.9 }
-      ],
+      topCustomersList,
       payrollGross,
       payrollSssEE,
       payrollPhicEE,
@@ -491,7 +499,7 @@ export default function ExecutiveDashboard({
       withholdingTaxCompPayable,
       expandedWithholdingTaxPayable,
       statutoryPayable,
-      totalUnpaidTaxLiabilities: totalUnpaidTaxLiabilities || 12850.00,
+      totalUnpaidTaxLiabilities,
       estimatedFixedCosts,
       estimatedVariableCosts,
       contributionMarginRatio,
@@ -506,27 +514,82 @@ export default function ExecutiveDashboard({
       salesCount: compSales.length,
       expensesCount: compExp.length
     };
-  }, [sales, collections, expenses, payments, payrollRecords, employees, ppeAssets, incomeTaxRecords, activeCompany, currentMonthIdx, currentYear, periodFilterMode]);
+  }, [compSales, compColls, compExp, compPay, compPayroll, compEmps, compPpe, compTax, activeCompany, currentMonthIdx, currentYear, periodFilterMode]);
 
-  // Quarterly Line Trend Data for Card 5
+  // Quarterly Line Trend Data for Card 3
   const quarterlySalesTrend = useMemo(() => {
-    return [
-      { quarter: 'Q1', sales: 9200, collections: 8500, expenses: 6200 },
-      { quarter: 'Q2', quarterLabel: 'Q2', sales: 5800, collections: 5100, expenses: 4900 },
-      { quarter: 'Q3', quarterLabel: 'Q3', sales: 1800, collections: 2200, expenses: 3100 },
-      { quarter: 'Q4', quarterLabel: 'Q4', sales: 15940.65, collections: 14200, expenses: 9800 }
+    const qData = [
+      { quarter: 'Q1', sales: 0, collections: 0, expenses: 0 },
+      { quarter: 'Q2', sales: 0, collections: 0, expenses: 0 },
+      { quarter: 'Q3', sales: 0, collections: 0, expenses: 0 },
+      { quarter: 'Q4', sales: 0, collections: 0, expenses: 0 },
     ];
-  }, []);
+    
+    compYearSales.forEach(s => {
+      const d = s.invoice_date || s.issue_date;
+      if (d) {
+        const m = new Date(d).getMonth();
+        const qIdx = Math.floor(m / 3);
+        if (qIdx >= 0 && qIdx < 4) {
+          qData[qIdx].sales += Number(s.invoice_amount || s.amount) || 0;
+        }
+      }
+    });
+    compYearColls.forEach(c => {
+      const d = c.collection_date || c.date;
+      if (d) {
+        const m = new Date(d).getMonth();
+        const qIdx = Math.floor(m / 3);
+        if (qIdx >= 0 && qIdx < 4) {
+          qData[qIdx].collections += Number(c.amount_collected) || 0;
+        }
+      }
+    });
+    compYearExp.forEach(e => {
+      const d = e.expense_date || e.issue_date;
+      if (d) {
+        const m = new Date(d).getMonth();
+        const qIdx = Math.floor(m / 3);
+        if (qIdx >= 0 && qIdx < 4) {
+          qData[qIdx].expenses += Number(e.expense_invoice_amount || e.amount) || 0;
+        }
+      }
+    });
+
+    return qData;
+  }, [compYearSales, compYearColls, compYearExp]);
 
   // Multi-period Area chart comparison
   const monthlyChartData = useMemo(() => {
-    return [
-      { name: 'Jan', Sales: stats.grossSales * 0.15 || 15000, Collections: stats.cashCollected * 0.14 || 12000, Expenses: stats.grossExpenses * 0.16 || 9000 },
-      { name: 'Feb', Sales: stats.grossSales * 0.22 || 22000, Collections: stats.cashCollected * 0.19 || 18000, Expenses: stats.grossExpenses * 0.20 || 13000 },
-      { name: 'Mar', Sales: stats.grossSales * 0.35 || 38000, Collections: stats.cashCollected * 0.32 || 32000, Expenses: stats.grossExpenses * 0.34 || 24000 },
-      { name: 'Apr', Sales: stats.grossSales * 0.28 || 28000, Collections: stats.cashCollected * 0.35 || 34000, Expenses: stats.grossExpenses * 0.30 || 18000 },
-    ];
-  }, [stats]);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months.map((name, mIdx) => {
+      const monthSales = compYearSales
+        .filter(s => {
+          const d = s.invoice_date || s.issue_date;
+          return d && new Date(d).getMonth() === mIdx;
+        })
+        .reduce((sum, s) => sum + (Number(s.invoice_amount || s.amount) || 0), 0);
+      const monthColls = compYearColls
+        .filter(c => {
+          const d = c.collection_date || c.date;
+          return d && new Date(d).getMonth() === mIdx;
+        })
+        .reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+      const monthExp = compYearExp
+        .filter(e => {
+          const d = e.expense_date || e.issue_date;
+          return d && new Date(d).getMonth() === mIdx;
+        })
+        .reduce((sum, e) => sum + (Number(e.expense_invoice_amount || e.amount) || 0), 0);
+
+      return {
+        name,
+        Sales: monthSales,
+        Collections: monthColls,
+        Expenses: monthExp
+      };
+    });
+  }, [compYearSales, compYearColls, compYearExp]);
 
   // Promotional Carousel Items for Card 6
   const promoInsights = [
@@ -562,7 +625,7 @@ export default function ExecutiveDashboard({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold tracking-widest text-zinc-400 dark:text-zinc-500 uppercase">
-                {activeCompany?.company_name || 'BOLT CONSTRUCTION'}
+                {activeCompany?.company_name || 'NO ENTITY SELECTED'}
               </span>
               <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-500 font-bold">
                 TABULATED DASHBOARD
@@ -913,7 +976,7 @@ export default function ExecutiveDashboard({
                   <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full flex overflow-hidden p-0.5 gap-0.5">
                     <div 
                       className="bg-gradient-to-r from-orange-500 to-amber-500 h-full rounded-l-full" 
-                      style={{ width: `${Math.min(90, Math.max(10, (stats.overdueAR / (stats.totalUnpaidAR || 1)) * 100))}%` }}
+                      style={{ width: `${stats.totalUnpaidAR > 0 ? Math.min(100, Math.max(0, (stats.overdueAR / stats.totalUnpaidAR) * 100)) : 0}%` }}
                     />
                     <div className="bg-zinc-300 dark:bg-zinc-600 h-full flex-1 rounded-r-full" />
                   </div>
@@ -940,7 +1003,7 @@ export default function ExecutiveDashboard({
                   <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full flex overflow-hidden p-0.5 gap-0.5">
                     <div 
                       className="bg-gradient-to-r from-lime-400 to-emerald-500 h-full rounded-l-full" 
-                      style={{ width: `${Math.min(90, Math.max(10, (stats.notDeposited / (stats.paidLast30Days || 1)) * 100))}%` }}
+                      style={{ width: `${stats.paidLast30Days > 0 ? Math.min(100, Math.max(0, (stats.notDeposited / stats.paidLast30Days) * 100)) : 0}%` }}
                     />
                     <div className="bg-gradient-to-r from-emerald-600 to-teal-600 h-full flex-1 rounded-r-full" />
                   </div>
@@ -977,20 +1040,24 @@ export default function ExecutiveDashboard({
                   <div>
                     <div className="flex justify-between text-zinc-400 mb-0.5">
                       <span>Income: <strong className={theme.textTitle}>{fmtMoney(stats.pnlIncomeDisplay, { maximumFractionDigits: 0 })}</strong></span>
-                      <span className="text-cyan-500 cursor-pointer" onClick={() => triggerAlert("8 transactions to reconcile", "info")}>8 review</span>
+                      <span className="text-cyan-500 cursor-pointer" onClick={() => triggerAlert(`${stats.salesCount} transactions recorded`, "info")}>
+                        {stats.salesCount} recorded
+                      </span>
                     </div>
                     <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-sm overflow-hidden flex">
-                      <div className="h-full bg-emerald-500 rounded-sm" style={{ width: '82%' }} />
+                      <div className="h-full bg-emerald-500 rounded-sm transition-all" style={{ width: stats.pnlIncomeDisplay > 0 ? '100%' : '0%' }} />
                     </div>
                   </div>
 
                   <div>
                     <div className="flex justify-between text-zinc-400 mb-0.5">
                       <span>Expenses: <strong className={theme.textTitle}>{fmtMoney(stats.pnlExpenseDisplay, { maximumFractionDigits: 0 })}</strong></span>
-                      <span className="text-cyan-500 cursor-pointer" onClick={() => triggerAlert("15 vouchers to reconcile", "info")}>15 review</span>
+                      <span className="text-cyan-500 cursor-pointer" onClick={() => triggerAlert(`${stats.expensesCount} vouchers recorded`, "info")}>
+                        {stats.expensesCount} recorded
+                      </span>
                     </div>
                     <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-sm overflow-hidden flex">
-                      <div className="h-full bg-cyan-500 rounded-sm" style={{ width: '68%' }} />
+                      <div className="h-full bg-cyan-500 rounded-sm transition-all" style={{ width: stats.pnlExpenseDisplay > 0 ? '100%' : '0%' }} />
                     </div>
                   </div>
                 </div>
@@ -1016,7 +1083,7 @@ export default function ExecutiveDashboard({
 
                 <div className="flex items-baseline justify-between mb-1">
                   <div className={`text-base font-black font-mono tracking-tight ${theme.textTitle}`}>
-                    {fmtMoney(15940.65)}
+                    {fmtMoney(stats.grossSales)}
                   </div>
                   <span className="text-[9px] text-zinc-400">{salesPeriod} trend</span>
                 </div>
@@ -1074,15 +1141,15 @@ export default function ExecutiveDashboard({
                         BDO Commercial
                       </span>
                       <span 
-                        onClick={() => triggerAlert("Opening 94 un-reconciled items...", "info")}
-                        className="text-[9.5px] text-cyan-500 hover:underline cursor-pointer"
+                        onClick={() => triggerAlert("No pending reconciliation items", "info")}
+                        className="text-[9.5px] text-zinc-400 font-mono"
                       >
-                        94 review
+                        {stats.cashCollected > 0 ? '1 linked' : '0 review'}
                       </span>
                     </div>
                     <div className="flex justify-between text-zinc-400">
-                      <span>Bank: <strong className={theme.textTitle}>{fmtMoney(12435.65)}</strong></span>
-                      <span>Ledger: {fmtMoney(4987.43)}</span>
+                      <span>Bank: <strong className={theme.textTitle}>{fmtMoney(Math.max(0, stats.cashCollected - stats.cashPaid))}</strong></span>
+                      <span>Ledger: {fmtMoney(Math.max(0, stats.cashCollected - stats.cashPaid))}</span>
                     </div>
                   </div>
 
@@ -1093,15 +1160,15 @@ export default function ExecutiveDashboard({
                         BPI Payroll
                       </span>
                       <span 
-                        onClick={() => triggerAlert("Opening card items...", "info")}
-                        className="text-[9.5px] text-cyan-500 hover:underline cursor-pointer"
+                        onClick={() => triggerAlert("No pending payroll card items", "info")}
+                        className="text-[9.5px] text-zinc-400 font-mono"
                       >
-                        94 review
+                        0 review
                       </span>
                     </div>
                     <div className="flex justify-between text-zinc-400">
-                      <span>Bank: <strong className="text-rose-500">-{fmtMoney(3435.65)}</strong></span>
-                      <span>Ledger: {fmtMoney(157.72)}</span>
+                      <span>Bank: <strong className={theme.textTitle}>{fmtMoney(0)}</strong></span>
+                      <span>Ledger: {fmtMoney(0)}</span>
                     </div>
                   </div>
                 </div>
@@ -1202,58 +1269,72 @@ export default function ExecutiveDashboard({
                 </span>
               </div>
 
-              <div className="relative flex items-center justify-center h-44">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={stats.topExpensePieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={46}
-                      outerRadius={72}
-                      paddingAngle={3}
-                      dataKey="value"
-                      strokeWidth={1.5}
-                      stroke={theme.isLight ? "#ffffff" : "#091124"}
-                    >
-                      {stats.topExpensePieData.map((entry, index) => (
-                        <Cell key={`top-exp-grid-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      formatter={(val: any) => [fmtMoney(Number(val)), 'Expense']}
-                      contentStyle={{
-                        backgroundColor: theme.isLight ? '#ffffff' : '#070D1D',
-                        borderColor: theme.isLight ? '#e2e8f0' : '#182C5A',
-                        borderRadius: '8px',
-                        fontSize: '10px',
-                        fontFamily: 'monospace'
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-[8px] font-mono text-zinc-400">TOTAL COST</span>
-                  <span className="text-xs font-bold font-mono text-cyan-500">
-                    {fmtShortMoney(stats.currentTotalExpensePeriod)}
-                  </span>
+              {stats.topExpensePieData.length === 0 ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center px-4">
+                  <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400 mb-2">
+                    <Receipt className="w-5 h-5" />
+                  </div>
+                  <p className={`text-xs font-bold ${theme.textTitle}`}>No Expenses Recorded Yet</p>
+                  <p className="text-[11px] text-zinc-400 max-w-xs mt-1">
+                    Record purchases and expense vouchers in the Purchases ledger to display cost distributions and category share.
+                  </p>
                 </div>
-              </div>
-
-              <div className="space-y-1.5 font-mono text-[10.5px] max-h-48 overflow-y-auto pr-1">
-                {stats.topExpensePieData.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between py-1 border-b border-black/3 dark:border-white/3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
-                      <span className="truncate text-zinc-700 dark:text-zinc-300 text-xs font-sans">{item.name}</span>
-                    </div>
-                    <div className="text-right flex-shrink-0 ml-2">
-                      <span className="font-bold">{fmtMoney(item.value)}</span>
-                      <span className="text-[9.5px] text-zinc-400 ml-1.5">({item.percent.toFixed(1)}%)</span>
+              ) : (
+                <>
+                  <div className="relative flex items-center justify-center h-44">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={stats.topExpensePieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={46}
+                          outerRadius={72}
+                          paddingAngle={3}
+                          dataKey="value"
+                          strokeWidth={1.5}
+                          stroke={theme.isLight ? "#ffffff" : "#091124"}
+                        >
+                          {stats.topExpensePieData.map((entry, index) => (
+                            <Cell key={`top-exp-grid-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          formatter={(val: any) => [fmtMoney(Number(val)), 'Expense']}
+                          contentStyle={{
+                            backgroundColor: theme.isLight ? '#ffffff' : '#070D1D',
+                            borderColor: theme.isLight ? '#e2e8f0' : '#182C5A',
+                            borderRadius: '8px',
+                            fontSize: '10px',
+                            fontFamily: 'monospace'
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-[8px] font-mono text-zinc-400">TOTAL COST</span>
+                      <span className="text-xs font-bold font-mono text-cyan-500">
+                        {fmtShortMoney(stats.currentTotalExpensePeriod)}
+                      </span>
                     </div>
                   </div>
-                ))}
-              </div>
+
+                  <div className="space-y-1.5 font-mono text-[10.5px] max-h-48 overflow-y-auto pr-1">
+                    {stats.topExpensePieData.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between py-1 border-b border-black/3 dark:border-white/3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 text-xs font-sans">{item.name}</span>
+                        </div>
+                        <div className="text-right flex-shrink-0 ml-2">
+                          <span className="font-bold">{fmtMoney(item.value)}</span>
+                          <span className="text-[9.5px] text-zinc-400 ml-1.5">({item.percent.toFixed(1)}%)</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* TOP CUSTOMERS LEADERBOARD (COL-SPAN-6) */}
@@ -1272,37 +1353,49 @@ export default function ExecutiveDashboard({
                 </span>
               </div>
 
-              <div className="space-y-2.5 pt-1">
-                {stats.topCustomersList.map((customer, idx) => (
-                  <div key={idx} className="p-2 rounded-xl border border-black/5 dark:border-white/5 space-y-1.5 hover:border-emerald-500/30 transition">
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold font-mono ${
-                          idx === 0 ? 'bg-amber-400/20 text-amber-500' : 'bg-black/5 dark:bg-white/5 text-zinc-500'
-                        }`}>
-                          #{idx + 1}
-                        </span>
-                        <span className={`font-bold truncate text-xs ${theme.textTitle}`}>{customer.name}</span>
-                      </div>
-                      <div className="text-right font-mono font-bold text-cyan-600 dark:text-cyan-400">
-                        {fmtMoney(customer.totalInvoiced)}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-                      <span>{customer.invoiceCount} invoices issued</span>
-                      <span>{customer.outstanding > 0 ? `${fmtMoney(customer.outstanding)} uncollected` : '100% Fully Settled'}</span>
-                    </div>
-
-                    <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full ${customer.collectionRate >= 100 ? 'bg-emerald-500' : 'bg-cyan-500'}`}
-                        style={{ width: `${Math.min(100, customer.collectionRate)}%` }}
-                      />
-                    </div>
+              {stats.topCustomersList.length === 0 ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center px-4">
+                  <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-400 mb-2">
+                    <Award className="w-5 h-5" />
                   </div>
-                ))}
-              </div>
+                  <p className={`text-xs font-bold ${theme.textTitle}`}>No Customer Sales Recorded</p>
+                  <p className="text-[11px] text-zinc-400 max-w-xs mt-1">
+                    Issue and record sales invoices to populate your customer revenue leaderboard.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2.5 pt-1">
+                  {stats.topCustomersList.map((customer, idx) => (
+                    <div key={idx} className="p-2 rounded-xl border border-black/5 dark:border-white/5 space-y-1.5 hover:border-emerald-500/30 transition">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold font-mono ${
+                            idx === 0 ? 'bg-amber-400/20 text-amber-500' : 'bg-black/5 dark:bg-white/5 text-zinc-500'
+                          }`}>
+                            #{idx + 1}
+                          </span>
+                          <span className={`font-bold truncate text-xs ${theme.textTitle}`}>{customer.name}</span>
+                        </div>
+                        <div className="text-right font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                          {fmtMoney(customer.totalInvoiced)}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+                        <span>{customer.invoiceCount} invoices issued</span>
+                        <span>{customer.outstanding > 0 ? `${fmtMoney(customer.outstanding)} uncollected` : '100% Fully Settled'}</span>
+                      </div>
+
+                      <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full ${customer.collectionRate >= 100 ? 'bg-emerald-500' : 'bg-cyan-500'}`}
+                          style={{ width: `${Math.min(100, customer.collectionRate)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
           </div>

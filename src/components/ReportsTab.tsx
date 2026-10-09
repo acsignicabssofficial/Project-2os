@@ -196,20 +196,20 @@ export default function ReportsTab({
   const netIncome = operatingIncome - incomeTaxExpense;
 
   // Balance sheet metrics for working capital & ratios
-  const cashAndEquivalents = Math.max(50000, (totalCollections - totalPayments) + 250000);
-  const accountsReceivable = Math.max(20000, totalSales - totalCollections > 0 ? (totalSales - totalCollections) : 45000);
-  const merchandiseInventory = Math.max(30000, costOfSales * 0.65);
+  const cashAndEquivalents = Math.max(0, totalCollections - totalPayments);
+  const accountsReceivable = Math.max(0, totalSales - totalCollections);
+  const merchandiseInventory = Math.max(0, costOfSales * 0.65);
   const totalCurrentAssets = cashAndEquivalents + accountsReceivable + merchandiseInventory;
 
-  const ppeNetBookValue = ppeAssets.reduce((sum, p) => sum + (Number(p.acquisition_cost) || 0) - (Number(p.accumulated_depreciation) || 0), 0) || 450000;
+  const ppeNetBookValue = ppeAssets.reduce((sum, p) => sum + (Number(p.acquisition_cost) || 0) - (Number(p.accumulated_depreciation) || 0), 0);
   const totalAssets = totalCurrentAssets + ppeNetBookValue;
 
-  const accountsPayable = Math.max(15000, totalExpenses - totalPayments > 0 ? (totalExpenses - totalPayments) : 38000);
-  const accruedTaxes = incomeTaxExpense + 12500;
+  const accountsPayable = Math.max(0, totalExpenses - totalPayments);
+  const accruedTaxes = incomeTaxExpense;
   const totalCurrentLiabilities = accountsPayable + accruedTaxes;
-  const longTermDebt = 120000;
+  const longTermDebt = 0;
   const totalLiabilities = totalCurrentLiabilities + longTermDebt;
-  const totalEquity = Math.max(100000, totalAssets - totalLiabilities);
+  const totalEquity = Math.max(0, totalAssets - totalLiabilities);
 
   // Turnover velocity ratios
   const arTurnover = accountsReceivable > 0 ? (totalSales / accountsReceivable) : 0;

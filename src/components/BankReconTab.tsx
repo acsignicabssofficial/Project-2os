@@ -42,58 +42,7 @@ interface BankReconTabProps {
   globalSearch?: string;
 }
 
-const INITIAL_SAMPLE_RECON_ITEMS: BankReconItem[] = [
-  {
-    id: 1,
-    date: '2026-03-30',
-    type: 'deposit_in_transit',
-    reference_no: 'CR-2026-088',
-    payee_payer: 'Acme Commercial Customer',
-    amount: 145000,
-    cleared: false,
-    notes: 'Collections deposited on March 31 afternoon cut-off'
-  },
-  {
-    id: 2,
-    date: '2026-03-29',
-    type: 'outstanding_check',
-    reference_no: 'CHK-90412',
-    payee_payer: 'Prime Office Space Leasing Inc.',
-    amount: 65000,
-    cleared: false,
-    notes: 'Rent check issued, not yet presented by landlord'
-  },
-  {
-    id: 3,
-    date: '2026-03-31',
-    type: 'outstanding_check',
-    reference_no: 'CHK-90415',
-    payee_payer: 'Meralco Utility Billing',
-    amount: 28450,
-    cleared: false,
-    notes: 'Check released to courier on end-of-month'
-  },
-  {
-    id: 4,
-    date: '2026-03-31',
-    type: 'bank_service_charge',
-    reference_no: 'DM-9941',
-    payee_payer: 'BDO Unibank - Main',
-    amount: 500,
-    cleared: true,
-    notes: 'Monthly account maintenance & checkbook fees'
-  },
-  {
-    id: 5,
-    date: '2026-03-31',
-    type: 'interest_income',
-    reference_no: 'CM-0124',
-    payee_payer: 'BDO Interest Crediting',
-    amount: 1250.75,
-    cleared: true,
-    notes: 'Gross savings/deposit interest earned net of final tax'
-  }
-];
+const INITIAL_SAMPLE_RECON_ITEMS: BankReconItem[] = [];
 
 export default function BankReconTab({
   collections = [],
@@ -106,10 +55,10 @@ export default function BankReconTab({
   triggerAlert,
   globalSearch = ''
 }: BankReconTabProps) {
-  const [selectedBank, setSelectedBank] = useState('BDO Unibank - CA #0012-3456-7890');
-  const [statementDate, setStatementDate] = useState('2026-03-31');
-  const [bankStatementBalance, setBankStatementBalance] = useState<number>(452700.75);
-  const [bookBalance, setBookBalance] = useState<number>(400000.00);
+  const [selectedBank, setSelectedBank] = useState('');
+  const [statementDate, setStatementDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bankStatementBalance, setBankStatementBalance] = useState<number>(0);
+  const [bookBalance, setBookBalance] = useState<number>(0);
   const [reconItems, setReconItems] = useState<BankReconItem[]>(INITIAL_SAMPLE_RECON_ITEMS);
   const [searchTerm, setSearchTerm] = useState('');
 

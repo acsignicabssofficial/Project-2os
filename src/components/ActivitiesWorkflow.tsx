@@ -105,6 +105,7 @@ interface ActivitiesWorkflowProps {
     outstandingAP?: number;
     statutoryPayable?: number;
     netVatPayable?: number;
+    payrollNet?: number;
   };
   employees?: Employee[];
   activeCompanyName?: string;
@@ -255,7 +256,7 @@ export default function ActivitiesWorkflow({
       startDay: 4,
       endDay: 10,
       progress: 75,
-      amount: stats.withholdingTaxCompPayable || 3450,
+      amount: stats.withholdingTaxCompPayable || 0,
       phase: 'Stage 3: Tax',
       milestone: true,
       comments: [
@@ -274,7 +275,7 @@ export default function ActivitiesWorkflow({
           authorRole: 'Payroll Lead',
           authorAvatar: 'MD',
           department: 'Payroll Dept',
-          text: 'Confirmed final 1601-C tax base with total compensation withholding of ₱3,450.00.',
+          text: 'Confirmed final 1601-C tax base with compensation withholding records.',
           timestamp: 'Today at 9:30 AM'
         }
       ]
@@ -298,7 +299,7 @@ export default function ActivitiesWorkflow({
       startDay: 2,
       endDay: 14,
       progress: 45,
-      amount: stats.overdueAR || 1525.50,
+      amount: stats.overdueAR || 0,
       isOverdue: true,
       phase: 'Stage 1: Billing',
       comments: [
@@ -364,7 +365,7 @@ export default function ActivitiesWorkflow({
       startDay: 12,
       endDay: 18,
       progress: 15,
-      amount: stats.outstandingAP || 4200,
+      amount: stats.outstandingAP || 0,
       phase: 'Stage 2: Payables',
       comments: [
         {
@@ -419,7 +420,7 @@ export default function ActivitiesWorkflow({
       startDay: 9,
       endDay: 15,
       progress: 90,
-      amount: stats.statutoryPayable || 6200,
+      amount: stats.statutoryPayable || 0,
       phase: 'Stage 3: Tax',
       milestone: true,
       comments: [
@@ -453,7 +454,7 @@ export default function ActivitiesWorkflow({
       startDay: 18,
       endDay: 25,
       progress: 25,
-      amount: stats.netVatPayable || 3200,
+      amount: stats.netVatPayable || 0,
       phase: 'Stage 3: Tax',
       milestone: true,
       comments: []
@@ -477,7 +478,7 @@ export default function ActivitiesWorkflow({
       startDay: 11,
       endDay: 15,
       progress: 60,
-      amount: 45000,
+      amount: stats.payrollNet || 0,
       phase: 'Stage 2: Payables',
       milestone: true,
       comments: [
@@ -539,18 +540,18 @@ export default function ActivitiesWorkflow({
     }
   ], [stats]);
 
-  // Persistent tasks state
+  // Persistent tasks state (starts empty until user records activities)
   const [tasks, setTasks] = useState<WorkflowTask[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (e) {
       console.error("Failed to load saved workflow tasks", e);
     }
-    return initialTasks;
+    return [];
   });
 
   // Save changes to localStorage

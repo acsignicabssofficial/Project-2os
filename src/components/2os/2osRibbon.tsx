@@ -68,6 +68,8 @@ interface TwoOSRibbonProps {
   onSelectCompany: (company: Company) => void;
   onExportActiveSheet: () => void;
   onExportAllSheets: () => void;
+  onOpenImportModal?: () => void;
+  onOpenExportModal?: () => void;
   onOpenNewEntryModal?: () => void;
   activeBranchCode?: string;
   selectedMonthIdx?: number;
@@ -103,6 +105,8 @@ export default function TwoOSRibbon({
   onSelectCompany,
   onExportActiveSheet,
   onExportAllSheets,
+  onOpenImportModal,
+  onOpenExportModal,
   onOpenNewEntryModal,
   activeBranchCode = 'ALL',
   selectedMonthIdx: propMonthIdx,
@@ -459,13 +463,43 @@ export default function TwoOSRibbon({
           })}
         </div>
 
-        {/* RIGHT SIDE: ACTION BUTTONS (EXPORT, IMPORT, WORKBOOK, PRINT, SETTINGS) */}
+        {/* RIGHT SIDE: ACTION BUTTONS (NEW ENTRY, EXPORT, IMPORT, WORKBOOK, PRINT, SETTINGS) */}
         <div className="flex items-center gap-1.5 flex-shrink-0 pl-2">
-          {/* Export Active Sheet */}
+          {/* New Entry Button */}
           <button
             onClick={() => {
-              onExportActiveSheet();
-              triggerAlert(`Exported ${activeTabInfo.label} to 2OS spreadsheet`, 'success');
+              const hasEntity = Boolean(activeCompany && activeCompany.company_name && activeCompany.company_name.trim().length > 0 && activeCompany.company_name !== 'Select Company...');
+              if (!hasEntity) {
+                triggerAlert('Strict requirement: Please set up an Entity Profile first before entering transactions! Saan mapupunta ang transaction kung wala naman itong designated entity?', 'error');
+                onSelectTab('companies');
+              } else {
+                setShowPromptModal(true);
+              }
+            }}
+            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
+              isTrial
+                ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-xs'
+                : isNeon 
+                ? 'bg-cyan-500 hover:bg-cyan-400 text-white shadow-xs' 
+                : themeMode === 'clean' 
+                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs' 
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+            }`}
+            title="Add New Entry (Strictly requires Entity Profile first)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ New Entry</span>
+          </button>
+
+          {/* Export Button */}
+          <button
+            onClick={() => {
+              if (onOpenExportModal) {
+                onOpenExportModal();
+              } else {
+                onExportActiveSheet();
+                triggerAlert(`Exported ${activeTabInfo.label} to 2OS spreadsheet`, 'success');
+              }
             }}
             className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
               isTrial
@@ -476,7 +510,7 @@ export default function TwoOSRibbon({
                 ? 'text-zinc-800 hover:bg-zinc-100' 
                 : 'text-cyan-300 hover:bg-white/10'
             }`}
-            title="Export Current Sheet to .xlsx"
+            title="Export Data (Select dataset, CSV, Excel, or SQL)"
           >
             <FileSpreadsheet className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'text-cyan-600 dark:text-cyan-400'}`} />
             <span>Export</span>
@@ -484,7 +518,13 @@ export default function TwoOSRibbon({
 
           {/* Import Data */}
           <button
-            onClick={() => triggerAlert('Import CSV/JSON data dialog: Select file to load', 'info')}
+            onClick={() => {
+              if (onOpenImportModal) {
+                onOpenImportModal();
+              } else {
+                triggerAlert('Import CSV/JSON data dialog: Select file to load', 'info');
+              }
+            }}
             className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
               isTrial
                 ? 'bg-[#e11d48] text-white hover:bg-[#be123c] shadow-xs'
@@ -494,7 +534,7 @@ export default function TwoOSRibbon({
                 ? 'text-zinc-800 hover:bg-zinc-100' 
                 : 'text-rose-300 hover:bg-white/10'
             }`}
-            title="Import Data from CSV / Excel"
+            title="Import Data (CSV, Templates, Column Summary, DB Update)"
           >
             <Upload className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'text-rose-500'}`} />
             <span>Import</span>
@@ -756,14 +796,18 @@ export default function TwoOSRibbon({
                 {/* Export Full Workbook */}
                 <button
                   onClick={() => {
-                    onExportAllSheets();
-                    triggerAlert('Exporting full multi-sheet 2OS accounting workbook (.xlsx)...', 'success');
+                    if (onOpenExportModal) {
+                      onOpenExportModal();
+                    } else {
+                      onExportAllSheets();
+                      triggerAlert('Exporting full multi-sheet 2OS accounting workbook (.xlsx)...', 'success');
+                    }
                   }}
                   className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[60px] text-center ${getToolBtnStyle()}`}
-                  title="Export Full 2OS Accounting Workbook (.xlsx)"
+                  title="Export Data (Select dataset, CSV, Excel, or SQL)"
                 >
                   <Download className="w-4 h-4 text-cyan-600 dark:text-cyan-400 mb-0.5" />
-                  <span className="text-[9px] leading-tight font-medium">Backup XLSX</span>
+                  <span className="text-[9px] leading-tight font-medium">Export</span>
                 </button>
 
                 {/* Print View */}
@@ -778,12 +822,18 @@ export default function TwoOSRibbon({
 
                 {/* Import Data */}
                 <button
-                  onClick={() => triggerAlert('Import data dialog: Select CSV/JSON file to restore records', 'info')}
+                  onClick={() => {
+                    if (onOpenImportModal) {
+                      onOpenImportModal();
+                    } else {
+                      triggerAlert('Import data dialog: Select CSV file to restore records', 'info');
+                    }
+                  }}
                   className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[54px] text-center ${getToolBtnStyle()}`}
-                  title="Import / Restore Data from CSV or JSON"
+                  title="Import Data from CSV / Template"
                 >
                   <Upload className="w-4 h-4 text-blue-500 mb-0.5" />
-                  <span className="text-[9px] leading-tight font-medium">Restore</span>
+                  <span className="text-[9px] leading-tight font-medium">Import</span>
                 </button>
 
                 {/* 2OS Architecture & Specs */}

@@ -18,7 +18,7 @@ import {
   ArrowDownRight,
   Eye
 } from 'lucide-react';
-import DocumentPreviewModal from './DocumentPreviewModal';
+import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import { UniformBookRecord, Contractor, Company } from '../types';
 import { computeExpenseVAT } from '../utils/accounting';
 
@@ -88,40 +88,11 @@ export default function PurchaseTransactionTab({
   const [payRefNo, setPayRefNo] = useState('');
   const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
 
+  // Preview modal state
+  const [previewRecord, setPreviewRecord] = useState<UniformBookRecord | null>(null);
+
   // Search filter for open payables
   const [openSearch, setOpenSearch] = useState('');
-
-  // Official BIR Document Preview Modal State
-  const [previewRecord, setPreviewRecord] = useState<any | null>(null);
-  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
-
-  const handlePreviewCurrentForm = () => {
-    setPreviewRecord({
-      invoice_number: invoiceNo.trim() || voucherNo.trim() || 'EXP-001',
-      voucher_number: voucherNo.trim(),
-      date: date,
-      registered_name: providerName || 'VENDOR / SERVICE PROVIDER',
-      tin: tin || '000-000-000-00000',
-      address: address || '',
-      type_of_transaction: purchaseMode === 'ON CASH' ? 'CASH' : 'CHARGE',
-      invoice_type: invoiceType,
-      particulars: particulars || 'Operating Expenses & Purchases',
-      qty: Number(qty) || 1,
-      unit_price: Number(unitPrice) || 0,
-      amount: liveFormulas.amount,
-      vatable_amount: liveFormulas.vatable_expense,
-      vat_amount: liveFormulas.vat_input,
-      zero_rated_amount: Number(zeroRated) || 0,
-      vat_exempt_amount: Number(vatExempt) || 0,
-      total_amount_vat_inclusive: liveFormulas.total_expenses_vat_inclusive,
-      total_amount_net_of_vat: liveFormulas.amount_net_of_vat,
-      discount: liveFormulas.less_discount,
-      tax_withheld: liveFormulas.less_withholding_tax,
-      total_amount_due: liveFormulas.total_amount_due,
-      vat_or_nonvat: vatStatus
-    });
-    setIsPreviewModalOpen(true);
-  };
 
   // Auto-fill TIN & Provider details
   const handleSelectProvider = (provName: string) => {
@@ -988,22 +959,51 @@ export default function PurchaseTransactionTab({
                 )}
               </div>
 
-              <div className="flex flex-col gap-2 mt-2">
+              <div className="flex gap-2 mt-2">
                 <button
                   type="button"
-                  onClick={handlePreviewCurrentForm}
-                  className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-purple-300 border border-zinc-700 font-bold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-2"
+                  onClick={() => {
+                    const tempRecord: UniformBookRecord = {
+                      id: 0,
+                      company_name: activeCompanyName,
+                      registered_name: providerName || 'Valued Supplier / Contractor',
+                      vat_or_nonvat: vatStatus,
+                      tin: tin || '000-000-000-00000',
+                      address: address || 'Metro Manila, Philippines',
+                      type_of_transaction: purchaseMode === 'ON CASH' ? 'CASH' : 'ON ACCOUNT',
+                      date: date,
+                      invoice_type: invoiceType,
+                      voucher_number: voucherNo,
+                      invoice_number: invoiceNo,
+                      particulars: particulars || 'Purchased goods/services',
+                      qty: parseFloat(qty) || 1,
+                      unit_price: parseFloat(unitPrice) || 0,
+                      amount: liveFormulas.expense_amount,
+                      vatable_amount: liveFormulas.vatable_expense,
+                      vat_amount: liveFormulas.input_vat,
+                      zero_rated_amount: parseFloat(zeroRated) || 0,
+                      vat_exempt_amount: parseFloat(vatExempt) || 0,
+                      total_amount_vat_inclusive: liveFormulas.expense_amount,
+                      total_amount_net_of_vat: liveFormulas.amount_net_of_vat,
+                      discount: liveFormulas.discounts,
+                      tax_withheld: liveFormulas.ewt_amount,
+                      total_amount_due: liveFormulas.total_amount_due,
+                      status: purchaseMode === 'ON CASH' ? 'Cash' : (purchaseMode === 'ON PARTIAL' ? 'Partial' : 'On Account')
+                    };
+                    setPreviewRecord(tempRecord);
+                  }}
+                  className="w-1/2 py-3.5 rounded-xl border border-purple-500/40 hover:bg-purple-500/10 text-purple-300 font-bold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  <Eye className="w-4 h-4 text-purple-400" />
-                  <span>Preview Official BIR Document ({vatStatus})</span>
+                  <Eye className="w-4 h-4" />
+                  <span>Preview ({vatStatus})</span>
                 </button>
 
                 <button
                   type="submit"
-                  className="w-full py-3.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-purple-600/20 transition cursor-pointer flex items-center justify-center gap-2"
+                  className="w-1/2 py-3.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-purple-600/20 transition cursor-pointer flex items-center justify-center gap-2"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Save & Route Purchase Transaction</span>
+                  <span>Save & Route</span>
                 </button>
               </div>
             </div>
@@ -1098,17 +1098,14 @@ export default function PurchaseTransactionTab({
                           </span>
                         </td>
                         <td className="p-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5 ml-auto">
+                          <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
-                              onClick={() => {
-                                setPreviewRecord(p);
-                                setIsPreviewModalOpen(true);
-                              }}
-                              className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-purple-400 border border-zinc-700 font-bold text-xs transition cursor-pointer"
-                              title="Preview Official BIR Document"
+                              onClick={() => setPreviewRecord(p)}
+                              title="Preview Official BIR Voucher / Invoice (VAT or Non-VAT)"
+                              className="p-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 hover:text-white transition cursor-pointer"
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              <Eye className="w-3.5 h-3.5 text-purple-400" />
                             </button>
                             <button
                               type="button"
@@ -1236,15 +1233,12 @@ export default function PurchaseTransactionTab({
         </div>
       )}
 
-      {/* OFFICIAL BIR DOCUMENT PREVIEW MODAL */}
-      <DocumentPreviewModal
-        isOpen={isPreviewModalOpen}
-        onClose={() => setIsPreviewModalOpen(false)}
+      {/* INVOICE / RECEIPT OFFICIAL PREVIEW MODAL (VAT & NON-VAT) */}
+      <InvoiceReceiptPreviewModal
+        isOpen={Boolean(previewRecord)}
+        onClose={() => setPreviewRecord(null)}
         record={previewRecord}
         activeCompany={activeCompany}
-        theme={theme}
-        transactionCategory="purchases"
-        bookType="subsidiary_purchases"
       />
     </div>
   );

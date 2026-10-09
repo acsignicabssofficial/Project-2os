@@ -1,9 +1,21 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import initSqlJs from "sql.js";
-import type { Database } from "sql.js";
+import initSqlJs, { Database } from "sql.js";
 import { createServer as createViteServer } from "vite";
+import {
+  INITIAL_COMPANIES,
+  INITIAL_CUSTOMERS,
+  INITIAL_CONTRACTORS,
+  INITIAL_SALES,
+  INITIAL_COLLECTIONS,
+  INITIAL_EXPENSES,
+  INITIAL_PAYMENTS,
+  INITIAL_PPE,
+  INITIAL_ACCOUNT_TITLES,
+  INITIAL_SPECIAL_ENTRIES,
+  INITIAL_INCOME_TAX_RECORDS
+} from "./src/data";
 
 const app = express();
 const PORT = 3000;
@@ -357,60 +369,20 @@ async function initSqliteDatabase() {
     );
   `);
 
-  // Check if companies table has data. If not, seed initial data.
-  const compRes = db.exec("SELECT COUNT(*) as cnt FROM companies");
-  const count = compRes[0]?.values[0]?.[0] || 0;
-  if (count === 0) {
-    console.log("Seeding initial dataset into SQLite database...");
-    let seedData: any = null;
-    if (fs.existsSync(DB_JSON_BACKUP)) {
-      try {
-        seedData = JSON.parse(fs.readFileSync(DB_JSON_BACKUP, "utf-8"));
-      } catch (e) {
-        console.warn("Could not read backup json:", e);
-      }
-    }
-    if (!seedData || !Array.isArray(seedData.accountTitles) || seedData.accountTitles.length === 0) {
-      seedData = {
-        companies: [],
-        activeCompanyId: null,
-        customers: [],
-        contractors: [],
-        sales: [],
-        collections: [],
-        expenses: [],
-        payments: [],
-        ppeAssets: [],
-        accountTitles: [
-          { id: 1, code: "1010", title: "Cash and Cash Equivalents", type: "Asset", category: "Current Assets", description: "Cash on hand and bank deposits" },
-          { id: 2, code: "1020", title: "Accounts Receivable", type: "Asset", category: "Current Assets", description: "Trade receivables from clients" },
-          { id: 3, code: "1030", title: "Input VAT", type: "Asset", category: "Current Assets", description: "12% Creditable Input VAT from purchases" },
-          { id: 4, code: "1040", title: "Creditable Withholding Tax (BIR 2307)", type: "Asset", category: "Current Assets", description: "Prepaid income tax withheld by customers" },
-          { id: 5, code: "1050", title: "Prepaid Expenses", type: "Asset", category: "Current Assets", description: "Advance payments for rent, insurance, etc." },
-          { id: 6, code: "1510", title: "Property, Plant & Equipment", type: "Asset", category: "Non-Current Assets", description: "Office furniture, computers, vehicles, machineries" },
-          { id: 7, code: "1520", title: "Accumulated Depreciation", type: "Asset", category: "Non-Current Assets", description: "Contra-asset for cumulative depreciation" },
-          { id: 8, code: "2010", title: "Accounts Payable", type: "Liability", category: "Current Liabilities", description: "Trade payables to suppliers and service providers" },
-          { id: 9, code: "2020", title: "Output VAT Payable", type: "Liability", category: "Current Liabilities", description: "12% Output VAT collected on sales" },
-          { id: 10, code: "2030", title: "Expanded Withholding Tax Payable (BIR 0619-E)", type: "Liability", category: "Current Liabilities", description: "Withholding tax payable to BIR for vendors" },
-          { id: 11, code: "2040", title: "Income Tax Payable (BIR 1702/1701)", type: "Liability", category: "Current Liabilities", description: "Income tax payable provision due to BIR" },
-          { id: 12, code: "3010", title: "Capital Stock / Owner's Equity", type: "Equity", category: "Equity", description: "Contributed capital by stockholders or owner" },
-          { id: 13, code: "3020", title: "Retained Earnings", type: "Equity", category: "Equity", description: "Cumulative net earnings retained in business" },
-          { id: 14, code: "4010", title: "Sales / Service Revenue", type: "Revenue", category: "Operating Revenue", description: "Gross revenues from sales and services" },
-          { id: 17, code: "6010", title: "Salaries, Wages & Benefits", type: "Expense", category: "Operating Expenses", description: "Employee gross compensation and allowances" }
-        ],
-        specialEntries: [],
-        incomeTaxRecords: [],
-        payrollRecords: [],
-        employees: [],
-        theme: "neon_light"
-      };
-    }
-    if (seedData) {
-      saveLedgerToSqlite(seedData);
-    }
-  } else {
-    persistSqliteBuffer();
+  // Seed Standard Chart of Accounts if account_titles table is empty
+  const acctRes = db.exec("SELECT COUNT(*) as cnt FROM account_titles");
+  const acctCount = acctRes[0]?.values[0]?.[0] || 0;
+  if (acctCount === 0 && Array.isArray(INITIAL_ACCOUNT_TITLES) && INITIAL_ACCOUNT_TITLES.length > 0) {
+    const stmt = db.prepare(`INSERT INTO account_titles VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    INITIAL_ACCOUNT_TITLES.forEach((a: any) => {
+      stmt.run([
+        a.id || Math.floor(Math.random() * 1000000), a.code, a.title, a.category,
+        a.type, a.description || "", new Date().toISOString()
+      ]);
+    });
+    stmt.free();
   }
+  persistSqliteBuffer();
 }
 
 function persistSqliteBuffer() {
@@ -620,6 +592,8 @@ function getLedgerDataFromSqlite() {
     subsidiaryPurchases,
     cashReceipts,
     cashDisbursements,
+    collectionsRecords: cashReceipts,
+    paymentsRecords: cashDisbursements,
     // Legacy properties for existing tabs
     sales: subsidiarySales.length > 0 ? subsidiarySales : sales,
     collections: cashReceipts.length > 0 ? cashReceipts : collections,
@@ -633,6 +607,95 @@ function getLedgerDataFromSqlite() {
     employees,
     theme
   };
+}
+
+// Entity Directory Hierarchy Generator
+// Strictly adhering to Philippine Corporate / Branch document filing structure:
+// entity directory/
+//   └── <company name>/
+//       ├── main (if branch code is 00000)/
+//       │   ├── main documents/ (dti/sec, bir, lgu, other documents)
+//       │   └── <year> transactions/ (sales, expenses, 2307, 2316, tax compliances/attachments, tax compliances/filings)
+//       └── branch 1 (depending on the branch code other than 00000)/
+//           ├── main documents/ (dti/sec, bir, lgu, other documents)
+//           └── <year> transactions/ (sales, expenses, 2307, 2316, tax compliances/attachments, tax compliances/filings)
+
+export function createEntityDirectoryTree(companyName: string, branchCode?: string, year?: string | number) {
+  if (!companyName || !companyName.trim()) return [];
+  const cleanCompName = companyName.trim();
+  // Safe directory name for OS filesystems (Windows & POSIX)
+  const safeCompDir = cleanCompName.replace(/[\\/:*?"<>|]/g, "_").trim();
+
+  // Year defaults to current year (2026)
+  const yr = year ? String(year).trim().slice(0, 4) : new Date().getFullYear().toString();
+  const validYear = /^\d{4}$/.test(yr) ? yr : new Date().getFullYear().toString();
+
+  // Branch folder determination:
+  // "main (if branch code is 00000)"
+  // "branch 1 (depending on the branch code other than 00000)"
+  const branchFolders: string[] = [];
+  const cleanBranch = branchCode ? String(branchCode).trim() : "00000";
+
+  if (cleanBranch === "00000" || cleanBranch === "0" || cleanBranch === "") {
+    branchFolders.push("main");
+    // Also include branch 1 to provide the full tree matching sample diagram
+    branchFolders.push("branch 1");
+  } else {
+    const branchNum = parseInt(cleanBranch, 10);
+    const branchName = !isNaN(branchNum) ? `branch ${branchNum}` : `branch ${cleanBranch}`;
+    branchFolders.push(branchName);
+    branchFolders.push("main");
+  }
+
+  const createdPaths: string[] = [];
+
+  // Targets:
+  // 1. Root ./entity directory
+  // 2. ./for pc demo/entity directory
+  const baseDirectories = [
+    path.join(process.cwd(), "entity directory"),
+    path.join(process.cwd(), "for pc demo", "entity directory")
+  ];
+
+  for (const baseDir of baseDirectories) {
+    const compDir = path.join(baseDir, safeCompDir);
+
+    for (const branch of branchFolders) {
+      const branchDir = path.join(compDir, branch);
+
+      const subDirs = [
+        path.join(branchDir, "main documents", "dti", "sec"),
+        path.join(branchDir, "main documents", "dti-sec"),
+        path.join(branchDir, "main documents", "dti"),
+        path.join(branchDir, "main documents", "sec"),
+        path.join(branchDir, "main documents", "bir"),
+        path.join(branchDir, "main documents", "lgu"),
+        path.join(branchDir, "main documents", "other documents"),
+        path.join(branchDir, `${validYear} transactions`, "sales"),
+        path.join(branchDir, `${validYear} transactions`, "expenses"),
+        path.join(branchDir, `${validYear} transactions`, "2307"),
+        path.join(branchDir, `${validYear} transactions`, "2316"),
+        path.join(branchDir, `${validYear} transactions`, "tax compliances", "attachments"),
+        path.join(branchDir, `${validYear} transactions`, "tax compliances", "filings")
+      ];
+
+      for (const dir of subDirs) {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        const gitKeep = path.join(dir, ".gitkeep");
+        if (!fs.existsSync(gitKeep)) {
+          try {
+            fs.writeFileSync(gitKeep, "");
+          } catch (_) {}
+        }
+      }
+
+      createdPaths.push(branchDir);
+    }
+  }
+
+  return createdPaths;
 }
 
 function saveLedgerToSqlite(data: any) {
@@ -657,6 +720,11 @@ function saveLedgerToSqlite(data: any) {
         c.address, c.zip_code, c.email, c.phone, c.is_vat_registered ? 1 : 0,
         c.tax_regime, c.created_at || new Date().toISOString()
       ]);
+      try {
+        createEntityDirectoryTree(c.company_name, c.tin_branch_code || "00000", c.created_at || c.birthday_or_incorporation_date);
+      } catch (err) {
+        console.error("Failed creating entity directory for company:", c.company_name, err);
+      }
     });
     stmt.free();
   }
@@ -1231,8 +1299,94 @@ app.post("/api/ledger-data", (req, res) => {
   }
 });
 
+app.post("/api/ledger-data/clear", (req, res) => {
+  try {
+    saveLedgerToSqlite({
+      companies: [],
+      activeCompanyId: null,
+      customers: [],
+      contractors: [],
+      sales: [],
+      collections: [],
+      expenses: [],
+      payments: [],
+      subsidiarySales: [],
+      subsidiaryPurchases: [],
+      cashReceipts: [],
+      cashDisbursements: [],
+      ppeAssets: [],
+      accountTitles: INITIAL_ACCOUNT_TITLES,
+      specialEntries: [],
+      incomeTaxRecords: [],
+      payrollRecords: [],
+      employees: [],
+      theme: "trial_layout"
+    });
+    res.json({ success: true, message: "All transactions and data cleared from database" });
+  } catch (e) {
+    console.error("Failed to clear SQLite database:", e);
+    res.status(500).json({ error: "Failed to clear database" });
+  }
+});
+
+app.post("/api/create-entity-directory", (req, res) => {
+  try {
+    const { company_name, branch_code, year } = req.body;
+    if (!company_name || !String(company_name).trim()) {
+      res.status(400).json({ error: "company_name is required" });
+      return;
+    }
+    const paths = createEntityDirectoryTree(company_name, branch_code, year);
+    res.json({
+      success: true,
+      message: `Entity directory for "${company_name}" created successfully`,
+      createdPaths: paths
+    });
+  } catch (e: any) {
+    console.error("Failed creating entity directory:", e);
+    res.status(500).json({ error: e.message || "Failed to create entity directory" });
+  }
+});
+
+app.get("/api/entity-directories", (req, res) => {
+  try {
+    const baseDir = path.join(process.cwd(), "entity directory");
+    if (!fs.existsSync(baseDir)) {
+      res.json({ entities: [] });
+      return;
+    }
+    const entities = fs.readdirSync(baseDir, { withFileTypes: true })
+      .filter(dirent => dirent.isDirectory())
+      .map(dirent => {
+        const compPath = path.join(baseDir, dirent.name);
+        const branches = fs.existsSync(compPath) 
+          ? fs.readdirSync(compPath, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+          : [];
+        return {
+          company_name: dirent.name,
+          branches
+        };
+      });
+    res.json({ entities });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Failed reading entity directories" });
+  }
+});
+
 async function start() {
   await initSqliteDatabase();
+
+  // Ensure entity directories exist for all stored companies on startup
+  try {
+    const companies = queryTableRows("companies");
+    for (const c of companies) {
+      if (c.company_name) {
+        createEntityDirectoryTree(c.company_name, c.tin_branch_code || "00000", c.created_at || c.birthday_or_incorporation_date);
+      }
+    }
+  } catch (err) {
+    console.error("Error creating initial entity directories:", err);
+  }
 
   // Explicitly serve public assets for PWA, manifest, and icons
   app.use("/sw.js", (req, res, next) => {

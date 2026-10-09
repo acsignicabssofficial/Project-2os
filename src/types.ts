@@ -88,6 +88,12 @@ export interface OtherParty {
   service_provider_Address?: string;
   sp_address?: string;
   atc_code?: string;
+  // Specific entity directory headers
+  customer_id?: string;
+  provider_id?: string;
+  customer_branch_code?: string;
+  provider_branch_code?: string;
+  business_tax_type?: 'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated' | string;
 }
 
 export type Customer = OtherParty;
@@ -208,6 +214,7 @@ export interface Expense {
   expense_date?: string;
   voucher_number?: string;
   invoice_number?: string;
+  business_tax_type?: 'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated' | string;
   expense_type?: string;
   expense_invoice_amount?: number;
   nonvat_expense_amount?: number;
@@ -606,6 +613,26 @@ export interface UniformBookRecord {
   created_at?: string;
 
   // Inter-compatibility properties for existing components/reports
+  customer_id?: string;
+  sales_id?: string;
+  provider_id?: string;
+  expense_id?: string;
+  customer_branch_code?: string;
+  provider_branch_code?: string;
+  business_tax_type?: 'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated' | string;
+  expense_type?: string;
+  date_of_sales?: string;
+  date_of_expense?: string;
+  sales_type?: 'cash' | 'on account' | string;
+  vat_output?: number;
+  vat_input?: number;
+  zero_rated_sales?: number;
+  vat_exempt_sales?: number;
+  total_sales_vat_inclusive?: number;
+  total_sales_net_of_vat?: number;
+  discounts?: number;
+  withholding_tax?: number;
+  amount_due?: number;
   client_TIN?: string;
   customer_name?: string;
   customer_tin?: string;

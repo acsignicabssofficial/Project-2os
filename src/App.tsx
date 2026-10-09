@@ -122,7 +122,22 @@ import TwoOSRibbon from './components/2os/2osRibbon';
 import TwoOSSheetBar from './components/2os/2osSheetBar';
 import InfinityFreeModal from './components/InfinityFreeModal';
 import AuditTrailModal from './components/2os/AuditTrailModal';
-import DocumentPreviewModal from './components/DocumentPreviewModal';
+import ImportModal from './components/2os/ImportModal';
+import ExportModal from './components/2os/ExportModal';
+import { 
+  ImportableDataType, 
+  CSV_TEMPLATES, 
+  mapRowsToSales, 
+  mapRowsToExpenses, 
+  mapRowsToCollections, 
+  mapRowsToPayments, 
+  mapRowsToCustomers, 
+  mapRowsToProviders, 
+  mapRowsToAccountTitles, 
+  mapRowsToEmployees, 
+  mapRowsToSpecialEntries, 
+  mapRowsToPPE 
+} from './utils/csvImportExport';
 import { exportActiveSheetTo2OS, exportFullAccountingWorkbookTo2OS } from './utils/2osExportHelper';
 import { ThemeMode } from './types';
 
@@ -497,48 +512,9 @@ export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isInfinityFreeModalOpen, setIsInfinityFreeModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
-  const [documentPreviewRecord, setDocumentPreviewRecord] = useState<any | null>(null);
-  const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
-
-  const handleOpenDocumentPreview = (record?: any) => {
-    if (record) {
-      setDocumentPreviewRecord(record);
-    } else if (subsidiarySales.length > 0) {
-      setDocumentPreviewRecord(subsidiarySales[0]);
-    } else if (sales.length > 0) {
-      setDocumentPreviewRecord(sales[0]);
-    } else {
-      setDocumentPreviewRecord({
-        id: 1,
-        company_name: activeCompany?.company_name || 'ANNYEONG SEYOH & CO',
-        registered_name: 'SAMPLE CLIENT CORP.',
-        vat_or_nonvat: activeCompany?.vat_or_non_vat === 'NON-VATABLE' ? 'NONVAT' : 'VAT',
-        tin: '000-123-456-00000',
-        address: '4TH FLOOR, BIR BLDG, SEN. MIRIAM P. DEFENSOR-SANTIAGO AVE., PINYAHAN, QUEZON CITY 1000',
-        type_of_transaction: 'CASH',
-        date: new Date().toISOString().split('T')[0],
-        invoice_type: 'SALES INVOICE',
-        voucher_number: '',
-        invoice_number: '001',
-        particulars: 'Professional Accounting & Bookkeeping Services',
-        qty: 1,
-        unit_price: 25000,
-        amount: 25000,
-        vatable_amount: 22321.43,
-        vat_amount: 2678.57,
-        zero_rated_amount: 0,
-        vat_exempt_amount: 0,
-        total_amount_vat_inclusive: 25000,
-        total_amount_net_of_vat: 22321.43,
-        discount: 0,
-        tax_withheld: 500,
-        total_amount_due: 24500,
-        is_cancelled: 0,
-        created_at: new Date().toISOString()
-      });
-    }
-    setIsDocumentPreviewOpen(true);
-  };
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [importDefaultType, setImportDefaultType] = useState<ImportableDataType>('sales');
 
   // Load backend data (with localStorage fallback for static hosting like GitHub Pages)
   useEffect(() => {
@@ -574,83 +550,99 @@ export default function App() {
     }
 
     function applyData(data: any) {
-      if (data.companies && data.companies.length > 0) {
+      if (Array.isArray(data.companies)) {
         setCompanies(data.companies);
         let found = null;
         if (data.activeCompanyId) {
           found = data.companies.find((c: any) => String(c.id) === String(data.activeCompanyId));
         }
-        setActiveCompany(found || data.companies[0]);
+        setActiveCompany(found || data.companies[0] || null);
       }
-      if (data.customers) setCustomers(data.customers);
-      if (data.contractors) setContractors(data.contractors);
+      if (Array.isArray(data.customers)) setCustomers(data.customers);
+      if (Array.isArray(data.contractors)) setContractors(data.contractors);
 
-      if (data.subsidiarySales && data.subsidiarySales.length > 0) {
+      if (Array.isArray(data.subsidiarySales)) {
         const mapped = data.subsidiarySales.map(mapSaleToUniform);
         setSubsidiarySales(mapped);
         setSales(mapped as any);
-      } else if (data.sales) {
+      } else if (Array.isArray(data.sales)) {
         const mapped = data.sales.map(mapSaleToUniform);
         setSubsidiarySales(mapped);
         setSales(data.sales);
+      } else {
+        setSubsidiarySales([]);
+        setSales([]);
       }
 
-      if (data.subsidiaryPurchases && data.subsidiaryPurchases.length > 0) {
+      if (Array.isArray(data.subsidiaryPurchases)) {
         const mapped = data.subsidiaryPurchases.map(mapExpenseToUniform);
         setSubsidiaryPurchases(mapped);
         setExpenses(mapped as any);
-      } else if (data.expenses) {
+      } else if (Array.isArray(data.expenses)) {
         const mapped = data.expenses.map(mapExpenseToUniform);
         setSubsidiaryPurchases(mapped);
         setExpenses(data.expenses);
+      } else {
+        setSubsidiaryPurchases([]);
+        setExpenses([]);
       }
 
-      if (data.cashReceipts && data.cashReceipts.length > 0) {
+      if (Array.isArray(data.cashReceipts)) {
         const mapped = data.cashReceipts.map(mapCollectionToUniform);
         setCashReceipts(mapped);
         setCollections(mapped as any);
-      } else if (data.collections) {
+      } else if (Array.isArray(data.collections)) {
         const mapped = data.collections.map(mapCollectionToUniform);
         setCashReceipts(mapped);
         setCollections(data.collections);
+      } else {
+        setCashReceipts([]);
+        setCollections([]);
       }
 
-      if (data.collectionsRecords && data.collectionsRecords.length > 0) {
+      if (Array.isArray(data.collectionsRecords)) {
         const mapped = data.collectionsRecords.map(mapCollectionToUniform);
         setCollectionsRecords(mapped);
-      } else if (data.collections) {
+      } else if (Array.isArray(data.collections)) {
         const mapped = data.collections.map(mapCollectionToUniform);
         setCollectionsRecords(mapped);
+      } else {
+        setCollectionsRecords([]);
       }
 
-      if (data.cashDisbursements && data.cashDisbursements.length > 0) {
+      if (Array.isArray(data.cashDisbursements)) {
         const mapped = data.cashDisbursements.map(mapPaymentToUniform);
         setCashDisbursements(mapped);
         setPayments(mapped as any);
-      } else if (data.payments) {
+      } else if (Array.isArray(data.payments)) {
         const mapped = data.payments.map(mapPaymentToUniform);
         setCashDisbursements(mapped);
         setPayments(data.payments);
+      } else {
+        setCashDisbursements([]);
+        setPayments([]);
       }
 
-      if (data.paymentsRecords && data.paymentsRecords.length > 0) {
+      if (Array.isArray(data.paymentsRecords)) {
         const mapped = data.paymentsRecords.map(mapPaymentToUniform);
         setPaymentsRecords(mapped);
-      } else if (data.payments) {
+      } else if (Array.isArray(data.payments)) {
         const mapped = data.payments.map(mapPaymentToUniform);
         setPaymentsRecords(mapped);
+      } else {
+        setPaymentsRecords([]);
       }
 
-      if (data.ppeAssets) setPpeAssets(data.ppeAssets);
-      if (data.employees) setEmployees(data.employees);
-      if (data.payrollRecords) setPayrollRecords(data.payrollRecords);
+      if (Array.isArray(data.ppeAssets)) setPpeAssets(data.ppeAssets);
+      if (Array.isArray(data.employees)) setEmployees(data.employees);
+      if (Array.isArray(data.payrollRecords)) setPayrollRecords(data.payrollRecords);
       if (data.sssBrackets) setSssBrackets(data.sssBrackets);
       if (data.philhealthConfig) setPhilhealthConfig(data.philhealthConfig);
       if (data.pagibigConfig) setPagibigConfig(data.pagibigConfig);
       if (data.taxBrackets) setTaxBrackets(data.taxBrackets);
       if (data.accountTitles) setAccountTitles(data.accountTitles);
-      if (data.specialEntries) setSpecialEntries(data.specialEntries);
-      if (data.incomeTaxRecords) setIncomeTaxRecords(data.incomeTaxRecords);
+      if (Array.isArray(data.specialEntries)) setSpecialEntries(data.specialEntries);
+      if (Array.isArray(data.incomeTaxRecords)) setIncomeTaxRecords(data.incomeTaxRecords);
       if (data.theme && ['neon_light', 'clean', 'dark', 'trial_layout'].includes(data.theme)) {
         setTheme(data.theme);
       }
@@ -815,6 +807,10 @@ export default function App() {
     companyExpenses.reduce((sum, e) => sum + (Number(e.vat_input_amount) || 0), 0)
   );
 
+  const withholdingTaxCompPayable = companyPayrollRecords.reduce((sum, p) => sum + (Number(p.withholding_tax) || 0), 0);
+  const statutoryPayable = companyPayrollRecords.reduce((sum, p) => sum + (Number(p.sss_deduction) || 0) + (Number(p.philhealth_deduction) || 0) + (Number(p.pagibig_deduction) || 0), 0);
+  const payrollNet = companyPayrollRecords.reduce((sum, p) => sum + (Number(p.net_pay) || 0), 0);
+
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
   const getActiveTabRecordCount = (): number => {
@@ -855,21 +851,190 @@ export default function App() {
     exportActiveSheetTo2OS(activeTab, sheetData, activeCompanyName);
   };
 
-  const handleExportAllSheets = () => {
-    exportFullAccountingWorkbookTo2OS({
-      companyName: activeCompanyName,
-      sales: companySales,
-      collections: companyCollections,
-      expenses: companyExpenses,
-      payments: companyPayments,
-      specialEntries: companySpecialEntries,
-      ppeAssets: companyPpeAssets,
-      customers,
-      contractors,
-      employees: companyEmployees,
-      payrollRecords: companyPayrollRecords,
-      accountTitles
-    });
+  const getTabLabel = (tab: string) => {
+    switch (tab) {
+      case 'sales': return 'Sales Invoices';
+      case 'expenses': return 'Expenses & APV';
+      case 'collections': return 'Collections / Cash Receipts';
+      case 'payments': return 'Disbursements & Payments';
+      case 'companies': return 'Entity Profiles';
+      case 'customers': return 'Customers Directory';
+      case 'providers': return 'Service Providers Directory';
+      case 'account_titles': return 'Chart of Accounts';
+      case 'general_journal':
+      case 'special_entries': return 'General Journal';
+      case 'general_ledger': return 'General Ledger';
+      case 'ppe': return 'Property, Plant & Equipment';
+      case 'employees': return 'Employee Profiles';
+      case 'payroll': return 'Payroll Register';
+      case 'income_tax': return 'Income Tax';
+      case 'dashboard': return 'Executive Dashboard';
+      default: return tab.toUpperCase().replace(/_/g, ' ');
+    }
+  };
+
+  const handleOpenExportModal = () => {
+    setIsExportModalOpen(true);
+  };
+
+  const handleOpenImportModal = () => {
+    let defType: ImportableDataType = 'sales';
+    if (activeTab === 'expenses') defType = 'expenses';
+    else if (activeTab === 'collections') defType = 'collections';
+    else if (activeTab === 'payments') defType = 'payments';
+    else if (activeTab === 'customers') defType = 'customers';
+    else if (activeTab === 'providers') defType = 'providers';
+    else if (activeTab === 'account_titles') defType = 'account_titles';
+    else if (activeTab === 'employees' || activeTab === 'payroll') defType = 'employees';
+    else if (activeTab === 'special_entries' || activeTab === 'general_journal') defType = 'special_entries';
+    else if (activeTab === 'ppe') defType = 'ppe';
+    setImportDefaultType(defType);
+    setIsImportModalOpen(true);
+  };
+
+  const handleConfirmImport = async (
+    dataType: ImportableDataType,
+    parsedRows: Record<string, string>[],
+    headers: string[]
+  ): Promise<{ success: boolean; message?: string }> => {
+    const currentCompanyName = activeCompany?.company_name || 'ABC Corporation';
+
+    let updatedSales = [...sales];
+    let updatedExpenses = [...expenses];
+    let updatedCollections = [...collections];
+    let updatedPayments = [...payments];
+    let updatedCustomers = [...customers];
+    let updatedContractors = [...contractors];
+    let updatedAccountTitles = [...accountTitles];
+    let updatedEmployees = [...employees];
+    let updatedSpecialEntries = [...specialEntries];
+    let updatedPpeAssets = [...ppeAssets];
+
+    let importedCount = 0;
+
+    switch (dataType) {
+      case 'sales': {
+        const mapped = mapRowsToSales(parsedRows, currentCompanyName) as Sale[];
+        updatedSales = [...mapped, ...updatedSales];
+        setSales(updatedSales);
+        setSubsidiarySales(updatedSales.map(mapSaleToUniform));
+        importedCount = mapped.length;
+        break;
+      }
+      case 'expenses': {
+        const mapped = mapRowsToExpenses(parsedRows, currentCompanyName) as Expense[];
+        updatedExpenses = [...mapped, ...updatedExpenses];
+        setExpenses(updatedExpenses);
+        setSubsidiaryPurchases(updatedExpenses.map(mapExpenseToUniform));
+        importedCount = mapped.length;
+        break;
+      }
+      case 'collections': {
+        const mapped = mapRowsToCollections(parsedRows, currentCompanyName) as Collection[];
+        updatedCollections = [...mapped, ...updatedCollections];
+        setCollections(updatedCollections);
+        setCashReceipts(updatedCollections.map(mapCollectionToUniform));
+        setCollectionsRecords(updatedCollections.map(mapCollectionToUniform));
+        importedCount = mapped.length;
+        break;
+      }
+      case 'payments': {
+        const mapped = mapRowsToPayments(parsedRows, currentCompanyName) as Payment[];
+        updatedPayments = [...mapped, ...updatedPayments];
+        setPayments(updatedPayments);
+        setCashDisbursements(updatedPayments.map(mapPaymentToUniform));
+        setPaymentsRecords(updatedPayments.map(mapPaymentToUniform));
+        importedCount = mapped.length;
+        break;
+      }
+      case 'customers': {
+        const mapped = mapRowsToCustomers(parsedRows) as Customer[];
+        updatedCustomers = [...mapped, ...updatedCustomers];
+        setCustomers(updatedCustomers);
+        importedCount = mapped.length;
+        break;
+      }
+      case 'providers': {
+        const mapped = mapRowsToProviders(parsedRows) as Contractor[];
+        updatedContractors = [...mapped, ...updatedContractors];
+        setContractors(updatedContractors);
+        importedCount = mapped.length;
+        break;
+      }
+      case 'account_titles': {
+        const mapped = mapRowsToAccountTitles(parsedRows) as AccountTitle[];
+        updatedAccountTitles = [...mapped, ...updatedAccountTitles];
+        setAccountTitles(updatedAccountTitles);
+        importedCount = mapped.length;
+        break;
+      }
+      case 'employees': {
+        const mapped = mapRowsToEmployees(parsedRows, currentCompanyName);
+        updatedEmployees = [...mapped, ...updatedEmployees];
+        setEmployees(updatedEmployees);
+        importedCount = mapped.length;
+        break;
+      }
+      case 'special_entries': {
+        const mapped = mapRowsToSpecialEntries(parsedRows, currentCompanyName) as SpecialEntry[];
+        updatedSpecialEntries = [...mapped, ...updatedSpecialEntries];
+        setSpecialEntries(updatedSpecialEntries);
+        importedCount = mapped.length;
+        break;
+      }
+      case 'ppe': {
+        const mapped = mapRowsToPPE(parsedRows, currentCompanyName) as PPEAsset[];
+        updatedPpeAssets = [...mapped, ...updatedPpeAssets];
+        setPpeAssets(updatedPpeAssets);
+        importedCount = mapped.length;
+        break;
+      }
+    }
+
+    // Immediately update the .db files via /api/ledger-data
+    const syncPayload = {
+      companies,
+      activeCompanyId: activeCompany?.id,
+      customers: updatedCustomers,
+      contractors: updatedContractors,
+      sales: updatedSales,
+      collections: updatedCollections,
+      expenses: updatedExpenses,
+      payments: updatedPayments,
+      ppeAssets: updatedPpeAssets,
+      employees: updatedEmployees,
+      payrollRecords,
+      sssBrackets,
+      philhealthConfig,
+      pagibigConfig,
+      taxBrackets,
+      accountTitles: updatedAccountTitles,
+      specialEntries: updatedSpecialEntries,
+      incomeTaxRecords,
+      theme,
+    };
+
+    try {
+      await fetch('/api/ledger-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(syncPayload),
+      });
+    } catch (e) {
+      console.warn('Backend SQLite sync warning:', e);
+    }
+
+    try {
+      localStorage.setItem('2os_ledger_data', JSON.stringify(syncPayload));
+    } catch (e) {
+      console.warn('LocalStorage save failed:', e);
+    }
+
+    triggerAlert('import data successful', 'success');
+    return {
+      success: true,
+      message: `import data successful. ${importedCount} records added and local .db files updated.`
+    };
   };
 
   const handleManualSave = () => {
@@ -948,8 +1113,8 @@ export default function App() {
           globalSearch={globalSearch}
           onSearchChange={setGlobalSearch}
           onSave={handleManualSave}
-          onExportAll={handleExportAllSheets}
-          onExportActiveSheet={handleExportActiveSheet}
+          onExportAll={handleOpenExportModal}
+          onExportActiveSheet={handleOpenExportModal}
           onOpenInfinityFreeModal={() => setIsInfinityFreeModalOpen(true)}
           onOpenAuditTrail={() => setIsAuditModalOpen(true)}
           onOpenSettings={() => {
@@ -971,8 +1136,10 @@ export default function App() {
             setActiveCompany(c);
             triggerAlert(`Active Company switched to: ${c.company_name}`, 'success');
           }}
-          onExportActiveSheet={handleExportActiveSheet}
-          onExportAllSheets={handleExportAllSheets}
+          onExportActiveSheet={handleOpenExportModal}
+          onExportAllSheets={handleOpenExportModal}
+          onOpenImportModal={handleOpenImportModal}
+          onOpenExportModal={handleOpenExportModal}
           activeBranchCode={activeBranchCode}
           selectedMonthIdx={selectedMonthIdx}
           selectedYear={selectedYear}
@@ -1145,8 +1312,6 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onNavigateToTab={(tab) => setActiveTab(tab as any)}
-                  specialEntries={specialEntries}
-                  setSpecialEntries={setSpecialEntries}
                 />
               )}
 
@@ -1510,11 +1675,12 @@ export default function App() {
                   fmtShortMoney={fmtShortMoney}
                   fmtMoney={fmtMoney}
                   stats={{
-                    withholdingTaxCompPayable: 14500,
+                    withholdingTaxCompPayable,
                     overdueAR,
                     outstandingAP,
-                    statutoryPayable: 8250,
-                    netVatPayable
+                    statutoryPayable,
+                    netVatPayable,
+                    payrollNet
                   }}
                   employees={companyEmployees}
                   activeCompanyName={activeCompany?.company_name}
@@ -1767,15 +1933,35 @@ export default function App() {
         themeMode={theme}
       />
 
-      {/* OFFICIAL BIR INVOICE & RECEIPT PREVIEW MODAL (VAT & NON-VAT STYLES) */}
-      <DocumentPreviewModal
-        isOpen={isDocumentPreviewOpen}
-        onClose={() => setIsDocumentPreviewOpen(false)}
-        record={documentPreviewRecord}
-        activeCompany={activeCompany}
-        theme={activeTheme}
-        themeMode={theme}
-        bookType={activeTab}
+      {/* IMPORT DATA WIZARD MODAL */}
+      <ImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        activeCompanyName={activeCompanyName || 'Company'}
+        defaultType={importDefaultType}
+        onConfirmImport={handleConfirmImport}
+      />
+
+      {/* EXPORT DATA WIZARD MODAL */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        activeTab={activeTab}
+        activeTabLabel={getTabLabel(activeTab)}
+        activeCompanyName={activeCompanyName || 'Company'}
+        data={{
+          sales: companySales,
+          expenses: companyExpenses,
+          collections: companyCollections,
+          payments: companyPayments,
+          customers,
+          providers: contractors,
+          accountTitles,
+          employees: companyEmployees,
+          payrollRecords: companyPayrollRecords,
+          specialEntries: companySpecialEntries,
+          ppeAssets: companyPpeAssets
+        }}
       />
 
     </div>

@@ -255,7 +255,7 @@ export default function SpecialEntriesTab({
   // 1. TRIGGER ACTION 1: POST ADJUSTING ENTRY (AJE)
   // ==========================================
   const totalDepreciationEstimate = useMemo(() => {
-    return ppeAssets.reduce((sum, p) => sum + (p.monthly_depreciation ? p.monthly_depreciation * 12 : (p.acquisition_cost * 0.2)), 0) || 45000;
+    return ppeAssets.reduce((sum, p) => sum + (p.monthly_depreciation ? p.monthly_depreciation * 12 : (p.acquisition_cost * 0.2)), 0);
   }, [ppeAssets]);
 
   const handlePostAJETrigger = (adjType: 'depreciation' | 'accruals' | 'prepayments') => {
@@ -304,11 +304,11 @@ export default function SpecialEntriesTab({
   // 2. TRIGGER ACTION 2: POST YEAR-END CLOSING (CJE)
   // ==========================================
   const totalGrossRevenue = useMemo(() => {
-    return sales.reduce((sum, s) => sum + (s.invoice_amount || s.vatable_amount || 0), 0) || 750000;
+    return sales.reduce((sum, s) => sum + (s.invoice_amount || s.vatable_amount || 0), 0);
   }, [sales]);
 
   const totalGrossExpenses = useMemo(() => {
-    return expenses.reduce((sum, e) => sum + (e.expense_invoice_amount || e.gross_amount || 0), 0) || 480000;
+    return expenses.reduce((sum, e) => sum + (e.expense_invoice_amount || e.gross_amount || 0), 0);
   }, [expenses]);
 
   const calculatedNetIncome = totalGrossRevenue - totalGrossExpenses;

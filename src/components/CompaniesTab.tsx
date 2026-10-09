@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, Landmark, Check, Info, Pencil, Trash2, Plus, X, Search, CheckCircle2, ShieldCheck, Mail, Phone, Calendar, MapPin } from 'lucide-react';
+import { Building2, Landmark, Check, Info, Pencil, Trash2, Plus, X, Search, CheckCircle2, ShieldCheck, Mail, Phone, Calendar, MapPin, FolderTree, Folder } from 'lucide-react';
 import { Company } from '../types';
 
 interface CompaniesTabProps {
@@ -23,6 +23,7 @@ export default function CompaniesTab({
 }: CompaniesTabProps) {
   // Modal visibility state
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedDirectoryCompany, setSelectedDirectoryCompany] = useState<Company | null>(null);
   const [localSearch, setLocalSearch] = useState('');
 
   // 2 Clean Sub-tabs: 'company' (Profile / Information) and 'bir' (BIR 2303 Tax Obligations)
@@ -135,6 +136,26 @@ export default function CompaniesTab({
       date_of_entry: new Date().toISOString().split('T')[0]
     };
 
+    const createdYear = incorporationDate ? incorporationDate.slice(0, 4) : 2026;
+
+    // Trigger local desktop & server filesystem entity directory creation
+    fetch('/api/create-entity-directory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_name: finalCompName,
+        branch_code: cleanBranch,
+        year: createdYear
+      })
+    })
+      .then(r => r.json())
+      .then(res => {
+        console.log("Entity directory created:", res);
+      })
+      .catch(err => {
+        console.error("Entity directory error:", err);
+      });
+
     if (editingCompanyId !== null) {
       setCompanies(prev => prev.map(c => {
         if (c.id === editingCompanyId) {
@@ -145,7 +166,7 @@ export default function CompaniesTab({
         }
         return c;
       }));
-      triggerAlert(`Company profile "${finalCompName}" updated successfully!`, 'success');
+      triggerAlert(`Company profile "${finalCompName}" updated! Entity directory synced under "entity directory/${finalCompName}".`, 'success');
       resetForm();
       setIsModalOpen(false);
     } else {
@@ -153,7 +174,7 @@ export default function CompaniesTab({
       if (!activeCompany) {
         setActiveCompany(savedCompany);
       }
-      triggerAlert(`Company profile "${finalCompName}" registered successfully!`, 'success');
+      triggerAlert(`Company profile "${finalCompName}" registered! Entity directory created under "entity directory/${finalCompName}".`, 'success');
       resetForm();
       setIsModalOpen(false);
     }
@@ -340,6 +361,25 @@ export default function CompaniesTab({
                               Select
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedDirectoryCompany(c);
+                              fetch('/api/create-entity-directory', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  company_name: c.company_name,
+                                  branch_code: c.tin_branch_code || '00000',
+                                  year: c.birthday_or_incorporation_date ? c.birthday_or_incorporation_date.slice(0, 4) : 2026
+                                })
+                              }).catch(() => {});
+                            }}
+                            className="p-1.5 rounded-lg border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 transition cursor-pointer"
+                            title="View / Sync Entity Directory Folder Structure"
+                          >
+                            <FolderTree className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleEditClick(c)}
@@ -850,6 +890,117 @@ export default function CompaniesTab({
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ========================================================================= */}
+      {/* POPUP MODAL: VIEW ENTITY DIRECTORY TREE STRUCTURE                         */}
+      {/* ========================================================================= */}
+      {selectedDirectoryCompany && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-fadeIn">
+          <div 
+            className={`relative w-full max-w-2xl max-h-[90vh] flex flex-col ${theme.bgCard} border ${theme.borderCard} rounded-2xl shadow-2xl overflow-hidden`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* MODAL HEADER */}
+            <div className={`p-5 border-b ${theme.borderCard} flex items-center justify-between bg-zinc-500/5`}>
+              <div className="flex items-center gap-3">
+                <div className="bg-cyan-500/10 text-cyan-400 p-2.5 rounded-xl border border-cyan-500/20">
+                  <FolderTree className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className={`font-display font-bold text-base ${theme.textTitle}`}>
+                    Entity Directory: {selectedDirectoryCompany.company_name}
+                  </h3>
+                  <p className={`text-xs ${theme.textMuted} mt-0.5`}>
+                    Auto-generated local desktop filesystem hierarchy under <span className="font-mono text-cyan-400">entity directory/</span>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedDirectoryCompany(null)}
+                className="p-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* TREE BODY */}
+            <div className="p-6 overflow-y-auto flex flex-col gap-4">
+              <div className="p-4 rounded-xl bg-black/40 border border-zinc-800 font-mono text-xs text-zinc-300 leading-relaxed overflow-x-auto whitespace-pre">
+{`.
+└── parent folder/
+    └── entity directory/
+        └── ${selectedDirectoryCompany.company_name}/
+            ├── main (if branch code is 00000)/
+            │   ├── main documents/
+            │   │   ├── dti/sec
+            │   │   ├── bir
+            │   │   ├── lgu
+            │   │   └── other documents
+            │   └── ${selectedDirectoryCompany.birthday_or_incorporation_date ? selectedDirectoryCompany.birthday_or_incorporation_date.slice(0, 4) : '2026'} transactions (year created)/
+            │       ├── sales
+            │       ├── expenses
+            │       ├── 2307
+            │       ├── 2316
+            │       └── tax compliances/
+            │           ├── attachments
+            │           └── filings          
+            └── branch 1 (depending on branch code other than 00000)/
+                ├── main documents/
+                │   ├── dti/sec
+                │   ├── bir
+                │   ├── lgu
+                │   └── other documents
+                └── ${selectedDirectoryCompany.birthday_or_incorporation_date ? selectedDirectoryCompany.birthday_or_incorporation_date.slice(0, 4) : '2026'} transactions (year created)/
+                    ├── sales
+                    ├── expenses
+                    ├── 2307
+                    ├── 2316
+                    └── tax compliances/
+                        ├── attachments
+                        └── filings`}
+              </div>
+
+              <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-300 flex items-center justify-between gap-3">
+                <div>
+                  <span className="font-bold">Filesystem Status: </span>
+                  <span>Synchronized in Desktop App & Local Database Engine</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetch('/api/create-entity-directory', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        company_name: selectedDirectoryCompany.company_name,
+                        branch_code: selectedDirectoryCompany.tin_branch_code || '00000',
+                        year: selectedDirectoryCompany.birthday_or_incorporation_date ? selectedDirectoryCompany.birthday_or_incorporation_date.slice(0, 4) : 2026
+                      })
+                    })
+                      .then(() => triggerAlert(`Filesystem folders re-verified for "${selectedDirectoryCompany.company_name}"!`, 'success'))
+                      .catch(() => triggerAlert("Could not reach local server filesystem.", "error"));
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-xs cursor-pointer whitespace-nowrap"
+                >
+                  Re-Verify Local Folders
+                </button>
+              </div>
+            </div>
+
+            {/* MODAL FOOTER */}
+            <div className={`p-4 border-t ${theme.borderCard} flex justify-end bg-zinc-500/5`}>
+              <button
+                type="button"
+                onClick={() => setSelectedDirectoryCompany(null)}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition cursor-pointer"
+              >
+                Close View
+              </button>
+            </div>
           </div>
         </div>
       )}

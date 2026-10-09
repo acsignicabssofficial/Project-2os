@@ -30,7 +30,7 @@ export default function ProvidersTab({
   const [contactNo, setContactNo] = useState('');
   const [email, setEmail] = useState('');
   const [atcCode, setAtcCode] = useState('WC120');
-  const [vatStatus, setVatStatus] = useState<'VAT' | 'NON-VAT'>('VAT');
+  const [businessTaxType, setBusinessTaxType] = useState<'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated'>('vatable');
   const [editingId, setEditingId] = useState<number | null>(null);
 
   const resetForm = () => {
@@ -42,7 +42,7 @@ export default function ProvidersTab({
     setContactNo('');
     setEmail('');
     setAtcCode('WC120');
-    setVatStatus('VAT');
+    setBusinessTaxType('vatable');
   };
 
   const openNewProviderModal = () => {
@@ -50,14 +50,34 @@ export default function ProvidersTab({
     setIsModalOpen(true);
   };
 
+  const handleTinChange = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 9);
+    let formatted = '';
+    if (digits.length > 0) formatted += digits.slice(0, 3);
+    if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
+    if (digits.length > 6) formatted += '-' + digits.slice(6, 9);
+    setTin(formatted);
+  };
+
+  const handleBranchCodeChange = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 5);
+    setBranchCode(digits);
+  };
+
   const handleSaveProvider = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCompany) {
-      triggerAlert('Please select or create a Company Profile first in the Companies tab!', 'error');
+      triggerAlert('Please select or create an Entity Profile first before adding vendors!', 'error');
       return;
     }
-    if (!providerName || !tin) {
-      triggerAlert('Provider Name and TIN are required fields!', 'error');
+    const cleanTinDigits = tin.replace(/\D/g, '');
+    if (cleanTinDigits.length !== 9) {
+      triggerAlert('Provider TIN must be exactly 9 digits (e.g. 123-456-789)!', 'error');
+      return;
+    }
+    const cleanBranch = branchCode.replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    if (!providerName.trim()) {
+      triggerAlert('Provider Name is required!', 'error');
       return;
     }
 
@@ -68,29 +88,37 @@ export default function ProvidersTab({
         registered_name: providerName.trim(),
         service_provider_TIN: tin.trim(),
         sp_tin: tin.trim(),
-        sp_branch_code: branchCode.trim(),
+        sp_branch_code: cleanBranch,
+        provider_branch_code: cleanBranch,
         sp_address: address.trim(),
         service_provider_Address: address.trim(),
+        business_tax_type: businessTaxType,
+        tax_type: businessTaxType === 'vatable' ? 'VAT' : 'Non-VAT',
+        vat_status: businessTaxType === 'vatable' ? 'VAT' : 'NON-VAT',
         contact_number: contactNo.trim(),
         email: email.trim(),
-        atc_code: atcCode,
-        vat_status: vatStatus,
-        tax_type: vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'
+        atc_code: atcCode
       } : p));
       triggerAlert(`Service provider "${providerName}" updated successfully.`, 'success');
       resetForm();
       setIsModalOpen(false);
     } else {
+      const nextIdNum = serviceProviders.filter(p => p.company_name === activeCompany.company_name).length + 1;
+      const newProvId = `PROV-${String(nextIdNum).padStart(4, '0')}`;
+
       const newProvider: ServiceProvider = {
         id: Date.now(),
+        provider_id: newProvId,
         company_name: activeCompany.company_name,
         registered_name: providerName.trim(),
         service_provider_name: providerName.trim(),
         service_provider_TIN: tin.trim(),
         sp_tin: tin.trim(),
-        sp_branch_code: branchCode.trim(),
-        tax_type: vatStatus === 'VAT' ? 'VAT' : 'Non-VAT',
-        vat_status: vatStatus,
+        sp_branch_code: cleanBranch,
+        provider_branch_code: cleanBranch,
+        business_tax_type: businessTaxType,
+        tax_type: businessTaxType === 'vatable' ? 'VAT' : 'Non-VAT',
+        vat_status: businessTaxType === 'vatable' ? 'VAT' : 'NON-VAT',
         service_provider_Address: address.trim(),
         sp_address: address.trim(),
         contact_number: contactNo.trim(),
@@ -99,7 +127,7 @@ export default function ProvidersTab({
       };
 
       setServiceProviders(prev => [...prev, newProvider]);
-      triggerAlert(`Service provider "${providerName}" registered.`, 'success');
+      triggerAlert(`Service provider "${providerName}" registered with ID: ${newProvId}.`, 'success');
       resetForm();
       setIsModalOpen(false);
     }
@@ -107,14 +135,14 @@ export default function ProvidersTab({
 
   const handleEdit = (provider: ServiceProvider) => {
     setEditingId(provider.id);
-    setProviderName(provider.service_provider_name);
+    setProviderName(provider.service_provider_name || provider.registered_name || '');
     setTin(provider.sp_tin || provider.service_provider_TIN || '');
-    setBranchCode(provider.sp_branch_code || '00000');
+    setBranchCode(provider.provider_branch_code || provider.sp_branch_code || '00000');
     setAddress(provider.sp_address || provider.service_provider_Address || '');
     setContactNo(provider.contact_number || '');
     setEmail(provider.email || '');
     setAtcCode(provider.atc_code || 'WC120');
-    setVatStatus(provider.vat_status || 'VAT');
+    setBusinessTaxType((provider.business_tax_type as any) || (provider.vat_status === 'VAT' ? 'vatable' : 'non-vatable'));
     setIsModalOpen(true);
   };
 
@@ -132,6 +160,24 @@ export default function ProvidersTab({
       (p.sp_tin && p.sp_tin.includes(q)) ||
       (p.email && p.email.toLowerCase().includes(q));
   });
+
+  if (!activeCompany) {
+    return (
+      <div className={`p-8 md:p-12 rounded-2xl border ${theme.borderCard} ${theme.bgCard} text-center space-y-4 max-w-2xl mx-auto my-8 shadow-sm`}>
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/20">
+          <Truck className="w-8 h-8" />
+        </div>
+        <div>
+          <h3 className={`text-lg font-bold ${theme.textTitle}`}>
+            Entity Profile Required Before Managing Service Providers
+          </h3>
+          <p className={`text-xs ${theme.textMuted} mt-1.5 max-w-md mx-auto leading-relaxed`}>
+            Bago ka makapag-enter ng transactions at service providers, kailangan mo munang mag-setup ng entity profile. Saan mapupunta ang provider at expense transactions kung wala naman itong designated entity?
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6 w-full">
@@ -153,7 +199,7 @@ export default function ProvidersTab({
                 </span>
               </div>
               <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                Master vendor database for purchase invoicing, BIR 2307 withholding certificates, and ATC tracking.
+                Master vendor database with 9-digit TIN, 5-digit branch code, and business tax type.
               </p>
             </div>
           </div>
@@ -188,48 +234,84 @@ export default function ProvidersTab({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className={`bg-zinc-500/5 ${theme.textMuted} uppercase font-bold tracking-wider border-b ${theme.borderCard}`}>
+                <th className="p-3.5">Provider ID</th>
                 <th className="p-3.5">Vendor / Provider Name</th>
-                <th className="p-3.5">TIN & Branch</th>
+                <th className="p-3.5 font-mono">TIN (9 Digits)</th>
+                <th className="p-3.5 font-mono">Branch Code</th>
+                <th className="p-3.5">Business Tax Type</th>
                 <th className="p-3.5">Address</th>
-                <th className="p-3.5">Contact Info</th>
                 <th className="p-3.5">Default ATC</th>
-                <th className="p-3.5">Tax Type</th>
                 <th className="p-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${theme.borderCard}`}>
               {filteredProviders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-zinc-500">
+                  <td colSpan={8} className="p-12 text-center text-zinc-500">
                     <Truck className="w-10 h-10 mx-auto mb-2 opacity-30" />
                     <p className="font-semibold text-sm">No Service Providers Found</p>
                     <p className="text-xs mt-1">Click "Register Provider / Vendor" above to add your first supplier profile.</p>
                   </td>
                 </tr>
               ) : (
-                filteredProviders.map((p) => (
-                  <tr key={p.id} className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/30'} transition-colors`}>
-                    <td className={`p-3.5 font-bold ${theme.textTitle}`}>{p.service_provider_name}</td>
-                    <td className="p-3.5 font-mono font-bold text-emerald-400">
-                      {p.sp_tin || p.service_provider_TIN}
-                      <span className="text-[10px] text-zinc-500 ml-1">({p.sp_branch_code || '00000'})</span>
-                    </td>
-                    <td className={`p-3.5 ${theme.isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>{p.sp_address || p.service_provider_Address || '-'}</td>
-                    <td className="p-3.5">
-                      <div className="flex flex-col text-[11px]">
-                        <span className={theme.textMain}>{p.contact_number || '-'}</span>
-                        <span className="text-zinc-500">{p.email || ''}</span>
-                      </div>
-                    </td>
-                    <td className="p-3.5 font-mono text-cyan-400 font-bold">{p.atc_code || 'WC120'}</td>
-                    <td className="p-3.5">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                        p.vat_status === 'VAT' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                      }`}>
-                        {p.vat_status || 'VAT'}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-right">
+                filteredProviders.map((p, pIdx) => {
+                  const provId = p.provider_id || `PROV-${String(pIdx + 1).padStart(4, '0')}`;
+                  const taxType = p.business_tax_type || (p.vat_status === 'VAT' ? 'vatable' : 'non-vatable');
+                  return (
+                    <tr key={p.id} className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/30'} transition-colors`}>
+                      <td className="p-3.5 font-mono font-bold text-violet-400">{provId}</td>
+                      <td className={`p-3.5 font-bold ${theme.textTitle}`}>{p.service_provider_name || p.registered_name}</td>
+                      <td className="p-3.5 font-mono font-bold text-emerald-400">
+                        {p.sp_tin || p.service_provider_TIN}
+                      </td>
+                      <td className="p-3.5 font-mono text-zinc-400">
+                        {p.provider_branch_code || p.sp_branch_code || '00000'}
+                      </td>
+                      <td className="p-3.5">
+                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                          taxType === 'vatable' 
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                            : taxType === 'zero-rated'
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                            : taxType === 'vat-exempt'
+                            ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        }`}>
+                          {taxType}
+                        </span>
+                      </td>
+                      <td className={`p-3.5 ${theme.isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>{p.sp_address || p.service_provider_Address || '-'}</td>
+                      <td className="p-3.5 font-mono text-cyan-400 font-bold">{p.atc_code || 'WC120'}</td>
+                      <td className="p-3.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(p)}
+                            className={`p-1.5 px-2.5 rounded-lg border ${theme.borderCard} ${theme.isLight ? 'bg-white hover:bg-slate-100 text-slate-700' : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300'} hover:border-emerald-500 transition cursor-pointer inline-flex items-center gap-1.5 font-semibold text-xs`}
+                            title="Edit Provider"
+                          >
+                            <Pencil className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(p.id, p.service_provider_name || p.registered_name || '')}
+                            className="p-1.5 px-2.5 rounded-lg border border-rose-500/20 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition cursor-pointer inline-flex items-center gap-1.5 font-semibold text-xs"
+                            title="Delete Provider"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"

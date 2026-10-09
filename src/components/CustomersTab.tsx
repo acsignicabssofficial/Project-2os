@@ -37,6 +37,7 @@ export default function CustomersTab({
 
   // Form State
   const [directCustTin, setDirectCustTin] = useState('');
+  const [directCustBranchCode, setDirectCustBranchCode] = useState('00000');
   const [directCustName, setDirectCustName] = useState('');
   const [directCustAddr, setDirectCustAddr] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -120,15 +121,17 @@ export default function CustomersTab({
 
   const handleEditClick = (item: Customer) => {
     setEditingId(item.id);
-    setDirectCustTin(item.customer_tin);
-    setDirectCustName(item.customer_name);
-    setDirectCustAddr(item.customer_address || '');
+    setDirectCustTin(item.customer_tin || item.client_TIN || '');
+    setDirectCustBranchCode(item.customer_branch_code || item.tin_branch_code || '00000');
+    setDirectCustName(item.customer_name || item.registered_name || '');
+    setDirectCustAddr(item.customer_address || item.client_Address || '');
     setIsModalOpen(true);
   };
 
   const openNewCustomerModal = () => {
     setEditingId(null);
     setDirectCustTin('');
+    setDirectCustBranchCode('00000');
     setDirectCustName('');
     setDirectCustAddr('');
     setIsModalOpen(true);
@@ -137,6 +140,7 @@ export default function CustomersTab({
   const handleCancelEdit = () => {
     setEditingId(null);
     setDirectCustTin('');
+    setDirectCustBranchCode('00000');
     setDirectCustName('');
     setDirectCustAddr('');
     setIsModalOpen(false);
@@ -149,25 +153,35 @@ export default function CustomersTab({
     }
   };
 
-  // Mask TIN
+  // Mask TIN (Strictly 9 digits only as specified in guide)
   const handleTinChange = (val: string) => {
-    const digits = val.replace(/\D/g, '').slice(0, 14);
+    const digits = val.replace(/\D/g, '').slice(0, 9);
     let formatted = '';
     if (digits.length > 0) formatted += digits.slice(0, 3);
     if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
     if (digits.length > 6) formatted += '-' + digits.slice(6, 9);
-    if (digits.length > 9) formatted += '-' + digits.slice(9, 14);
     setDirectCustTin(formatted);
+  };
+
+  const handleBranchCodeChange = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 5);
+    setDirectCustBranchCode(digits);
   };
 
   const handleAddCustomerDirect = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCompany) {
-      triggerAlert("Please select or create a Company Profile first in the Companies tab!", "error");
+      triggerAlert("Please select or create an Entity Profile first before adding customers!", "error");
       return;
     }
-    if (!directCustTin || !directCustName) {
-      triggerAlert("Customer TIN and Customer Name are required!", "error");
+    const cleanTinDigits = directCustTin.replace(/\D/g, '');
+    if (cleanTinDigits.length !== 9) {
+      triggerAlert("Customer TIN must be exactly 9 digits (e.g. 123-456-789)!", "error");
+      return;
+    }
+    const cleanBranch = directCustBranchCode.replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    if (!directCustName.trim()) {
+      triggerAlert("Customer Name is required!", "error");
       return;
     }
 
@@ -191,9 +205,14 @@ export default function CustomersTab({
         if (c.id === editingId) {
           return {
             ...c,
-            customer_name: directCustName,
+            customer_name: directCustName.trim(),
+            registered_name: directCustName.trim(),
             customer_tin: directCustTin,
-            customer_address: directCustAddr
+            client_TIN: directCustTin,
+            customer_branch_code: cleanBranch,
+            tin_branch_code: cleanBranch,
+            customer_address: directCustAddr.trim(),
+            client_Address: directCustAddr.trim()
           };
         }
         return c;
@@ -206,7 +225,8 @@ export default function CustomersTab({
             return {
               ...s,
               customer_tin: directCustTin,
-              customer_name: directCustName
+              customer_name: directCustName.trim(),
+              registered_name: directCustName.trim()
             };
           }
           return s;
@@ -217,32 +237,39 @@ export default function CustomersTab({
             return {
               ...col,
               customer_tin: directCustTin,
-              customer_name: directCustName
+              customer_name: directCustName.trim(),
+              registered_name: directCustName.trim()
             };
           }
           return col;
         }));
       }
 
-      triggerAlert(`Customer profile updated successfully!`, 'success');
-      handleCancelEdit();
+      triggerAlert(`Customer profile "${directCustName}" updated.`, "success");
     } else {
-      const newCust: Customer = {
+      const nextIdNum = customers.filter(c => c.company_name === activeCompanyName).length + 1;
+      const newCustId = `CUST-${String(nextIdNum).padStart(4, '0')}`;
+
+      const newCustomer: Customer = {
         id: Date.now(),
+        customer_id: newCustId,
         company_name: activeCompanyName,
-        registered_name: directCustName,
-        customer_name: directCustName,
-        client_TIN: directCustTin,
+        customer_name: directCustName.trim(),
+        registered_name: directCustName.trim(),
         customer_tin: directCustTin,
-        client_Address: directCustAddr,
-        customer_address: directCustAddr,
+        client_TIN: directCustTin,
+        customer_branch_code: cleanBranch,
+        tin_branch_code: cleanBranch,
+        customer_address: directCustAddr.trim(),
+        client_Address: directCustAddr.trim(),
         tax_type: 'VAT'
       };
 
-      setCustomers(prev => [...prev, newCust]);
-      triggerAlert(`Customer profile "${directCustName}" registered successfully!`, 'success');
-      handleCancelEdit();
+      setCustomers(prev => [newCustomer, ...prev]);
+      triggerAlert(`Customer profile "${directCustName}" registered with ID: ${newCustId}.`, "success");
     }
+
+    handleCancelEdit();
   };
 
   const companyCustomers = customers.filter(c => activeCompanyName && c.company_name === activeCompanyName);
@@ -350,6 +377,24 @@ export default function CustomersTab({
     };
   }, [drilldownCust, sales, collections, activeCompany, customerStats, activeCompanyName]);
 
+  if (!activeCompany) {
+    return (
+      <div className={`p-8 md:p-12 rounded-2xl border ${theme.borderCard} ${theme.bgCard} text-center space-y-4 max-w-2xl mx-auto my-8 shadow-sm`}>
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/20">
+          <Users className="w-8 h-8" />
+        </div>
+        <div>
+          <h3 className={`text-lg font-bold ${theme.textTitle}`}>
+            Entity Profile Required Before Managing Customers
+          </h3>
+          <p className={`text-xs ${theme.textMuted} mt-1.5 max-w-md mx-auto leading-relaxed`}>
+            Bago ka makapag-enter ng transactions at customers, kailangan mo munang mag-setup ng entity profile. Saan mapupunta ang customer at sales transaction kung wala naman itong designated entity?
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6 w-full">
       {/* CUSTOMER PROFILES MASTERLIST DATABASE */}
@@ -415,8 +460,10 @@ export default function CustomersTab({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className={`bg-zinc-500/5 ${theme.textMuted} uppercase font-bold tracking-wider border-b ${theme.borderCard}`}>
-                <th className="p-3.5">Customer TIN</th>
-                <th className="p-3.5">Full Legal Name</th>
+                <th className="p-3.5">Customer ID</th>
+                <th className="p-3.5">Customer Name</th>
+                <th className="p-3.5 font-mono">Customer TIN (9 Digits)</th>
+                <th className="p-3.5 font-mono">Branch Code</th>
                 <th className="p-3.5">Registered Address</th>
                 <th className="p-3.5 text-right">Total Invoiced Sales</th>
                 <th className="p-3.5 text-right">Total Collected</th>
@@ -427,20 +474,24 @@ export default function CustomersTab({
             <tbody className={`divide-y ${theme.borderCard}`}>
               {filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-zinc-500">
+                  <td colSpan={9} className="p-12 text-center text-zinc-500">
                     <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
                     <p className="font-semibold text-sm">No Customer Profiles Found</p>
                     <p className="text-xs mt-1">Click "Register Customer Profile" above or use Bulk Import to populate your customer directory.</p>
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((c) => {
+                filteredCustomers.map((c, cIdx) => {
                   const stats = customerStats[c.customer_tin] || { totalSales: 0, totalCollected: 0, balance: 0 };
+                  const custId = c.customer_id || `CUST-${String(cIdx + 1).padStart(4, '0')}`;
+                  const branch = c.customer_branch_code || c.tin_branch_code || '00000';
                   return (
                     <tr key={c.id} className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/30'} transition-colors`}>
-                      <td className={`p-3.5 font-mono font-bold text-blue-400`}>{c.customer_tin}</td>
-                      <td className={`p-3.5 font-bold ${theme.textTitle}`}>{c.customer_name}</td>
-                      <td className={`p-3.5 ${theme.isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>{c.customer_address || "No address on file"}</td>
+                      <td className="p-3.5 font-mono font-bold text-violet-400">{custId}</td>
+                      <td className={`p-3.5 font-bold ${theme.textTitle}`}>{c.customer_name || c.registered_name}</td>
+                      <td className="p-3.5 font-mono font-bold text-blue-400">{c.customer_tin || c.client_TIN}</td>
+                      <td className="p-3.5 font-mono text-zinc-400">{branch}</td>
+                      <td className={`p-3.5 ${theme.isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>{c.customer_address || c.client_Address || "No address on file"}</td>
                       <td className={`p-3.5 text-right font-mono ${theme.isLight ? 'text-zinc-700' : 'text-zinc-300'}`}>₱{stats.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                       <td className="p-3.5 text-right font-mono text-emerald-400 font-bold">₱{stats.totalCollected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                       <td className="p-3.5 text-right font-mono">
@@ -527,18 +578,38 @@ export default function CustomersTab({
 
             {/* Modal Form */}
             <form onSubmit={handleAddCustomerDirect} className="p-6 flex flex-col gap-4">
-              <div>
-                <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
-                  Customer TIN <span className="text-rose-500">*</span>
-                </label>
-                <input 
-                  type="text"
-                  placeholder="000-000-000-00000"
-                  value={directCustTin}
-                  onChange={(e) => handleTinChange(e.target.value)}
-                  required
-                  className={`w-full px-3.5 py-2.5 border rounded-xl text-xs bg-transparent focus:outline-hidden ${theme.accentFocus} font-mono font-bold placeholder-zinc-500 ${theme.borderInput} ${theme.textMain}`}
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
+                    Customer TIN (9 Digits) <span className="text-rose-500">*</span>
+                  </label>
+                  <input 
+                    type="text"
+                    placeholder="123-456-789"
+                    value={directCustTin}
+                    onChange={(e) => handleTinChange(e.target.value)}
+                    required
+                    maxLength={11}
+                    className={`w-full px-3.5 py-2.5 border rounded-xl text-xs bg-transparent focus:outline-hidden ${theme.accentFocus} font-mono font-bold placeholder-zinc-500 ${theme.borderInput} ${theme.textMain}`}
+                  />
+                  <span className="text-[10px] text-zinc-500 mt-1 block">9-digit primary TIN</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
+                    Customer Branch Code <span className="text-rose-500">*</span>
+                  </label>
+                  <input 
+                    type="text"
+                    placeholder="00000"
+                    value={directCustBranchCode}
+                    onChange={(e) => handleBranchCodeChange(e.target.value)}
+                    required
+                    maxLength={5}
+                    className={`w-full px-3.5 py-2.5 border rounded-xl text-xs bg-transparent focus:outline-hidden ${theme.accentFocus} font-mono font-bold placeholder-zinc-500 ${theme.borderInput} ${theme.textMain}`}
+                  />
+                  <span className="text-[10px] text-zinc-500 mt-1 block">5-digit branch code (e.g. 00000)</span>
+                </div>
               </div>
 
               <div>
