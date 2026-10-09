@@ -1265,6 +1265,7 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setExpenses(list as any)}
+                  accountTitles={accountTitles}
                 />
               )}
 
@@ -1280,6 +1281,7 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setPayments(list as any)}
+                  accountTitles={accountTitles}
                 />
               )}
 
@@ -1295,6 +1297,7 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setPayments(list as any)}
+                  accountTitles={accountTitles}
                 />
               )}
 
@@ -1312,6 +1315,8 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onNavigateToTab={(tab) => setActiveTab(tab as any)}
+                  specialEntries={specialEntries}
+                  setSpecialEntries={setSpecialEntries}
                 />
               )}
 
@@ -1329,6 +1334,9 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onNavigateToTab={(tab) => setActiveTab(tab as any)}
+                  accountTitles={accountTitles}
+                  specialEntries={specialEntries}
+                  setSpecialEntries={setSpecialEntries}
                 />
               )}
 

@@ -20,7 +20,7 @@ import {
   Eye
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
-import { UniformBookRecord, Customer, Company } from '../types';
+import { UniformBookRecord, Customer, Company, SpecialEntry, SpecialEntryLine } from '../types';
 import { computeSaleFormulas } from '../utils/accounting';
 
 interface SalesTransactionTabProps {
@@ -36,6 +36,8 @@ interface SalesTransactionTabProps {
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
   onNavigateToTab?: (tabKey: string) => void;
+  specialEntries?: SpecialEntry[];
+  setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
 }
 
 export default function SalesTransactionTab({
@@ -50,7 +52,9 @@ export default function SalesTransactionTab({
   theme,
   triggerAlert,
   globalSearch = '',
-  onNavigateToTab
+  onNavigateToTab,
+  specialEntries = [],
+  setSpecialEntries
 }: SalesTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
 
@@ -87,6 +91,7 @@ export default function SalesTransactionTab({
   // Quick collection modal for open invoices
   const [selectedInvoiceToCollect, setSelectedInvoiceToCollect] = useState<UniformBookRecord | null>(null);
   const [collectAmount, setCollectAmount] = useState('');
+  const [collectDiscount, setCollectDiscount] = useState('0');
   const [collectWtax, setCollectWtax] = useState('0');
   const [collectRefNo, setCollectRefNo] = useState('');
   const [collectDate, setCollectDate] = useState(new Date().toISOString().split('T')[0]);
@@ -176,6 +181,12 @@ export default function SalesTransactionTab({
   const handleSubmitSale = (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!activeCompany || !activeCompany.company_name || activeCompany.company_name.trim() === '' || activeCompany.company_name === 'Select Company...') {
+      triggerAlert('Strict Validation: Please setup or select an Entity Profile first before entering sales transactions! (Saan mapupunta ang transaction kung walang designated entity?)', 'error');
+      if (onNavigateToTab) onNavigateToTab('companies');
+      return;
+    }
+
     if (!customerName.trim()) {
       triggerAlert('Please enter or select a Customer Name.', 'error');
       return;
@@ -188,6 +199,15 @@ export default function SalesTransactionTab({
     const totalDue = liveFormulas.total_amount_due;
     const nowIso = new Date().toISOString();
     const commonId = Date.now();
+
+    const isVat = vatStatus === 'VAT';
+    const zeroRatedVal = parseFloat(zeroRated) || 0;
+    const vatExemptVal = parseFloat(vatExempt) || 0;
+    const discountsVal = parseFloat(discount) || 0;
+    const wtaxVal = parseFloat(taxWithheld) || 0;
+    const vatableSalesVal = liveFormulas.vatable_sales;
+    const vatOutputVal = liveFormulas.vat;
+    const totalGrossSales = Math.round((vatableSalesVal + vatOutputVal + zeroRatedVal + vatExemptVal) * 100) / 100 || liveFormulas.total_sale_vat_inclusive;
 
     // 1. Prepare Base Record for Subsidiary Sales
     let assignedStatus: 'Cash' | 'On Account' | 'Partial' = 'On Account';
@@ -233,19 +253,14 @@ export default function SalesTransactionTab({
     };
 
     // 2. Routing Logic based on user specification:
-    // 3.1 If ON ACCOUNT:
-    //     Record the transaction to subsidiary sales only.
+    // 1.1 Record transaction to subsidiary sales
+    setSubsidiarySales(prev => [saleRecord, ...prev]);
+
+    // 1.2 Record transaction to collections book (only if cash sales or partial)
+    // 1.3 Record transaction to cash receipts (only if cash sales or fully paid in collections book)
     if (saleMode === 'ON ACCOUNT') {
-      setSubsidiarySales(prev => [saleRecord, ...prev]);
       triggerAlert(`Sale ${invoiceNo} recorded to Subsidiary Sales on Account (Receivable: ₱${totalDue.toLocaleString()}).`, 'success');
-    }
-
-    // 3.2 If ON CASH:
-    //     Record transaction to BOTH subsidiary sales AND cash receipts (and collections).
-    else if (saleMode === 'ON CASH') {
-      // Record to Subsidiary Sales
-      setSubsidiarySales(prev => [saleRecord, ...prev]);
-
+    } else if (saleMode === 'ON CASH') {
       // Record to Cash Receipts (Strictly cash-only book)
       const cashReceiptRecord: UniformBookRecord = {
         id: commonId + 1,
@@ -289,12 +304,7 @@ export default function SalesTransactionTab({
       setCollections(prev => [collectionRecord, ...prev]);
 
       triggerAlert(`Cash Sale ${invoiceNo} recorded to BOTH Subsidiary Sales & Cash Receipts (₱${totalDue.toLocaleString()})!`, 'success');
-    }
-
-    // 3.3 If ON PARTIAL:
-    //     Record transaction to both subsidiary sales and collections. 
-    //     If collections for an invoice has reach full collection, that's when it will record to cash receipts.
-    else if (saleMode === 'ON PARTIAL') {
+    } else if (saleMode === 'ON PARTIAL') {
       const downPmt = parseFloat(downPaymentAmount) || 0;
       const downWtax = parseFloat(downPaymentWithholding) || 0;
 
@@ -303,14 +313,10 @@ export default function SalesTransactionTab({
         return;
       }
 
-      // Check if down payment already satisfies full invoice
       const isFull = downPmt >= totalDue;
-
       if (isFull) {
         saleRecord.status = 'Paid';
       }
-
-      setSubsidiarySales(prev => [saleRecord, ...prev]);
 
       // Record down payment in Collections
       const partialCollectionRecord: UniformBookRecord = {
@@ -348,12 +354,109 @@ export default function SalesTransactionTab({
       setCollections(prev => [partialCollectionRecord, ...prev]);
 
       if (isFull) {
-        // Automatically records to Cash Receipts as full collection
         setCashReceipts(prev => [{ ...partialCollectionRecord, id: commonId + 2, type_of_transaction: 'CASH', status: 'Cash' }, ...prev]);
         triggerAlert(`Sale ${invoiceNo} was fully covered by down payment! Recorded to Subsidiary Sales, Collections, and Cash Receipts.`, 'success');
       } else {
         triggerAlert(`Partial Sale ${invoiceNo} recorded to Subsidiary Sales & Collections. Initial collected: ₱${downPmt.toLocaleString()} (Balance: ₱${(totalDue - downPmt).toLocaleString()}).`, 'info');
       }
+    }
+
+    // 2. RECORD JOURNAL ENTRY TO SPECIAL JOURNAL
+    // 2.1 after adding transaction to subsidiary sales;
+    // 2.1.1 if cash sales:
+    // entry 1: debit accounts receivable, credit vatable sales, credit vat-output, credit zero-rated sales, credit vat-exempt sales.
+    // entry 2: debit cash, debit discounts, debit withholding tax from customers, credit accounts receivable.
+    if (setSpecialEntries) {
+      const newSJs: SpecialEntry[] = [];
+      const entry1Id = Date.now();
+
+      // ENTRY 1: Sales Recognition
+      const entry1Lines: SpecialEntryLine[] = [
+        { type: 'Debit', account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
+      ];
+
+      if (vatableSalesVal > 0) {
+        entry1Lines.push({ type: 'Credit', account_code: '4010', account_title: isVat ? 'Vatable Sales' : 'Sales Revenue', amount: vatableSalesVal });
+      }
+      if (vatOutputVal > 0) {
+        entry1Lines.push({ type: 'Credit', account_code: '2020', account_title: 'Output VAT Payable', amount: vatOutputVal });
+      }
+      if (zeroRatedVal > 0) {
+        entry1Lines.push({ type: 'Credit', account_code: '4020', account_title: 'Zero-Rated Sales', amount: zeroRatedVal });
+      }
+      if (vatExemptVal > 0) {
+        entry1Lines.push({ type: 'Credit', account_code: '4030', account_title: 'VAT-Exempt Sales', amount: vatExemptVal });
+      }
+      if (entry1Lines.filter(l => l.type === 'Credit').length === 0) {
+        entry1Lines.push({ type: 'Credit', account_code: '4010', account_title: 'Sales Revenue', amount: totalGrossSales });
+      }
+
+      newSJs.push({
+        id: entry1Id,
+        company_name: activeCompanyName,
+        entry_number: `SJ-SLS-${invoiceNo.trim()}`,
+        voucher_no: `SJ-SLS-${invoiceNo.trim()}`,
+        entry_date: date,
+        entry_type: 'Sales Recognition',
+        description: `Sales Recognition (Entry 1) - Inv #${invoiceNo.trim()} (${customerName.trim()})`,
+        lines: entry1Lines,
+        created_at: nowIso
+      });
+
+      // ENTRY 2 (for collections or for full payments/cash sales):
+      // debit cash, debit discounts, debit withholding tax from customers, credit accounts receivable.
+      if (saleMode === 'ON CASH') {
+        const cashAmt = Math.round((totalGrossSales - discountsVal - wtaxVal) * 100) / 100;
+        const entry2Lines: SpecialEntryLine[] = [
+          { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt }
+        ];
+        if (discountsVal > 0) {
+          entry2Lines.push({ type: 'Debit', account_code: '4015', account_title: 'Sales Discounts', amount: discountsVal });
+        }
+        if (wtaxVal > 0) {
+          entry2Lines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: wtaxVal });
+        }
+        entry2Lines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales });
+
+        newSJs.push({
+          id: entry1Id + 1,
+          company_name: activeCompanyName,
+          entry_number: `SJ-COL-${invoiceNo.trim()}`,
+          voucher_no: `SJ-COL-${invoiceNo.trim()}`,
+          entry_date: date,
+          entry_type: 'Cash Collection & Settlement',
+          description: `Cash Settlement (Entry 2) - Inv #${invoiceNo.trim()} (${customerName.trim()})`,
+          lines: entry2Lines,
+          created_at: nowIso
+        });
+      } else if (saleMode === 'ON PARTIAL') {
+        const downPmt = parseFloat(downPaymentAmount) || 0;
+        const downWtax = parseFloat(downPaymentWithholding) || 0;
+        if (downPmt > 0) {
+          const cashAmt = Math.round((downPmt - downWtax) * 100) / 100;
+          const entry2Lines: SpecialEntryLine[] = [
+            { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt }
+          ];
+          if (downWtax > 0) {
+            entry2Lines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: downWtax });
+          }
+          entry2Lines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: downPmt });
+
+          newSJs.push({
+            id: entry1Id + 1,
+            company_name: activeCompanyName,
+            entry_number: `SJ-COL-${invoiceNo.trim()}`,
+            voucher_no: collectionRef.trim() || `COL-${Date.now().toString().slice(-4)}`,
+            entry_date: date,
+            entry_type: 'Partial Collection & Settlement',
+            description: `Partial Collection (Entry 2) - Inv #${invoiceNo.trim()} (${customerName.trim()})`,
+            lines: entry2Lines,
+            created_at: nowIso
+          });
+        }
+      }
+
+      setSpecialEntries(prev => [...newSJs, ...prev]);
     }
 
     // Reset Form for next entry
@@ -369,25 +472,29 @@ export default function SalesTransactionTab({
     if (!selectedInvoiceToCollect) return;
 
     const paymentAmt = parseFloat(collectAmount) || 0;
+    const discountAmt = parseFloat(collectDiscount) || 0;
     const wtaxAmt = parseFloat(collectWtax) || 0;
 
-    if (paymentAmt <= 0) {
-      triggerAlert('Please enter a valid collection amount.', 'error');
+    if (paymentAmt <= 0 && discountAmt <= 0 && wtaxAmt <= 0) {
+      triggerAlert('Please enter a valid collection, discount, or withholding tax amount.', 'error');
       return;
     }
 
     const inv = selectedInvoiceToCollect;
     const invTotalDue = Number(inv.total_amount_due || inv.amount) || 0;
+    const totalSettledReceivable = Math.round((paymentAmt + discountAmt + wtaxAmt) * 100) / 100;
 
-    // Calculate previous collections
+    // Calculate previous collections (cash + discounts + withholding)
     const existingMatching = collections.filter(c => 
       !c.is_cancelled && 
       c.invoice_number && 
       c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase()
     );
-    const prevCollected = existingMatching.reduce((sum, c) => sum + (Number(c.amount_collected || c.amount) || 0), 0);
-    const newTotalCollected = prevCollected + paymentAmt;
-    const isNowFullyCollected = newTotalCollected >= invTotalDue;
+    const prevCollected = existingMatching.reduce((sum, c) => 
+      sum + (Number(c.amount_collected || c.amount) || 0) + (Number(c.discount ?? c.discounts) || 0) + (Number(c.tax_withheld ?? c.amount_withheld_2307) || 0)
+    , 0);
+    const newTotalCollected = Math.round((prevCollected + totalSettledReceivable) * 100) / 100;
+    const isNowFullyCollected = newTotalCollected >= (invTotalDue - 0.01);
 
     const commonId = Date.now();
     const nowIso = new Date().toISOString();
@@ -407,19 +514,20 @@ export default function SalesTransactionTab({
       invoice_number: inv.invoice_number,
       particulars: `Collection for Invoice #${inv.invoice_number} (${isNowFullyCollected ? 'Final Settlement' : 'Installment'})`,
       qty: 1,
-      unit_price: paymentAmt,
+      unit_price: totalSettledReceivable,
       amount: paymentAmt,
       vatable_amount: Math.round((paymentAmt / 1.12) * 100) / 100,
       vat_amount: Math.round((paymentAmt - paymentAmt / 1.12) * 100) / 100,
       zero_rated_amount: 0,
       vat_exempt_amount: 0,
-      total_amount_vat_inclusive: paymentAmt,
-      total_amount_net_of_vat: Math.round((paymentAmt / 1.12) * 100) / 100,
-      discount: 0,
+      total_amount_vat_inclusive: totalSettledReceivable,
+      total_amount_net_of_vat: Math.round((totalSettledReceivable / 1.12) * 100) / 100,
+      discount: discountAmt,
+      discounts: discountAmt,
       tax_withheld: wtaxAmt,
+      amount_withheld_2307: wtaxAmt,
       total_amount_due: invTotalDue,
       amount_collected: paymentAmt,
-      amount_withheld_2307: wtaxAmt,
       status: isNowFullyCollected ? 'Paid' : 'Partial',
       is_cancelled: false,
       created_at: nowIso
@@ -451,19 +559,78 @@ export default function SalesTransactionTab({
       setCashReceipts(prev => [fullCashReceipt, ...prev]);
 
       triggerAlert(
-        `Invoice #${inv.invoice_number} is now FULLY COLLECTED (₱${newTotalCollected.toLocaleString()}) and has been automatically recorded to Cash Receipts!`,
+        `Invoice #${inv.invoice_number} is now FULLY COLLECTED (₱${newTotalCollected.toLocaleString()} settled) and has been automatically recorded to Cash Receipts!`,
         'success'
       );
     } else {
       triggerAlert(
-        `Recorded partial collection of ₱${paymentAmt.toLocaleString()} for Invoice #${inv.invoice_number}. Remaining: ₱${(invTotalDue - newTotalCollected).toLocaleString()}.`,
+        `Recorded collection of ₱${paymentAmt.toLocaleString()} cash (total credit ₱${totalSettledReceivable.toLocaleString()}) for Invoice #${inv.invoice_number}. Remaining: ₱${Math.max(0, invTotalDue - newTotalCollected).toLocaleString()}.`,
         'info'
       );
     }
 
+    // 4. Record Entry 2 to Special Journal for this collection
+    // Strictly following user formula:
+    // (dr) Cash [1010]
+    // (dr) Sales Discounts [4015]
+    // (dr) Creditable Withholding Tax (BIR 2307) [1040]
+    // (cr) Accounts Receivable [1020]
+    // Total Dr = Total Cr, exactly matching total gross settled receivable
+    if (setSpecialEntries) {
+      const colLines: SpecialEntryLine[] = [
+        { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: paymentAmt }
+      ];
+      if (discountAmt > 0) {
+        colLines.push({ type: 'Debit', account_code: '4015', account_title: 'Sales Discounts', amount: discountAmt });
+      }
+      if (wtaxAmt > 0) {
+        colLines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: wtaxAmt });
+      }
+      colLines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: totalSettledReceivable });
+
+      setSpecialEntries(prev => [{
+        id: Date.now(),
+        company_name: activeCompanyName,
+        entry_number: `SJ-COL-${inv.invoice_number}-${Date.now().toString().slice(-4)}`,
+        voucher_no: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
+        entry_date: collectDate,
+        entry_type: 'Collection / Receivable Settlement',
+        description: `Collection (Entry 2) - Inv #${inv.invoice_number} (${inv.registered_name})`,
+        lines: colLines,
+        created_at: new Date().toISOString()
+      }, ...prev]);
+    }
+
     setSelectedInvoiceToCollect(null);
     setCollectAmount('');
+    setCollectDiscount('0');
+    setCollectWtax('0');
   };
+
+  if (!activeCompany || !activeCompany.company_name || activeCompany.company_name.trim() === '' || activeCompany.company_name === 'Select Company...') {
+    return (
+      <div className={`p-8 md:p-12 rounded-2xl border ${theme.borderCard} ${theme.bgCard} text-center space-y-4 max-w-2xl mx-auto my-8 shadow-sm`}>
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/20">
+          <Building2 className="w-8 h-8" />
+        </div>
+        <div>
+          <h3 className={`text-lg font-bold ${theme.textTitle}`}>
+            Entity Profile Required Before Entering Transactions
+          </h3>
+          <p className={`text-xs ${theme.textMuted} mt-1.5 max-w-md mx-auto leading-relaxed`}>
+            Bago ka makapag-enter ng transactions, kailangan mo munang mag-setup ng entity profile kasi saan mapupunta ang transaction kung wala naman itong designated entity.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigateToTab && onNavigateToTab('companies')}
+          className="px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-black shadow-md cursor-pointer inline-flex items-center gap-2 transition"
+        >
+          <span>Set Up Entity Profile Now</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-5 w-full">
@@ -1105,6 +1272,8 @@ export default function SalesTransactionTab({
                               onClick={() => {
                                 setSelectedInvoiceToCollect(inv);
                                 setCollectAmount(String(balance));
+                                setCollectDiscount('0');
+                                setCollectWtax('0');
                                 setCollectRefNo(`OR-${Date.now().toString().slice(-4)}`);
                               }}
                               className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1"
@@ -1159,30 +1328,78 @@ export default function SalesTransactionTab({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-zinc-300 font-bold mb-1">Collection Amount (₱) *</label>
-                <input
-                  type="number"
-                  step="any"
-                  value={collectAmount}
-                  onChange={(e) => setCollectAmount(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-zinc-300 font-bold mb-1">Withholding Tax 2307 (₱)</label>
+                  <label className="block text-zinc-300 font-bold mb-1">Cash Collected (₱) *</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={collectAmount}
+                    onChange={(e) => setCollectAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-zinc-300 font-bold mb-1">Discounts (₱)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={collectDiscount}
+                    onChange={(e) => setCollectDiscount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-zinc-300 font-bold mb-1">Withholding Tax (₱)</label>
                   <input
                     type="number"
                     step="any"
                     value={collectWtax}
                     onChange={(e) => setCollectWtax(e.target.value)}
+                    placeholder="0.00"
                     className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
                   />
                 </div>
+              </div>
 
+              {/* LIVE JOURNAL ENTRY 2 PREVIEW */}
+              <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-700 space-y-1.5">
+                <div className="flex justify-between items-center text-[11px] font-bold text-amber-400">
+                  <span>Entry 2 / A/R Settlement Preview:</span>
+                  <span className="font-mono">
+                    Total A/R Credit: ₱{((parseFloat(collectAmount) || 0) + (parseFloat(collectDiscount) || 0) + (parseFloat(collectWtax) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="font-mono text-[10px] space-y-0.5 text-zinc-300">
+                  <div className="flex justify-between">
+                    <span className="text-emerald-400">(dr) Cash and Cash Equivalents [1010]</span>
+                    <span>₱{(parseFloat(collectAmount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {(parseFloat(collectDiscount) || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-rose-400">(dr) Sales Discounts [4015]</span>
+                      <span>₱{(parseFloat(collectDiscount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {(parseFloat(collectWtax) || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-cyan-400">(dr) Withholding Tax 2307 [1040]</span>
+                      <span>₱{(parseFloat(collectWtax) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-1 border-t border-zinc-800 text-amber-300 font-bold">
+                    <span>(cr) Accounts Receivable [1020]</span>
+                    <span>₱{((parseFloat(collectAmount) || 0) + (parseFloat(collectDiscount) || 0) + (parseFloat(collectWtax) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-zinc-300 font-bold mb-1">Collection Date</label>
                   <input
@@ -1193,17 +1410,17 @@ export default function SalesTransactionTab({
                     required
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-zinc-300 font-bold mb-1">Official Receipt (OR) / Ref #</label>
-                <input
-                  type="text"
-                  value={collectRefNo}
-                  onChange={(e) => setCollectRefNo(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
-                  required
-                />
+                <div>
+                  <label className="block text-zinc-300 font-bold mb-1">Official Receipt (OR) / Ref #</label>
+                  <input
+                    type="text"
+                    value={collectRefNo}
+                    onChange={(e) => setCollectRefNo(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">

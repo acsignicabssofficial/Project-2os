@@ -656,7 +656,6 @@ export interface UniformBookRecord {
   less_withholding_tax?: number;
   down_payment?: number;
   collection_status?: string;
-  expense_type?: string;
   service_provider_name?: string;
   service_provider_tin?: string;
   service_provider_TIN?: string;

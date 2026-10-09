@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CheckCircle2, Pencil, Trash2, Ban, RotateCcw, Plus, Search, X, Receipt, Calculator } from 'lucide-react';
-import { Expense, Contractor, Company, Payment } from '../types';
+import { Expense, Contractor, Company, Payment, AccountTitle } from '../types';
 import { computeExpenseFormulas } from '../utils/accounting';
 
 interface ExpensesTabProps {
@@ -13,6 +13,7 @@ interface ExpensesTabProps {
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   setShowAddProviderPrompt: (val: { tin: string, type: 'expenses' | 'payments' } | null) => void;
   globalSearch: string;
+  accountTitles?: AccountTitle[];
 }
 
 export default function ExpensesTab({
@@ -24,9 +25,48 @@ export default function ExpensesTab({
   theme,
   triggerAlert,
   setShowAddProviderPrompt,
-  globalSearch
+  globalSearch,
+  accountTitles = []
 }: ExpensesTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
+
+  // Dynamic Chart of Accounts Expenses options
+  const selectableExpenseAccounts = useMemo(() => {
+    if (!accountTitles || accountTitles.length === 0) {
+      return [
+        'Operating Expense',
+        'Cost of Goods Sold',
+        'Rent Expense',
+        'Utilities Expense',
+        'Salaries & Wages',
+        'Office Supplies',
+        'Professional Fees',
+        'Advertising & Promotion',
+        'Taxes & Licenses',
+        'Communication Expense',
+        'Depreciation Expense',
+        'Repairs & Maintenance',
+        'Miscellaneous Expense'
+      ];
+    }
+    const filtered = accountTitles
+      .filter(a => {
+        const type = (a.type || a.account_type || '').toLowerCase();
+        const cat = (a.category || a.account_sub_type || '').toLowerCase();
+        return type.includes('expense') || type.includes('cost') || cat.includes('expense') || cat.includes('cost');
+      })
+      .map(a => a.account_title || a.title || '')
+      .filter(Boolean);
+    return filtered.length > 0 ? Array.from(new Set(filtered)) : [
+      'Operating Expense',
+      'Rent Expense',
+      'Utilities Expense',
+      'Salaries & Wages',
+      'Office Supplies',
+      'Professional Fees',
+      'Miscellaneous Expense'
+    ];
+  }, [accountTitles]);
 
   // Form fields
   const [expTin, setExpTin] = useState('');
@@ -36,6 +76,7 @@ export default function ExpensesTab({
   const [invoiceNumber, setInvoiceNumber] = useState('EXP-001');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
+  const [businessTaxType, setBusinessTaxType] = useState<'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated'>('vatable');
   const [expenseType, setExpenseType] = useState('Rent Expense');
   const [paymentType, setPaymentType] = useState<'paid' | 'on credit' | 'partial'>('paid');
   const [qty, setQty] = useState('1');

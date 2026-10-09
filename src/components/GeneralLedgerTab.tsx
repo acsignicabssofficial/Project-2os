@@ -149,11 +149,14 @@ export default function GeneralLedgerTab({
     collections.forEach(c => {
       const date = c.collection_date || '';
       const amt = Number(c.amount_collected) || 0;
-      const w2307 = Number(c.amount_withheld_2307) || 0;
+      const w2307 = Number(c.amount_withheld_2307 || (c as any).tax_withheld) || 0;
+      const discount = Number((c as any).discount || (c as any).discounts) || 0;
+      const custLabel = c.customer_name || (c as any).registered_name || 'Customer';
 
-      addPosting('1010', 'Cash and Cash Equivalents', date, c.invoice_number, `Collection Receipt - ${c.customer_name}`, amt, 0, 'SPECIAL');
-      if (w2307 > 0) addPosting('1040', 'Creditable Withholding Tax (2307)', date, c.invoice_number, `2307 Received - ${c.customer_name}`, w2307, 0, 'SPECIAL');
-      addPosting('1020', 'Accounts Receivable', date, c.invoice_number, `AR Settlement - ${c.customer_name}`, 0, amt + w2307, 'SPECIAL');
+      addPosting('1010', 'Cash and Cash Equivalents', date, c.invoice_number, `Collection Receipt - ${custLabel}`, amt, 0, 'SPECIAL');
+      if (discount > 0) addPosting('4015', 'Sales Discounts', date, c.invoice_number, `Discount Allowed - ${custLabel}`, discount, 0, 'SPECIAL');
+      if (w2307 > 0) addPosting('1040', 'Creditable Withholding Tax (2307)', date, c.invoice_number, `2307 Received - ${custLabel}`, w2307, 0, 'SPECIAL');
+      addPosting('1020', 'Accounts Receivable', date, c.invoice_number, `AR Settlement - ${custLabel}`, 0, amt + discount + w2307, 'SPECIAL');
     });
 
     // 3. Post Expenses (SPECIAL LEDGER)

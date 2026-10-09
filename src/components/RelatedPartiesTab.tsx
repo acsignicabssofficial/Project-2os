@@ -102,6 +102,11 @@ export default function RelatedPartiesTab({
           theme={theme}
           triggerAlert={triggerAlert}
           globalSearch={globalSearch}
+          expenses={expenses}
+          payments={payments}
+          setExpenses={setExpenses}
+          setPayments={setPayments}
+          accountTitles={accountTitles}
         />
       )}
     </div>

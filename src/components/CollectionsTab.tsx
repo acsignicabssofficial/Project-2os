@@ -33,6 +33,7 @@ export default function CollectionsTab({
   const [collCustName, setCollCustName] = useState('');
   const [collDate, setCollDate] = useState(new Date().toISOString().split('T')[0]);
   const [collAmt, setCollAmt] = useState('');
+  const [collDiscount, setCollDiscount] = useState('0');
   const [collWithheld, setCollWithheld] = useState('0');
   const [collInvoiceAmt, setCollInvoiceAmt] = useState<string>('');
   const [collEntryNo, setCollEntryNo] = useState('');
@@ -97,14 +98,15 @@ export default function CollectionsTab({
 
   const handleEditClick = (item: Collection) => {
     setEditingId(item.id);
-    setCollTin(item.client_TIN);
-    setCollInvNo(item.invoice_number);
-    setCollCustName(item.registered_name);
-    setCollDate(item.collection_date);
-    setCollAmt(item.amount_collected.toString());
-    setCollWithheld(item.amount_withheld_2307.toString());
-    setCollInvoiceAmt(item.invoice_amount.toString());
-    setCollEntryNo(item.entry_number);
+    setCollTin(item.client_TIN || item.customer_tin || '');
+    setCollInvNo(item.invoice_number || '');
+    setCollCustName(item.registered_name || item.customer_name || '');
+    setCollDate(item.collection_date || new Date().toISOString().split('T')[0]);
+    setCollAmt((item.amount_collected ?? 0).toString());
+    setCollDiscount((item.discount ?? (item as any).discounts ?? 0).toString());
+    setCollWithheld((item.amount_withheld_2307 ?? (item as any).wtax_2307 ?? 0).toString());
+    setCollInvoiceAmt((item.invoice_amount ?? (item as any).total_amount_due ?? 0).toString());
+    setCollEntryNo(item.entry_number || '');
     setIsModalOpen(true);
   };
 
@@ -115,6 +117,7 @@ export default function CollectionsTab({
     setCollCustName('');
     setCollDate(new Date().toISOString().split('T')[0]);
     setCollAmt('');
+    setCollDiscount('0');
     setCollWithheld('0');
     setCollInvoiceAmt('');
     setCollEntryNo('');
@@ -164,25 +167,32 @@ export default function CollectionsTab({
       triggerAlert("Please select or create a Company Profile first in the Companies tab!", "error");
       return;
     }
-    if (!collTin || !collInvNo || !collDate || !collAmt) {
+    if (!collTin || !collInvNo || !collDate || (!collAmt && parseFloat(collAmt) <= 0)) {
       triggerAlert("Customer TIN, Invoice Number, Collection Date, and Amount are required fields!", "error");
       return;
     }
 
     const amtCol = parseFloat(collAmt) || 0;
+    const discountAmt = parseFloat(collDiscount) || 0;
     const w2307 = parseFloat(collWithheld) || 0;
-    const remBalance = Math.max(0, invoiceAmt - amtCol - w2307);
+    const totalSettled = amtCol + discountAmt + w2307;
+    const remBalance = Math.max(0, invoiceAmt - totalSettled);
 
     const newCollItem: Collection = {
       id: editingId !== null ? editingId : Date.now(),
       company_name: activeCompanyName,
       client_TIN: collTin,
+      customer_tin: collTin,
       invoice_number: collInvNo,
       registered_name: collCustName || `Customer (${collInvNo})`,
+      customer_name: collCustName || `Customer (${collInvNo})`,
       collection_date: collDate,
       amount_collected: amtCol,
       amount_withheld_2307: w2307,
+      discount: discountAmt,
+      discounts: discountAmt,
       invoice_amount: invoiceAmt,
+      total_amount_due: invoiceAmt,
       balance: remBalance,
       entry_number: collEntryNo
     };
@@ -201,9 +211,10 @@ export default function CollectionsTab({
         setSales(prev => prev.map(s => s.id === selectedSale.id ? { ...s, collection_status: newStatus } : s));
       }
 
-      triggerAlert(`Recorded Collection with Entry #${collEntryNo} successfully!`, 'success');
+      triggerAlert(`Recorded Collection with Entry #${collEntryNo} successfully (Total Settled: ₱${totalSettled.toLocaleString()})!`, 'success');
       setCollInvNo('');
       setCollAmt('');
+      setCollDiscount('0');
       setCollWithheld('0');
       setCollInvoiceAmt('');
       setIsModalOpen(false);
@@ -262,8 +273,10 @@ export default function CollectionsTab({
                 <th className="p-3 font-mono">Invoice #</th>
                 <th className="p-3 font-mono">Date</th>
                 <th className="p-3">Customer Name</th>
-                <th className="p-3 text-right font-mono">Amount Collected</th>
-                <th className="p-3 text-right font-mono">Withheld 2307</th>
+                <th className="p-3 text-right font-mono">Cash Collected</th>
+                <th className="p-3 text-right font-mono text-rose-400">Discount</th>
+                <th className="p-3 text-right font-mono text-amber-400">Withheld 2307</th>
+                <th className="p-3 text-right font-mono text-emerald-400">Total Settled (Cr A/R)</th>
                 <th className="p-3 text-right font-mono">Remaining Balance</th>
                 <th className="p-3 text-center">Actions</th>
               </tr>
@@ -271,6 +284,10 @@ export default function CollectionsTab({
             <tbody className={`divide-y ${theme.borderCard}`}>
               {filteredCollections.map((c) => {
                 const isCancelled = c.is_cancelled;
+                const cDisc = Number((c as any).discount || (c as any).discounts) || 0;
+                const cWtax = Number(c.amount_withheld_2307 || (c as any).tax_withheld) || 0;
+                const cCash = Number(c.amount_collected) || 0;
+                const cSettled = cCash + cDisc + cWtax;
                 return (
                   <tr key={c.id} className={`${isCancelled ? 'bg-rose-950/20 text-zinc-500' : theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/30'} transition-colors`}>
                     <td className={`p-3 font-mono font-bold ${isCancelled ? 'line-through text-rose-400/70' : 'text-cyan-400'}`}>
@@ -280,10 +297,16 @@ export default function CollectionsTab({
                     <td className={`p-3 font-mono ${isCancelled ? 'line-through text-zinc-500' : 'text-zinc-400'}`}>{c.collection_date}</td>
                     <td className={`p-3 font-semibold ${isCancelled ? 'line-through text-zinc-500' : theme.textTitle}`}>{c.registered_name}</td>
                     <td className={`p-3 text-right font-mono font-bold ${isCancelled ? 'line-through text-zinc-500' : 'text-emerald-400'}`}>
-                      ₱{c.amount_collected.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ₱{cCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className={`p-3 text-right font-mono ${isCancelled ? 'line-through text-zinc-500' : 'text-rose-400'}`}>
+                      ₱{cDisc.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </td>
                     <td className={`p-3 text-right font-mono ${isCancelled ? 'line-through text-zinc-500' : 'text-amber-400'}`}>
-                      ₱{c.amount_withheld_2307.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ₱{cWtax.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className={`p-3 text-right font-mono font-extrabold ${isCancelled ? 'line-through text-zinc-500' : 'text-cyan-300'}`}>
+                      ₱{cSettled.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </td>
                     <td className={`p-3 text-right font-mono ${isCancelled ? 'line-through text-zinc-500' : 'text-zinc-400'}`}>
                       ₱{(c.balance ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -438,36 +461,57 @@ export default function CollectionsTab({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Form 2307 Withheld (₱)</label>
-                  <input 
-                    type="number"
-                    step="0.01"
-                    value={collWithheld}
-                    onChange={(e) => setCollWithheld(e.target.value)}
-                    className={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Sales Discounts (₱)</label>
+                    <input 
+                      type="number"
+                      step="0.01"
+                      value={collDiscount}
+                      onChange={(e) => setCollDiscount(e.target.value)}
+                      className={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Form 2307 Withheld (₱)</label>
+                    <input 
+                      type="number"
+                      step="0.01"
+                      value={collWithheld}
+                      onChange={(e) => setCollWithheld(e.target.value)}
+                      className={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
+                    />
+                  </div>
                 </div>
               </div>
 
               <div className="lg:col-span-3 flex flex-col gap-3 h-full justify-between self-stretch">
                 <div className="p-3.5 rounded-xl border font-mono text-xs space-y-1.5 bg-zinc-500/5 border-zinc-700/30">
                   <div className="flex justify-between text-zinc-400 text-[10px]">
-                    <span>Total Amount Due:</span>
+                    <span>Total Invoice Due:</span>
                     <span className="font-bold">₱{invoiceAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between text-emerald-400 text-[10px]">
-                    <span>Cash Received:</span>
+                    <span>(dr) Cash Collected:</span>
                     <span className="font-bold">₱{thisCollected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
+                  <div className="flex justify-between text-rose-400 text-[10px]">
+                    <span>(dr) Sales Discounts:</span>
+                    <span>₱{(parseFloat(collDiscount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
                   <div className="flex justify-between text-amber-400 text-[10px]">
-                    <span>2307 Tax Withheld:</span>
+                    <span>(dr) 2307 Tax Withheld:</span>
                     <span>₱{thisWithheld.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className="border-t border-zinc-800/40 my-1"></div>
-                  <div className="flex justify-between font-bold text-xs text-cyan-400">
+                  <div className="flex justify-between text-cyan-300 font-bold text-[11px]">
+                    <span>(cr) Total A/R Settled:</span>
+                    <span>₱{(thisCollected + (parseFloat(collDiscount) || 0) + thisWithheld).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-xs text-amber-400">
                     <span>Remaining Balance:</span>
-                    <span>₱{Math.max(0, invoiceAmt - thisCollected - thisWithheld).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    <span>₱{Math.max(0, invoiceAmt - thisCollected - (parseFloat(collDiscount) || 0) - thisWithheld).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 </div>
               </div>

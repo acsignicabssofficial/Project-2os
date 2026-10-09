@@ -192,13 +192,16 @@ export default function AccountTitlesTab({
     // Collections
     collections.filter(c => isDateInPeriod(c.collection_date)).forEach(c => {
       const colAmt = Number(c.amount_collected) || 0;
-      const w2307 = Number(c.amount_withheld_2307) || 0;
+      const w2307 = Number(c.amount_withheld_2307 || (c as any).tax_withheld) || 0;
+      const discount = Number((c as any).discount || (c as any).discounts) || 0;
       // 1010 Cash (Dr)
       addVal('1010', colAmt, 0);
+      // 4015 Sales Discounts (Dr)
+      if (discount > 0) addVal('4015', discount, 0);
       // 1040 2307 CWT (Dr)
       if (w2307 > 0) addVal('1040', w2307, 0);
-      // 1020 AR (Cr)
-      addVal('1020', 0, colAmt + w2307);
+      // 1020 AR (Cr) - gross receivable cleared
+      addVal('1020', 0, colAmt + discount + w2307);
     });
 
     // Expenses

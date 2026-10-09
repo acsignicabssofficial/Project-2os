@@ -19,7 +19,7 @@ import {
   Eye
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
-import { UniformBookRecord, Contractor, Company } from '../types';
+import { UniformBookRecord, Contractor, Company, AccountTitle, SpecialEntry, SpecialEntryLine } from '../types';
 import { computeExpenseVAT } from '../utils/accounting';
 
 interface PurchaseTransactionTabProps {
@@ -35,6 +35,9 @@ interface PurchaseTransactionTabProps {
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
   onNavigateToTab?: (tabKey: string) => void;
+  accountTitles?: AccountTitle[];
+  specialEntries?: SpecialEntry[];
+  setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
 }
 
 export default function PurchaseTransactionTab({
@@ -49,15 +52,20 @@ export default function PurchaseTransactionTab({
   theme,
   triggerAlert,
   globalSearch = '',
-  onNavigateToTab
+  onNavigateToTab,
+  accountTitles = [],
+  specialEntries = [],
+  setSpecialEntries
 }: PurchaseTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
 
   // Tab mode: 'new_purchase' or 'disburse_open'
   const [hubTab, setHubTab] = useState<'new_purchase' | 'disburse_open'>('new_purchase');
 
-  // Form State
+  // Form State with additional headers: Business Tax Type & Expense Type (from COA)
   const [providerName, setProviderName] = useState('');
+  const [businessTaxType, setBusinessTaxType] = useState<'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated'>('vatable');
+  const [expenseType, setExpenseType] = useState('Rent Expense');
   const [vatStatus, setVatStatus] = useState<'VAT' | 'NONVAT'>('VAT');
   const [tin, setTin] = useState('');
   const [address, setAddress] = useState('');
@@ -72,6 +80,32 @@ export default function PurchaseTransactionTab({
   const [vatExempt, setVatExempt] = useState('0');
   const [discount, setDiscount] = useState('0');
   const [taxWithheld, setTaxWithheld] = useState('0');
+
+  // Selectable expense accounts from Chart of Accounts (Expenses) category
+  const expenseOptions = useMemo(() => {
+    const fromCoa = accountTitles
+      .filter(a => a.type === 'Expense' || (a.category && a.category.toLowerCase().includes('expense')))
+      .map(a => a.title);
+    if (fromCoa.length > 0) {
+      return Array.from(new Set(fromCoa));
+    }
+    return [
+      'Rent Expense',
+      'Utilities Expense',
+      'Salaries, Wages & Benefits',
+      'Office Supplies Expense',
+      'Professional Fees',
+      'Communication Expense',
+      'Depreciation Expense',
+      'Repairs & Maintenance',
+      'Taxes & Licenses',
+      'Advertising & Marketing',
+      'Transportation & Travel',
+      'Representation & Entertainment',
+      'Insurance Expense',
+      'Miscellaneous Operating Expense'
+    ];
+  }, [accountTitles]);
 
   // Transaction Mode: 'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'
   const [purchaseMode, setPurchaseMode] = useState<'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'>('ON CASH');
@@ -94,7 +128,7 @@ export default function PurchaseTransactionTab({
   // Search filter for open payables
   const [openSearch, setOpenSearch] = useState('');
 
-  // Auto-fill TIN & Provider details
+    // Auto-fill TIN & Provider details
   const handleSelectProvider = (provName: string) => {
     setProviderName(provName);
     const found = contractors.find(c => 
@@ -103,6 +137,13 @@ export default function PurchaseTransactionTab({
     if (found) {
       setTin(found.sp_tin || found.client_TIN || '');
       setAddress(found.address || found.sp_address || '');
+      if (found.business_tax_type) {
+        setBusinessTaxType(found.business_tax_type as any);
+        setVatStatus(found.business_tax_type === 'vatable' ? 'VAT' : 'NONVAT');
+      } else if (found.vat_status) {
+        setBusinessTaxType(found.vat_status === 'VAT' ? 'vatable' : 'non-vatable');
+        setVatStatus(found.vat_status === 'VAT' ? 'VAT' : 'NONVAT');
+      }
     }
   };
 
@@ -120,6 +161,10 @@ export default function PurchaseTransactionTab({
       if (found) {
         if (!providerName) setProviderName(found.registered_name || found.service_provider_name || found.company_name || '');
         if (!address) setAddress(found.address || found.sp_address || '');
+        if (found.business_tax_type) {
+          setBusinessTaxType(found.business_tax_type as any);
+          setVatStatus(found.business_tax_type === 'vatable' ? 'VAT' : 'NONVAT');
+        }
       }
     }
   };
@@ -131,7 +176,7 @@ export default function PurchaseTransactionTab({
     const grossAmt = rawQty * rawPrice;
     const disc = parseFloat(discount) || 0;
     const wtax = parseFloat(taxWithheld) || 0;
-    const isVat = vatStatus === 'VAT';
+    const isVat = businessTaxType === 'vatable';
 
     const vatResult = computeExpenseVAT(grossAmt, disc, isVat);
 
@@ -146,7 +191,7 @@ export default function PurchaseTransactionTab({
       discount: disc,
       tax_withheld: wtax
     };
-  }, [qty, unitPrice, discount, taxWithheld, vatStatus]);
+  }, [qty, unitPrice, discount, taxWithheld, businessTaxType]);
 
   // Open / Unpaid / Partial Purchases for current company
   const openPayables = useMemo(() => {
@@ -182,6 +227,12 @@ export default function PurchaseTransactionTab({
   const handleSubmitPurchase = (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!activeCompany || !activeCompany.company_name || activeCompany.company_name.trim() === '' || activeCompany.company_name === 'Select Company...') {
+      triggerAlert('Strict Validation: Please setup or select an Entity Profile first before entering purchase transactions! (Saan mapupunta ang transaction kung walang designated entity?)', 'error');
+      if (onNavigateToTab) onNavigateToTab('companies');
+      return;
+    }
+
     if (!providerName.trim()) {
       triggerAlert('Please enter or select a Service Provider / Vendor Name.', 'error');
       return;
@@ -212,6 +263,8 @@ export default function PurchaseTransactionTab({
       company_name: activeCompanyName,
       registered_name: providerName.trim(),
       vat_or_nonvat: vatStatus,
+      business_tax_type: businessTaxType,
+      expense_type: expenseType,
       tin: tin.trim() || '000-000-000-00000',
       address: address.trim(),
       type_of_transaction: assignedTransactionType,
@@ -219,7 +272,7 @@ export default function PurchaseTransactionTab({
       invoice_type: invoiceType,
       voucher_number: voucherNo.trim(),
       invoice_number: invoiceNo.trim() || `EXP-${voucherNo.trim()}`,
-      particulars: particulars.trim() || 'Purchases & Operating Expenses',
+      particulars: particulars.trim() || `${expenseType} - ${providerName.trim()}`,
       qty: parseFloat(qty) || 1,
       unit_price: parseFloat(unitPrice) || 0,
       amount: liveFormulas.amount,
@@ -258,6 +311,8 @@ export default function PurchaseTransactionTab({
         company_name: activeCompanyName,
         registered_name: providerName.trim(),
         vat_or_nonvat: vatStatus,
+        business_tax_type: businessTaxType,
+        expense_type: expenseType,
         tin: tin.trim() || '000-000-000-00000',
         address: address.trim(),
         type_of_transaction: 'CASH',
@@ -265,7 +320,7 @@ export default function PurchaseTransactionTab({
         invoice_type: 'OFFICIAL RECEIPT',
         voucher_number: voucherNo.trim(),
         invoice_number: invoiceNo.trim() || `EXP-${voucherNo.trim()}`,
-        particulars: `Cash Disbursement for Voucher #${voucherNo.trim()} - ${particulars || 'Purchases'}`,
+        particulars: `Cash Disbursement for Voucher #${voucherNo.trim()} - ${particulars || expenseType}`,
         qty: parseFloat(qty) || 1,
         unit_price: parseFloat(unitPrice) || 0,
         amount: liveFormulas.amount,
@@ -323,6 +378,8 @@ export default function PurchaseTransactionTab({
         company_name: activeCompanyName,
         registered_name: providerName.trim(),
         vat_or_nonvat: vatStatus,
+        business_tax_type: businessTaxType,
+        expense_type: expenseType,
         tin: tin.trim() || '000-000-000-00000',
         address: address.trim(),
         type_of_transaction: 'ON ACCOUNT',
@@ -359,6 +416,58 @@ export default function PurchaseTransactionTab({
       } else {
         triggerAlert(`Partial Purchase ${voucherNo} recorded to Subsidiary Purchases & Payments. Disbursed: ₱${downPmt.toLocaleString()} (Remaining payable: ₱${(totalDue - downPmt).toLocaleString()}).`, 'info');
       }
+    }
+
+    // 3. RECORD SPECIAL JOURNAL ENTRIES FOR PURCHASE
+    if (setSpecialEntries) {
+      const newSJs: SpecialEntry[] = [];
+      const entryId = Date.now();
+      const expAmt = liveFormulas.vatable_purchases || liveFormulas.net_of_discount;
+      const inputVatAmt = liveFormulas.input_vat;
+
+      const pLines: SpecialEntryLine[] = [
+        { type: 'Debit', account_code: '6020', account_title: expenseType, amount: expAmt }
+      ];
+      if (inputVatAmt > 0) {
+        pLines.push({ type: 'Debit', account_code: '1030', account_title: 'Input Tax', amount: inputVatAmt });
+      }
+      pLines.push({ type: 'Credit', account_code: '2010', account_title: 'Accounts Payable', amount: totalDue });
+
+      newSJs.push({
+        id: entryId,
+        company_name: activeCompanyName,
+        entry_number: `SJ-PUR-${voucherNo.trim()}`,
+        voucher_no: voucherNo.trim(),
+        entry_date: date,
+        entry_type: 'Purchases / Expense Recognition',
+        description: `Expense Voucher #${voucherNo.trim()} - ${expenseType} (${providerName.trim()})`,
+        lines: pLines,
+        created_at: nowIso
+      });
+
+      if (purchaseMode === 'ON CASH') {
+        const cashDisbursed = Math.max(0, totalDue - (liveFormulas.tax_withheld || 0));
+        const disLines: SpecialEntryLine[] = [
+          { type: 'Debit', account_code: '2010', account_title: 'Accounts Payable', amount: totalDue },
+          { type: 'Credit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashDisbursed }
+        ];
+        if (liveFormulas.tax_withheld > 0) {
+          disLines.push({ type: 'Credit', account_code: '2030', account_title: 'Withholding Tax Payable - Expanded (BIR 2307)', amount: liveFormulas.tax_withheld });
+        }
+        newSJs.push({
+          id: entryId + 1,
+          company_name: activeCompanyName,
+          entry_number: `SJ-DIS-${voucherNo.trim()}`,
+          voucher_no: `CD-${voucherNo.trim()}`,
+          entry_date: date,
+          entry_type: 'Cash Disbursement / Settlement',
+          description: `Disbursement Settlement for Voucher #${voucherNo.trim()} (${providerName.trim()})`,
+          lines: disLines,
+          created_at: nowIso
+        });
+      }
+
+      setSpecialEntries(prev => [...newSJs, ...prev]);
     }
 
     // Reset Form for next entry
@@ -467,9 +576,58 @@ export default function PurchaseTransactionTab({
       );
     }
 
+    // 4. Record to Special Journal
+    if (setSpecialEntries) {
+      const cashDisbursed = Math.max(0, paymentAmt - wtaxAmt);
+      const disLines: SpecialEntryLine[] = [
+        { type: 'Debit', account_code: '2010', account_title: 'Accounts Payable', amount: paymentAmt },
+        { type: 'Credit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashDisbursed }
+      ];
+      if (wtaxAmt > 0) {
+        disLines.push({ type: 'Credit', account_code: '2030', account_title: 'Withholding Tax Payable - Expanded (BIR 2307)', amount: wtaxAmt });
+      }
+
+      setSpecialEntries(prev => [{
+        id: Date.now(),
+        company_name: activeCompanyName,
+        entry_number: `SJ-DIS-${payRec.voucher_number}-${Date.now().toString().slice(-4)}`,
+        voucher_no: payRefNo.trim() || `PV-${Date.now().toString().slice(-4)}`,
+        entry_date: payDate,
+        entry_type: 'Cash Disbursement / Settlement',
+        description: `Disbursement for Voucher #${payRec.voucher_number} (${payRec.registered_name})`,
+        lines: disLines,
+        created_at: new Date().toISOString()
+      }, ...prev]);
+    }
+
     setSelectedPayableToPay(null);
     setPayAmount('');
   };
+
+  if (!activeCompany || !activeCompany.company_name || activeCompany.company_name.trim() === '' || activeCompany.company_name === 'Select Company...') {
+    return (
+      <div className={`p-8 md:p-12 rounded-2xl border ${theme.borderCard} ${theme.bgCard} text-center space-y-4 max-w-2xl mx-auto my-8 shadow-sm`}>
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/20">
+          <Building2 className="w-8 h-8" />
+        </div>
+        <div>
+          <h3 className={`text-lg font-bold ${theme.textTitle}`}>
+            Entity Profile Required Before Entering Transactions
+          </h3>
+          <p className={`text-xs ${theme.textMuted} mt-1.5 max-w-md mx-auto leading-relaxed`}>
+            Bago ka makapag-enter ng transactions, kailangan mo munang mag-setup ng entity profile kasi saan mapupunta ang transaction kung wala naman itong designated entity.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigateToTab && onNavigateToTab('companies')}
+          className="px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-black shadow-md cursor-pointer inline-flex items-center gap-2 transition"
+        >
+          <span>Set Up Entity Profile Now</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-5 w-full">
@@ -709,16 +867,37 @@ export default function PurchaseTransactionTab({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Tax Classification</label>
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>1. Business Tax Type *</label>
                 <select
-                  value={vatStatus}
-                  onChange={(e) => setVatStatus(e.target.value as any)}
+                  value={businessTaxType}
+                  onChange={(e) => {
+                    const val = e.target.value as any;
+                    setBusinessTaxType(val);
+                    setVatStatus(val === 'vatable' ? 'VAT' : 'NONVAT');
+                  }}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
                 >
-                  <option value="VAT" className="bg-zinc-900 text-white">VAT Supplier (12% Input VAT)</option>
-                  <option value="NONVAT" className="bg-zinc-900 text-white">Non-VAT Supplier</option>
+                  <option value="vatable" className="bg-zinc-900 text-white">Vatable (12% Input VAT)</option>
+                  <option value="non-vatable" className="bg-zinc-900 text-white">Non-Vatable</option>
+                  <option value="vat-exempt" className="bg-zinc-900 text-white">VAT-Exempt</option>
+                  <option value="zero-rated" className="bg-zinc-900 text-white">Zero-Rated</option>
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-bold mb-1 text-purple-400`}>2. Expense Type (COA) *</label>
+                <select
+                  value={expenseType}
+                  onChange={(e) => setExpenseType(e.target.value)}
+                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} text-purple-300`}
+                >
+                  {expenseOptions.map((opt, idx) => (
+                    <option key={idx} value={opt} className="bg-zinc-900 text-white">
+                      {opt}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1053,6 +1232,8 @@ export default function PurchaseTransactionTab({
                     <th className="p-3">Voucher #</th>
                     <th className="p-3">Date</th>
                     <th className="p-3">Provider / Vendor</th>
+                    <th className="p-3">Business Tax Type</th>
+                    <th className="p-3">Expense Type</th>
                     <th className="p-3 text-right">Payable Total</th>
                     <th className="p-3 text-right">Paid to Date</th>
                     <th className="p-3 text-right text-rose-400">Balance Due</th>
@@ -1078,6 +1259,14 @@ export default function PurchaseTransactionTab({
                         <td className="p-3 font-medium text-zinc-200">
                           <div>{p.registered_name}</div>
                           <div className="text-[10px] font-mono text-zinc-500">{p.tin}</div>
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-300 border border-zinc-700">
+                            {p.business_tax_type || p.vat_or_nonvat || 'vatable'}
+                          </span>
+                        </td>
+                        <td className="p-3 font-semibold text-purple-300">
+                          {p.expense_type || p.particulars || 'Operating Expense'}
                         </td>
                         <td className="p-3 text-right font-mono font-bold text-zinc-200">
                           ₱{pDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}

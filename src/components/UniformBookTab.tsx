@@ -23,7 +23,8 @@ import {
   UNIFORM_BOOK_HEADERS, 
   Company, 
   Customer, 
-  Contractor 
+  Contractor,
+  AccountTitle
 } from '../types';
 import { 
   getBookDisplayLabel, 
@@ -47,6 +48,7 @@ interface UniformBookTabProps {
   globalSearch?: string;
   // Callback when records change to sync back to legacy states if needed
   onSyncLegacy?: (updated: UniformBookRecord[]) => void;
+  accountTitles?: AccountTitle[];
 }
 
 export default function UniformBookTab({
@@ -59,11 +61,53 @@ export default function UniformBookTab({
   theme,
   triggerAlert,
   globalSearch = '',
-  onSyncLegacy
+  onSyncLegacy,
+  accountTitles = []
 }: UniformBookTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const labels = getBookDisplayLabel(bookType);
   const isDisbursementOrPurchase = bookType === 'cash_disbursement' || bookType === 'subsidiary_purchases';
+
+  // Dynamic Chart of Accounts Expenses options
+  const selectableExpenseAccounts = useMemo(() => {
+    if (!accountTitles || accountTitles.length === 0) {
+      return [
+        'Operating Expense',
+        'Cost of Goods Sold',
+        'Rent Expense',
+        'Utilities Expense',
+        'Salaries & Wages',
+        'Office Supplies',
+        'Professional Fees',
+        'Advertising & Promotion',
+        'Taxes & Licenses',
+        'Communication Expense',
+        'Depreciation Expense',
+        'Repairs & Maintenance',
+        'Miscellaneous Expense'
+      ];
+    }
+    const filtered = accountTitles
+      .filter(a => {
+        const type = (a.type || a.account_type || '').toLowerCase();
+        const cat = (a.category || a.account_sub_type || '').toLowerCase();
+        return type.includes('expense') || type.includes('cost') || cat.includes('expense') || cat.includes('cost');
+      })
+      .map(a => a.account_title || a.title || '')
+      .filter(Boolean);
+    return filtered.length > 0 ? Array.from(new Set(filtered)) : [
+      'Operating Expense',
+      'Rent Expense',
+      'Utilities Expense',
+      'Salaries & Wages',
+      'Office Supplies',
+      'Professional Fees',
+      'Miscellaneous Expense'
+    ];
+  }, [accountTitles]);
+
+  const [formBusinessTaxType, setFormBusinessTaxType] = useState<'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated'>('vatable');
+  const [formExpenseType, setFormExpenseType] = useState('Operating Expense');
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
@@ -176,6 +220,8 @@ export default function UniformBookTab({
     setEditingRecordId(null);
     setFormRegisteredName('');
     setFormVatOrNonVat(activeCompany?.vat_or_non_vat === 'NON-VATABLE' ? 'NONVAT' : 'VAT');
+    setFormBusinessTaxType('vatable');
+    setFormExpenseType('Operating Expense');
     setFormTin('');
     setFormAddress('');
     setFormTypeOfTransaction('CASH');
@@ -198,6 +244,8 @@ export default function UniformBookTab({
     setEditingRecordId(rec.id);
     setFormRegisteredName(rec.registered_name || '');
     setFormVatOrNonVat(rec.vat_or_nonvat || 'VAT');
+    setFormBusinessTaxType((rec.business_tax_type as any) || (rec.vat_or_nonvat === 'VAT' ? 'vatable' : 'non-vatable'));
+    setFormExpenseType(rec.expense_type || 'Operating Expense');
     setFormTin(rec.tin || '');
     setFormAddress(rec.address || '');
     setFormTypeOfTransaction(rec.type_of_transaction || 'CASH');
@@ -232,6 +280,8 @@ export default function UniformBookTab({
       company_name: activeCompanyName,
       registered_name: formRegisteredName.trim(),
       vat_or_nonvat: formVatOrNonVat,
+      business_tax_type: isDisbursementOrPurchase ? formBusinessTaxType : undefined,
+      expense_type: isDisbursementOrPurchase ? formExpenseType : undefined,
       tin: formTin.trim(),
       address: formAddress.trim(),
       type_of_transaction: formTypeOfTransaction,
@@ -333,6 +383,24 @@ export default function UniformBookTab({
     setImportedPreview([]);
     setImportFileName('');
   };
+
+  if (!activeCompany || !activeCompany.company_name || activeCompany.company_name.trim() === '' || activeCompany.company_name === 'Select Company...') {
+    return (
+      <div className={`p-8 md:p-12 rounded-2xl border ${theme.borderCard} ${theme.bgCard} text-center space-y-4 max-w-2xl mx-auto my-8 shadow-sm`}>
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/20">
+          <AlertCircle className="w-8 h-8" />
+        </div>
+        <div>
+          <h3 className={`text-lg font-bold ${theme.textTitle}`}>
+            Entity Profile Required Before Entering Transactions
+          </h3>
+          <p className={`text-xs ${theme.textMuted} mt-1.5 max-w-md mx-auto leading-relaxed`}>
+            Bago ka makapag-enter ng transactions, kailangan mo munang mag-setup ng entity profile kasi saan mapupunta ang transaction kung wala naman itong designated entity.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-5 w-full">
@@ -535,6 +603,12 @@ export default function UniformBookTab({
                 <th className={`p-3 min-w-[120px] font-mono ${isDisbursementOrPurchase ? 'text-amber-500 font-extrabold' : ''}`}>
                   7.1 VOUCHER #
                 </th>
+                {isDisbursementOrPurchase && (
+                  <>
+                    <th className="p-3 min-w-[140px] text-purple-400 font-bold">BUSINESS TAX TYPE</th>
+                    <th className="p-3 min-w-[150px] text-indigo-400 font-bold">EXPENSE TYPE</th>
+                  </>
+                )}
                 <th className="p-3 min-w-[110px] font-mono font-bold text-cyan-500">8. INVOICE #</th>
                 <th className="p-3 min-w-[200px]">9. PARTICULARS</th>
                 <th className="p-3 min-w-[70px] text-right font-mono">10. QTY</th>
@@ -555,7 +629,7 @@ export default function UniformBookTab({
             <tbody className={`divide-y ${theme.borderCard}`}>
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={25} className="p-8 text-center text-zinc-400">
+                  <td colSpan={isDisbursementOrPurchase ? 27 : 25} className="p-8 text-center text-zinc-400">
                     No records found in this register. Encode new transactions via &quot;Other Transactions&quot; ➔ &quot;Sales / Purchase Transaction&quot;.
                   </td>
                 </tr>
@@ -615,6 +689,26 @@ export default function UniformBookTab({
                       <td className={`p-3 font-mono font-semibold ${r.voucher_number ? 'text-amber-400' : 'text-zinc-500'}`}>
                         {r.voucher_number || '-'}
                       </td>
+                      {isDisbursementOrPurchase && (
+                        <>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              (r.business_tax_type || '').toLowerCase() === 'vatable' || r.vat_or_nonvat === 'VAT'
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : (r.business_tax_type || '').toLowerCase() === 'zero-rated'
+                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                                : (r.business_tax_type || '').toLowerCase() === 'vat-exempt'
+                                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            }`}>
+                              {r.business_tax_type || (r.vat_or_nonvat === 'VAT' ? 'vatable' : 'non-vatable')}
+                            </span>
+                          </td>
+                          <td className="p-3 font-semibold text-indigo-300">
+                            {r.expense_type || 'Operating Expense'}
+                          </td>
+                        </>
+                      )}
                       <td className="p-3 font-mono font-bold text-cyan-400">
                         <button
                           type="button"
@@ -1036,6 +1130,43 @@ export default function UniformBookTab({
                   className={`w-full px-3 py-1.5 text-xs font-mono rounded-lg border bg-transparent ${theme.borderInput} ${theme.textMain}`}
                 />
               </div>
+
+              {isDisbursementOrPurchase && (
+                <>
+                  <div>
+                    <label className="block text-[11px] font-bold text-purple-400 uppercase tracking-wider mb-1">
+                      Business Tax Type <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={formBusinessTaxType}
+                      onChange={(e) => setFormBusinessTaxType(e.target.value as any)}
+                      className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-transparent font-semibold ${theme.borderInput} ${theme.textMain}`}
+                    >
+                      <option value="vatable" className="text-zinc-900 bg-white">Vatable (12% VAT)</option>
+                      <option value="non-vatable" className="text-zinc-900 bg-white">Non-Vatable (3% / None)</option>
+                      <option value="vat-exempt" className="text-zinc-900 bg-white">VAT-Exempt</option>
+                      <option value="zero-rated" className="text-zinc-900 bg-white">Zero-Rated (0%)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-indigo-400 uppercase tracking-wider mb-1">
+                      Expense Type (Chart of Accounts) <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={formExpenseType}
+                      onChange={(e) => setFormExpenseType(e.target.value)}
+                      className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-transparent font-semibold ${theme.borderInput} ${theme.textMain}`}
+                    >
+                      {selectableExpenseAccounts.map((cat) => (
+                        <option key={cat} value={cat} className="text-zinc-900 bg-white">
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
 
               {/* 8. INVOICE # */}
               <div>
