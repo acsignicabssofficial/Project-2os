@@ -84,9 +84,12 @@ export default function SalesTransactionTab({
   const [saleMode, setSaleMode] = useState<'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'>('ON CASH');
 
   // Partial mode fields
-  const [downPaymentAmount, setDownPaymentAmount] = useState('10000');
+  const [downPaymentAmount, setDownPaymentAmount] = useState('15000');
   const [downPaymentWithholding, setDownPaymentWithholding] = useState('0');
   const [collectionRef, setCollectionRef] = useState(`OR-${Date.now().toString().slice(-4)}`);
+  const [recordSecondPaymentNow, setRecordSecondPaymentNow] = useState(true);
+  const [secondPaymentDate, setSecondPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [secondPaymentRef, setSecondPaymentRef] = useState(`OR-2ND-${Date.now().toString().slice(-4)}`);
 
   // Quick collection modal for open invoices
   const [selectedInvoiceToCollect, setSelectedInvoiceToCollect] = useState<UniformBookRecord | null>(null);
@@ -210,14 +213,15 @@ export default function SalesTransactionTab({
     const totalGrossSales = Math.round((vatableSalesVal + vatOutputVal + zeroRatedVal + vatExemptVal) * 100) / 100 || liveFormulas.total_sale_vat_inclusive;
 
     // 1. Prepare Base Record for Subsidiary Sales
-    let assignedStatus: 'Cash' | 'On Account' | 'Partial' = 'On Account';
+    let assignedStatus: 'Cash' | 'On Account' | 'Partial' | 'Paid' = 'On Account';
     let assignedTransactionType: 'CASH' | 'ON ACCOUNT' = 'ON ACCOUNT';
 
     if (saleMode === 'ON CASH') {
-      assignedStatus = 'Cash';
+      assignedStatus = 'Paid';
       assignedTransactionType = 'CASH';
     } else if (saleMode === 'ON PARTIAL') {
-      assignedStatus = 'Partial';
+      const downPmt = parseFloat(downPaymentAmount) || 0;
+      assignedStatus = (recordSecondPaymentNow || downPmt >= totalDue) ? 'Paid' : 'Partial';
       assignedTransactionType = 'ON ACCOUNT';
     }
 
@@ -253,15 +257,27 @@ export default function SalesTransactionTab({
     };
 
     // 2. Routing Logic based on user specification:
-    // 1.1 Record transaction to subsidiary sales
+    // 5.1 / 6.1 Sales (other transaction) is single-entry method -> NO journal entry created directly here.
+    // 5.2 / 6.2 Subsidiary Sales records the sale (and General Journal derives the A/R & Sales entry from Subsidiary Sales).
     setSubsidiarySales(prev => [saleRecord, ...prev]);
 
-    // 1.2 Record transaction to collections book (only if cash sales or partial)
-    // 1.3 Record transaction to cash receipts (only if cash sales or fully paid in collections book)
     if (saleMode === 'ON ACCOUNT') {
-      triggerAlert(`Sale ${invoiceNo} recorded to Subsidiary Sales on Account (Receivable: ₱${totalDue.toLocaleString()}).`, 'success');
+      // Also record in Collections Book as 'On Account' with pending balance so Collections Book tracks all pending receivables (Clarification #4)
+      const onAccountTrackingRecord: UniformBookRecord = {
+        ...saleRecord,
+        id: commonId + 1,
+        invoice_type: 'SALES INVOICE',
+        particulars: `Receivable Tracking for Invoice #${invoiceNo.trim()} (Pending Balance: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+        amount_collected: 0,
+        pending_balance: totalDue,
+        amount_withheld_2307: liveFormulas.less_withholding_tax,
+        status: 'On Account',
+        installments: []
+      };
+      setCollections(prev => [onAccountTrackingRecord, ...prev]);
+      triggerAlert(`Sale ${invoiceNo} recorded to Subsidiary Sales & tracked in Collections Book (Pending Receivable: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`, 'success');
     } else if (saleMode === 'ON CASH') {
-      // Record to Cash Receipts (Strictly cash-only book)
+      // 5.3 Record to Cash Receipts (Fully paid sales only -> Journalizes Dr Cash, Dr CWT 2307, Cr A/R)
       const cashReceiptRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
@@ -288,37 +304,64 @@ export default function SalesTransactionTab({
         tax_withheld: liveFormulas.less_withholding_tax,
         total_amount_due: totalDue,
         amount_collected: totalDue,
+        pending_balance: 0,
         amount_withheld_2307: liveFormulas.less_withholding_tax,
-        status: 'Cash',
+        status: 'Paid',
         is_cancelled: false,
         created_at: nowIso
       };
       setCashReceipts(prev => [cashReceiptRecord, ...prev]);
 
-      // Record to Collections book
+      // 5.4 Record to Collections Book (tracks vatable sales, cash received, 2307, vat output -> no duplicate journal entry)
       const collectionRecord: UniformBookRecord = {
         ...cashReceiptRecord,
         id: commonId + 2,
-        status: 'Paid'
+        status: 'Paid',
+        pending_balance: 0
       };
       setCollections(prev => [collectionRecord, ...prev]);
 
-      triggerAlert(`Cash Sale ${invoiceNo} recorded to BOTH Subsidiary Sales & Cash Receipts (₱${totalDue.toLocaleString()})!`, 'success');
+      triggerAlert(`Full Cash Sale ${invoiceNo} recorded to Subsidiary Sales, Cash Receipts & Collections Book (Cash Received: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})!`, 'success');
     } else if (saleMode === 'ON PARTIAL') {
       const downPmt = parseFloat(downPaymentAmount) || 0;
       const downWtax = parseFloat(downPaymentWithholding) || 0;
 
       if (downPmt <= 0) {
-        triggerAlert('Please enter a valid Down Payment / Initial Collection amount.', 'error');
+        triggerAlert('Please enter a valid Down Payment / 1st Collection amount.', 'error');
         return;
       }
 
-      const isFull = downPmt >= totalDue;
-      if (isFull) {
-        saleRecord.status = 'Paid';
+      const remainingCashBalance = Math.max(0, Math.round((totalDue - downPmt) * 100) / 100);
+      const isCompletedWithSecondPayment = recordSecondPaymentNow || remainingCashBalance <= 0.01;
+
+      const installments = [
+        {
+          payment_no: 1,
+          date: date,
+          ref_no: collectionRef.trim() || `OR-1ST-${Date.now().toString().slice(-4)}`,
+          cash_amount: downPmt,
+          discount: 0,
+          wtax_2307: remainingCashBalance <= 0.01 ? liveFormulas.less_withholding_tax : downWtax,
+          is_final: remainingCashBalance <= 0.01
+        }
+      ];
+
+      if (recordSecondPaymentNow && remainingCashBalance > 0.01) {
+        installments.push({
+          payment_no: 2,
+          date: secondPaymentDate || date,
+          ref_no: secondPaymentRef.trim() || `OR-2ND-${Date.now().toString().slice(-4)}`,
+          cash_amount: remainingCashBalance,
+          discount: 0,
+          wtax_2307: Math.max(0, Math.round((liveFormulas.less_withholding_tax - downWtax) * 100) / 100),
+          is_final: true
+        });
       }
 
-      // Record down payment in Collections
+      const totalCashCollected = isCompletedWithSecondPayment ? totalDue : downPmt;
+      const pendingBal = isCompletedWithSecondPayment ? 0 : remainingCashBalance;
+
+      // 6.4 Record in Collections Book with full sale figures (vatable sales 22,321.43, vat output 2,678.57, 2307 2,232.14, cash received 22,767.86) and installments
       const partialCollectionRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
@@ -327,143 +370,57 @@ export default function SalesTransactionTab({
         tin: tin.trim() || '000-000-000-00000',
         address: address.trim(),
         type_of_transaction: 'ON ACCOUNT',
-        date: date,
+        date: isCompletedWithSecondPayment ? (secondPaymentDate || date) : date,
         invoice_type: 'OFFICIAL RECEIPT',
         voucher_number: collectionRef.trim() || `COL-${Date.now().toString().slice(-4)}`,
         invoice_number: invoiceNo.trim(),
-        particulars: `Initial Down Payment for Invoice #${invoiceNo.trim()} (${isFull ? '100% Full' : 'Partial'})`,
-        qty: 1,
-        unit_price: downPmt,
-        amount: downPmt,
-        vatable_amount: Math.round((downPmt / 1.12) * 100) / 100,
-        vat_amount: Math.round((downPmt - downPmt / 1.12) * 100) / 100,
-        zero_rated_amount: 0,
-        vat_exempt_amount: 0,
-        total_amount_vat_inclusive: downPmt,
-        total_amount_net_of_vat: Math.round((downPmt / 1.12) * 100) / 100,
-        discount: 0,
-        tax_withheld: downWtax,
+        particulars: isCompletedWithSecondPayment
+          ? `Paid in Partial (1st Down Payment: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} | 2nd Payment: ₱${remainingCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
+          : `1st Payment / Down Payment for Invoice #${invoiceNo.trim()} (Collected: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} | Pending: ₱${remainingCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+        qty: parseFloat(qty) || 1,
+        unit_price: parseFloat(unitPrice) || 0,
+        amount: liveFormulas.amount,
+        vatable_amount: liveFormulas.vatable_sales,
+        vat_amount: liveFormulas.vat,
+        zero_rated_amount: liveFormulas.zero_rated,
+        vat_exempt_amount: liveFormulas.vat_exempt,
+        total_amount_vat_inclusive: liveFormulas.total_sale_vat_inclusive,
+        total_amount_net_of_vat: liveFormulas.amount_net_of_vat,
+        discount: liveFormulas.less_discount,
+        tax_withheld: liveFormulas.less_withholding_tax,
         total_amount_due: totalDue,
-        amount_collected: downPmt,
-        amount_withheld_2307: downWtax,
-        status: isFull ? 'Paid' : 'Partial',
+        amount_collected: totalCashCollected,
+        pending_balance: pendingBal,
+        amount_withheld_2307: liveFormulas.less_withholding_tax,
+        status: isCompletedWithSecondPayment ? 'Paid' : 'Partial',
+        installments,
         is_cancelled: false,
         created_at: nowIso
       };
 
       setCollections(prev => [partialCollectionRecord, ...prev]);
 
-      if (isFull) {
-        setCashReceipts(prev => [{ ...partialCollectionRecord, id: commonId + 2, type_of_transaction: 'CASH', status: 'Cash' }, ...prev]);
-        triggerAlert(`Sale ${invoiceNo} was fully covered by down payment! Recorded to Subsidiary Sales, Collections, and Cash Receipts.`, 'success');
+      if (isCompletedWithSecondPayment) {
+        // 6.3 Cash Receipts also records the fully paid sale (no duplicate journal entry since journalized in Collections Book)
+        setCashReceipts(prev => [{
+          ...partialCollectionRecord,
+          id: commonId + 2,
+          type_of_transaction: 'ON ACCOUNT',
+          status: 'Paid',
+          settled_via_collections: true,
+          particulars: `Full Settlement Completed via Collections Book for Invoice #${invoiceNo.trim()} (1st: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} + 2nd: ₱${remainingCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
+        }, ...prev]);
+        triggerAlert(`Partial Sale ${invoiceNo} (1st: ₱${downPmt.toLocaleString()} + 2nd: ₱${remainingCashBalance.toLocaleString()}) recorded to Subsidiary Sales, Collections Book, and Cash Receipts!`, 'success');
       } else {
-        triggerAlert(`Partial Sale ${invoiceNo} recorded to Subsidiary Sales & Collections. Initial collected: ₱${downPmt.toLocaleString()} (Balance: ₱${(totalDue - downPmt).toLocaleString()}).`, 'info');
+        triggerAlert(`Partial Sale ${invoiceNo} recorded to Subsidiary Sales & Collections Book. 1st Payment: ₱${downPmt.toLocaleString()} (Pending Balance: ₱${remainingCashBalance.toLocaleString()}).`, 'info');
       }
-    }
-
-    // 2. RECORD JOURNAL ENTRY TO SPECIAL JOURNAL
-    // 2.1 after adding transaction to subsidiary sales;
-    // 2.1.1 if cash sales:
-    // entry 1: debit accounts receivable, credit vatable sales, credit vat-output, credit zero-rated sales, credit vat-exempt sales.
-    // entry 2: debit cash, debit discounts, debit withholding tax from customers, credit accounts receivable.
-    if (setSpecialEntries) {
-      const newSJs: SpecialEntry[] = [];
-      const entry1Id = Date.now();
-
-      // ENTRY 1: Sales Recognition
-      const entry1Lines: SpecialEntryLine[] = [
-        { type: 'Debit', account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
-      ];
-
-      if (vatableSalesVal > 0) {
-        entry1Lines.push({ type: 'Credit', account_code: '4010', account_title: isVat ? 'Vatable Sales' : 'Sales Revenue', amount: vatableSalesVal });
-      }
-      if (vatOutputVal > 0) {
-        entry1Lines.push({ type: 'Credit', account_code: '2020', account_title: 'Output VAT Payable', amount: vatOutputVal });
-      }
-      if (zeroRatedVal > 0) {
-        entry1Lines.push({ type: 'Credit', account_code: '4020', account_title: 'Zero-Rated Sales', amount: zeroRatedVal });
-      }
-      if (vatExemptVal > 0) {
-        entry1Lines.push({ type: 'Credit', account_code: '4030', account_title: 'VAT-Exempt Sales', amount: vatExemptVal });
-      }
-      if (entry1Lines.filter(l => l.type === 'Credit').length === 0) {
-        entry1Lines.push({ type: 'Credit', account_code: '4010', account_title: 'Sales Revenue', amount: totalGrossSales });
-      }
-
-      newSJs.push({
-        id: entry1Id,
-        company_name: activeCompanyName,
-        entry_number: `SJ-SLS-${invoiceNo.trim()}`,
-        voucher_no: `SJ-SLS-${invoiceNo.trim()}`,
-        entry_date: date,
-        entry_type: 'Sales Recognition',
-        description: `Sales Recognition (Entry 1) - Inv #${invoiceNo.trim()} (${customerName.trim()})`,
-        lines: entry1Lines,
-        created_at: nowIso
-      });
-
-      // ENTRY 2 (for collections or for full payments/cash sales):
-      // debit cash, debit discounts, debit withholding tax from customers, credit accounts receivable.
-      if (saleMode === 'ON CASH') {
-        const cashAmt = Math.round((totalGrossSales - discountsVal - wtaxVal) * 100) / 100;
-        const entry2Lines: SpecialEntryLine[] = [
-          { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt }
-        ];
-        if (discountsVal > 0) {
-          entry2Lines.push({ type: 'Debit', account_code: '4015', account_title: 'Sales Discounts', amount: discountsVal });
-        }
-        if (wtaxVal > 0) {
-          entry2Lines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: wtaxVal });
-        }
-        entry2Lines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales });
-
-        newSJs.push({
-          id: entry1Id + 1,
-          company_name: activeCompanyName,
-          entry_number: `SJ-COL-${invoiceNo.trim()}`,
-          voucher_no: `SJ-COL-${invoiceNo.trim()}`,
-          entry_date: date,
-          entry_type: 'Cash Collection & Settlement',
-          description: `Cash Settlement (Entry 2) - Inv #${invoiceNo.trim()} (${customerName.trim()})`,
-          lines: entry2Lines,
-          created_at: nowIso
-        });
-      } else if (saleMode === 'ON PARTIAL') {
-        const downPmt = parseFloat(downPaymentAmount) || 0;
-        const downWtax = parseFloat(downPaymentWithholding) || 0;
-        if (downPmt > 0) {
-          const cashAmt = Math.round((downPmt - downWtax) * 100) / 100;
-          const entry2Lines: SpecialEntryLine[] = [
-            { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt }
-          ];
-          if (downWtax > 0) {
-            entry2Lines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: downWtax });
-          }
-          entry2Lines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: downPmt });
-
-          newSJs.push({
-            id: entry1Id + 1,
-            company_name: activeCompanyName,
-            entry_number: `SJ-COL-${invoiceNo.trim()}`,
-            voucher_no: collectionRef.trim() || `COL-${Date.now().toString().slice(-4)}`,
-            entry_date: date,
-            entry_type: 'Partial Collection & Settlement',
-            description: `Partial Collection (Entry 2) - Inv #${invoiceNo.trim()} (${customerName.trim()})`,
-            lines: entry2Lines,
-            created_at: nowIso
-          });
-        }
-      }
-
-      setSpecialEntries(prev => [...newSJs, ...prev]);
     }
 
     // Reset Form for next entry
     setInvoiceNo(`SI-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
     setParticulars('');
     setUnitPrice('25000');
-    setDownPaymentAmount('10000');
+    setDownPaymentAmount('15000');
   };
 
   // EXECUTE COLLECTION ON AN OPEN INVOICE
@@ -473,69 +430,153 @@ export default function SalesTransactionTab({
 
     const paymentAmt = parseFloat(collectAmount) || 0;
     const discountAmt = parseFloat(collectDiscount) || 0;
-    const wtaxAmt = parseFloat(collectWtax) || 0;
+    const manualWtaxAmt = parseFloat(collectWtax) || 0;
 
-    if (paymentAmt <= 0 && discountAmt <= 0 && wtaxAmt <= 0) {
+    if (paymentAmt <= 0 && discountAmt <= 0 && manualWtaxAmt <= 0) {
       triggerAlert('Please enter a valid collection, discount, or withholding tax amount.', 'error');
       return;
     }
 
     const inv = selectedInvoiceToCollect;
     const invTotalDue = Number(inv.total_amount_due || inv.amount) || 0;
-    const totalSettledReceivable = Math.round((paymentAmt + discountAmt + wtaxAmt) * 100) / 100;
+    const invWtax = Number(inv.tax_withheld || inv.withholding_2307) || 0;
 
-    // Calculate previous collections (cash + discounts + withholding)
+    // Check existing collection record(s) for this invoice
     const existingMatching = collections.filter(c => 
       !c.is_cancelled && 
       c.invoice_number && 
       c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase()
     );
-    const prevCollected = existingMatching.reduce((sum, c) => 
-      sum + (Number(c.amount_collected || c.amount) || 0) + (Number(c.discount ?? c.discounts) || 0) + (Number(c.tax_withheld ?? c.amount_withheld_2307) || 0)
-    , 0);
-    const newTotalCollected = Math.round((prevCollected + totalSettledReceivable) * 100) / 100;
-    const isNowFullyCollected = newTotalCollected >= (invTotalDue - 0.01);
+
+    const prevCashCollected = existingMatching.reduce((sum, c) => sum + (Number(c.amount_collected || 0)), 0);
+    const prevDiscount = existingMatching.reduce((sum, c) => {
+      if (Array.isArray(c.installments) && c.installments.length > 0) {
+        return sum + c.installments.reduce((s, inst) => s + (Number(inst.discount) || 0), 0);
+      }
+      return sum;
+    }, 0);
+    const prevInstallmentWtax = existingMatching.reduce((sum, c) => {
+      if (Array.isArray(c.installments) && c.installments.length > 0) {
+        return sum + c.installments.reduce((s, inst) => s + (Number(inst.wtax_2307) || 0), 0);
+      }
+      return sum + (Number(c.amount_withheld_2307) || 0);
+    }, 0);
+
+    const newTotalCashCollected = Math.round((prevCashCollected + paymentAmt) * 100) / 100;
+    const newTotalSettledTowardsDue = Math.round((newTotalCashCollected + prevDiscount + discountAmt + (invWtax === 0 ? manualWtaxAmt : 0)) * 100) / 100;
+    const isNowFullyCollected = newTotalSettledTowardsDue >= (invTotalDue - 0.05);
+
+    // Upon full collection completion, recognize the invoice's 2307 withholding tax (or manualWtaxAmt)
+    const wtaxForThisInstallment = manualWtaxAmt > 0
+      ? manualWtaxAmt
+      : (isNowFullyCollected ? Math.max(0, Math.round((invWtax - prevInstallmentWtax) * 100) / 100) : 0);
 
     const commonId = Date.now();
     const nowIso = new Date().toISOString();
+    const pendingBal = Math.max(0, Math.round((invTotalDue - newTotalSettledTowardsDue) * 100) / 100);
 
-    // 1. Add record to Collections
-    const newCollectionRec: UniformBookRecord = {
-      id: commonId,
-      company_name: activeCompanyName,
-      registered_name: inv.registered_name,
-      vat_or_nonvat: inv.vat_or_nonvat,
-      tin: inv.tin,
-      address: inv.address,
-      type_of_transaction: 'ON ACCOUNT',
-      date: collectDate,
-      invoice_type: 'OFFICIAL RECEIPT',
-      voucher_number: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
-      invoice_number: inv.invoice_number,
-      particulars: `Collection for Invoice #${inv.invoice_number} (${isNowFullyCollected ? 'Final Settlement' : 'Installment'})`,
-      qty: 1,
-      unit_price: totalSettledReceivable,
-      amount: paymentAmt,
-      vatable_amount: Math.round((paymentAmt / 1.12) * 100) / 100,
-      vat_amount: Math.round((paymentAmt - paymentAmt / 1.12) * 100) / 100,
-      zero_rated_amount: 0,
-      vat_exempt_amount: 0,
-      total_amount_vat_inclusive: totalSettledReceivable,
-      total_amount_net_of_vat: Math.round((totalSettledReceivable / 1.12) * 100) / 100,
-      discount: discountAmt,
-      discounts: discountAmt,
-      tax_withheld: wtaxAmt,
-      amount_withheld_2307: wtaxAmt,
-      total_amount_due: invTotalDue,
-      amount_collected: paymentAmt,
-      status: isNowFullyCollected ? 'Paid' : 'Partial',
-      is_cancelled: false,
-      created_at: nowIso
-    };
+    // 1. Update or add consolidated record in Collections Book (with installments array)
+    setCollections(prev => {
+      const existingIdx = prev.findIndex(c => !c.is_cancelled && c.invoice_number && c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase());
+      if (existingIdx !== -1) {
+        const existingRec = prev[existingIdx];
+        const prevInsts = Array.isArray(existingRec.installments) && existingRec.installments.length > 0
+          ? existingRec.installments
+          : (Number(existingRec.amount_collected) > 0 ? [{
+              payment_no: 1,
+              date: existingRec.date || inv.date,
+              ref_no: existingRec.voucher_number || `OR-1ST`,
+              cash_amount: Number(existingRec.amount_collected) || 0,
+              discount: 0,
+              wtax_2307: 0,
+              is_final: false
+            }] : []);
 
-    setCollections(prev => [newCollectionRec, ...prev]);
+        const nextPaymentNo = prevInsts.length + 1;
+        const nextInst = {
+          payment_no: nextPaymentNo,
+          date: collectDate,
+          ref_no: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
+          cash_amount: paymentAmt,
+          discount: discountAmt,
+          wtax_2307: wtaxForThisInstallment,
+          is_final: isNowFullyCollected
+        };
 
-    // 2. Update status in Subsidiary Sales
+        const updatedInsts = [...prevInsts, nextInst];
+        const breakdownStr = updatedInsts.map(i => `#${i.payment_no}: ₱${i.cash_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`).join(' + ');
+
+        const updatedRec: UniformBookRecord = {
+          ...existingRec,
+          date: collectDate,
+          voucher_number: collectRefNo.trim() || existingRec.voucher_number,
+          vatable_amount: inv.vatable_amount,
+          vat_amount: inv.vat_amount,
+          zero_rated_amount: inv.zero_rated_amount,
+          vat_exempt_amount: inv.vat_exempt_amount,
+          total_amount_vat_inclusive: inv.total_amount_vat_inclusive,
+          total_amount_net_of_vat: inv.total_amount_net_of_vat,
+          discount: Math.round(((Number(inv.discount) || 0) + discountAmt) * 100) / 100,
+          tax_withheld: invWtax || wtaxForThisInstallment,
+          amount_withheld_2307: invWtax || wtaxForThisInstallment,
+          total_amount_due: invTotalDue,
+          amount_collected: newTotalCashCollected,
+          pending_balance: pendingBal,
+          status: isNowFullyCollected ? 'Paid' : 'Partial',
+          particulars: `Collections for Invoice #${inv.invoice_number} (${breakdownStr})`,
+          installments: updatedInsts
+        };
+
+        const copy = [...prev];
+        copy[existingIdx] = updatedRec;
+        return copy;
+      } else {
+        const newCollectionRec: UniformBookRecord = {
+          id: commonId,
+          company_name: activeCompanyName,
+          registered_name: inv.registered_name,
+          vat_or_nonvat: inv.vat_or_nonvat,
+          tin: inv.tin,
+          address: inv.address,
+          type_of_transaction: 'ON ACCOUNT',
+          date: collectDate,
+          invoice_type: 'OFFICIAL RECEIPT',
+          voucher_number: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
+          invoice_number: inv.invoice_number,
+          particulars: `Collection for Invoice #${inv.invoice_number} (${isNowFullyCollected ? 'Full Settlement' : 'Partial'})`,
+          qty: inv.qty || 1,
+          unit_price: inv.unit_price || inv.amount,
+          amount: inv.amount,
+          vatable_amount: inv.vatable_amount,
+          vat_amount: inv.vat_amount,
+          zero_rated_amount: inv.zero_rated_amount,
+          vat_exempt_amount: inv.vat_exempt_amount,
+          total_amount_vat_inclusive: inv.total_amount_vat_inclusive,
+          total_amount_net_of_vat: inv.total_amount_net_of_vat,
+          discount: Math.round(((Number(inv.discount) || 0) + discountAmt) * 100) / 100,
+          tax_withheld: invWtax || wtaxForThisInstallment,
+          amount_withheld_2307: invWtax || wtaxForThisInstallment,
+          total_amount_due: invTotalDue,
+          amount_collected: newTotalCashCollected,
+          pending_balance: pendingBal,
+          status: isNowFullyCollected ? 'Paid' : 'Partial',
+          installments: [{
+            payment_no: 1,
+            date: collectDate,
+            ref_no: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
+            cash_amount: paymentAmt,
+            discount: discountAmt,
+            wtax_2307: wtaxForThisInstallment,
+            is_final: isNowFullyCollected
+          }],
+          is_cancelled: false,
+          created_at: nowIso
+        };
+        return [newCollectionRec, ...prev];
+      }
+    });
+
+    // 2. Update status in Subsidiary Sales (6.2: status "Paid" when full payment is completed)
     setSubsidiarySales(prev => prev.map(s => {
       if (s.invoice_number === inv.invoice_number) {
         return {
@@ -546,59 +587,38 @@ export default function SalesTransactionTab({
       return s;
     }));
 
-    // 3. If collection for this invoice has reached FULL collection:
-    // That's when it will record to CASH RECEIPTS!
+    // 3. 6.3 If collection for this invoice has reached FULL collection:
+    // Record the fully paid sale into Cash Receipts Book (with full sale vatable_amount, vat_amount, 2307, total_amount_due; no duplicate journal entry)
     if (isNowFullyCollected) {
       const fullCashReceipt: UniformBookRecord = {
-        ...newCollectionRec,
+        ...inv,
         id: commonId + 1,
-        type_of_transaction: 'CASH',
-        status: 'Cash',
-        particulars: `Full Cash Settlement Cleared: Invoice #${inv.invoice_number} (${inv.registered_name})`
+        type_of_transaction: 'ON ACCOUNT',
+        date: collectDate,
+        invoice_type: 'OFFICIAL RECEIPT',
+        voucher_number: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
+        amount_collected: newTotalCashCollected,
+        pending_balance: 0,
+        amount_withheld_2307: invWtax || wtaxForThisInstallment,
+        tax_withheld: invWtax || wtaxForThisInstallment,
+        status: 'Paid',
+        settled_via_collections: true,
+        particulars: `Full Settlement Completed via Collections Book: Invoice #${inv.invoice_number} (${inv.registered_name})`
       };
-      setCashReceipts(prev => [fullCashReceipt, ...prev]);
+      setCashReceipts(prev => {
+        const filtered = prev.filter(cr => cr.invoice_number.trim().toLowerCase() !== inv.invoice_number.trim().toLowerCase());
+        return [fullCashReceipt, ...filtered];
+      });
 
       triggerAlert(
-        `Invoice #${inv.invoice_number} is now FULLY COLLECTED (₱${newTotalCollected.toLocaleString()} settled) and has been automatically recorded to Cash Receipts!`,
+        `Invoice #${inv.invoice_number} is now PAID IN FULL (Cash Collected: ₱${newTotalCashCollected.toLocaleString(undefined, { minimumFractionDigits: 2 })} | 2307: ₱${(invWtax || wtaxForThisInstallment).toLocaleString(undefined, { minimumFractionDigits: 2 })}) and recorded to Cash Receipts!`,
         'success'
       );
     } else {
       triggerAlert(
-        `Recorded collection of ₱${paymentAmt.toLocaleString()} cash (total credit ₱${totalSettledReceivable.toLocaleString()}) for Invoice #${inv.invoice_number}. Remaining: ₱${Math.max(0, invTotalDue - newTotalCollected).toLocaleString()}.`,
+        `Recorded collection of ₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${inv.invoice_number}. Remaining Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}.`,
         'info'
       );
-    }
-
-    // 4. Record Entry 2 to Special Journal for this collection
-    // Strictly following user formula:
-    // (dr) Cash [1010]
-    // (dr) Sales Discounts [4015]
-    // (dr) Creditable Withholding Tax (BIR 2307) [1040]
-    // (cr) Accounts Receivable [1020]
-    // Total Dr = Total Cr, exactly matching total gross settled receivable
-    if (setSpecialEntries) {
-      const colLines: SpecialEntryLine[] = [
-        { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: paymentAmt }
-      ];
-      if (discountAmt > 0) {
-        colLines.push({ type: 'Debit', account_code: '4015', account_title: 'Sales Discounts', amount: discountAmt });
-      }
-      if (wtaxAmt > 0) {
-        colLines.push({ type: 'Debit', account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: wtaxAmt });
-      }
-      colLines.push({ type: 'Credit', account_code: '1020', account_title: 'Accounts Receivable', amount: totalSettledReceivable });
-
-      setSpecialEntries(prev => [{
-        id: Date.now(),
-        company_name: activeCompanyName,
-        entry_number: `SJ-COL-${inv.invoice_number}-${Date.now().toString().slice(-4)}`,
-        voucher_no: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
-        entry_date: collectDate,
-        entry_type: 'Collection / Receivable Settlement',
-        description: `Collection (Entry 2) - Inv #${inv.invoice_number} (${inv.registered_name})`,
-        lines: colLines,
-        created_at: new Date().toISOString()
-      }, ...prev]);
     }
 
     setSelectedInvoiceToCollect(null);
@@ -788,40 +808,69 @@ export default function SalesTransactionTab({
 
             {/* PARTIAL DOWN PAYMENT DETAILS IF SELECTED */}
             {saleMode === 'ON PARTIAL' && (
-              <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 grid grid-cols-1 md:grid-cols-3 gap-3 animate-fadeIn">
-                <div>
-                  <label className="block text-[11px] font-bold text-cyan-300 mb-1">
-                    Down Payment Amount (₱) *
-                  </label>
-                  <input
-                    type="number"
-                    value={downPaymentAmount}
-                    onChange={(e) => setDownPaymentAmount(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
-                    required
-                  />
+              <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 flex flex-col gap-3 animate-fadeIn">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-cyan-300 mb-1">
+                      1st Payment / Down Payment (₱) *
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={downPaymentAmount}
+                      onChange={(e) => setDownPaymentAmount(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-amber-300 mb-1">
+                      2nd Payment / Balance Due (₱)
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={`₱${Math.max(0, liveFormulas.total_amount_due - (parseFloat(downPaymentAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-amber-500/40 bg-zinc-950 text-amber-300 font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-cyan-300 mb-1">
+                      1st Payment OR # / Ref
+                    </label>
+                    <input
+                      type="text"
+                      value={collectionRef}
+                      onChange={(e) => setCollectionRef(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-cyan-300 mb-1">
-                    CWT 2307 Withheld (₱)
+
+                <div className="pt-2 border-t border-cyan-500/20 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-cyan-200 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={recordSecondPaymentNow}
+                      onChange={(e) => setRecordSecondPaymentNow(e.target.checked)}
+                      className="rounded border-cyan-500 bg-zinc-900 text-cyan-500 focus:ring-cyan-500"
+                    />
+                    <span>
+                      2nd Payment (Balance of <strong>₱{Math.max(0, liveFormulas.total_amount_due - (parseFloat(downPaymentAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>) is also paid / collected
+                    </span>
                   </label>
-                  <input
-                    type="number"
-                    value={downPaymentWithholding}
-                    onChange={(e) => setDownPaymentWithholding(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-cyan-300 mb-1">
-                    Official Receipt # / Ref
-                  </label>
-                  <input
-                    type="text"
-                    value={collectionRef}
-                    onChange={(e) => setCollectionRef(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
-                  />
+
+                  {recordSecondPaymentNow && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-cyan-300 font-bold whitespace-nowrap">2nd OR # / Ref:</span>
+                      <input
+                        type="text"
+                        value={secondPaymentRef}
+                        onChange={(e) => setSecondPaymentRef(e.target.value)}
+                        className="w-36 px-2.5 py-1 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1097,13 +1146,13 @@ export default function SalesTransactionTab({
                 <span className="font-bold text-zinc-300 uppercase tracking-wider text-[10px]">Destination Books:</span>
                 <div className="flex items-center gap-1.5 text-emerald-400">
                   <Check className="w-3.5 h-3.5" />
-                  <span>Subsidiary Sales Register (Status: {saleMode === 'ON CASH' ? 'Cash' : saleMode === 'ON PARTIAL' ? 'Partial' : 'On Account'})</span>
+                  <span>Subsidiary Sales Register (Status: {saleMode === 'ON CASH' ? 'Paid' : saleMode === 'ON PARTIAL' ? (recordSecondPaymentNow ? 'Paid' : 'Partial') : 'On Account'})</span>
                 </div>
                 {saleMode === 'ON CASH' && (
                   <>
                     <div className="flex items-center gap-1.5 text-cyan-400">
                       <Check className="w-3.5 h-3.5" />
-                      <span>Cash Receipts Book (Cash-Only Entry)</span>
+                      <span>Cash Receipts Book (Fully Paid Entry)</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-purple-400">
                       <Check className="w-3.5 h-3.5" />
@@ -1112,10 +1161,18 @@ export default function SalesTransactionTab({
                   </>
                 )}
                 {saleMode === 'ON PARTIAL' && (
-                  <div className="flex items-center gap-1.5 text-cyan-400">
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Collections Book (Down Payment Recorded)</span>
-                  </div>
+                  <>
+                    {recordSecondPaymentNow && (
+                      <div className="flex items-center gap-1.5 text-cyan-400">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Cash Receipts Book (Completed Payment)</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5 text-purple-400">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Collections Book ({recordSecondPaymentNow ? '1st & 2nd Payments Recorded' : '1st Down Payment Recorded'})</span>
+                    </div>
+                  </>
                 )}
               </div>
 
