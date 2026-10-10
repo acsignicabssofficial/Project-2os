@@ -254,13 +254,13 @@ const themeConfigs = {
 
 function mapSaleToUniform(s: any): UniformBookRecord {
   const isVat = s.output_vat > 0 || (s.vat_or_nonvat && !s.vat_or_nonvat.includes('NON'));
-  const amount = Number(s.amount || s.invoice_amount) || 0;
+  const amount = Number(s.amount || s.invoice_amount || s.total_amount_vat_inclusive) || 0;
   const vatable = Number(s.vatable_amount || s.vatable_sales) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
   const vat = Number(s.vat_amount || s.output_vat || s.vat) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
   const netOfVat = Number(s.total_amount_net_of_vat || s.amount_net_of_vat) || (amount - vat);
   const discount = Number(s.discount || s.discounts || s.less_discount) || 0;
   const withheld = Number(s.tax_withheld || s.withholding_2307 || s.less_withholding_tax) || 0;
-  const totalDue = Number(s.total_amount_due) || (amount - discount - withheld);
+  const totalDue = Number(s.total_amount_due) || (amount - discount);
 
   return {
     id: s.id || Date.now(),
@@ -269,7 +269,7 @@ function mapSaleToUniform(s: any): UniformBookRecord {
     vat_or_nonvat: isVat ? 'VAT' : 'NONVAT',
     tin: s.tin || s.customer_tin || s.client_TIN || '000-000-000-00000',
     address: s.address || s.client_Address || '',
-    type_of_transaction: (s.type_of_transaction || (s.sales_status === 'Paid' ? 'CASH' : 'ON ACCOUNT')) as any,
+    type_of_transaction: (s.type_of_transaction || (s.sales_status === 'Paid' || s.status === 'Paid' || s.status === 'Cash' ? 'CASH' : 'ON ACCOUNT')) as any,
     date: s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0],
     invoice_type: s.invoice_type || 'SALES INVOICE',
     voucher_number: s.voucher_number || '',
@@ -287,6 +287,11 @@ function mapSaleToUniform(s: any): UniformBookRecord {
     discount: discount,
     tax_withheld: withheld,
     total_amount_due: totalDue,
+    status: s.status || s.sales_status || (s.type_of_transaction === 'CASH' ? 'Paid' : 'On Account'),
+    amount_collected: s.amount_collected !== undefined ? Number(s.amount_collected) : undefined,
+    pending_balance: s.pending_balance !== undefined ? Number(s.pending_balance) : undefined,
+    settled_via_collections: Boolean(s.settled_via_collections),
+    installments: Array.isArray(s.installments) ? s.installments : undefined,
     is_cancelled: Boolean(s.is_cancelled || s.sales_status === 'Cancelled'),
     created_at: s.created_at || new Date().toISOString(),
     customer_name: s.registered_name || s.customer_name,
@@ -302,22 +307,24 @@ function mapSaleToUniform(s: any): UniformBookRecord {
 
 function mapExpenseToUniform(e: any): UniformBookRecord {
   const isVat = e.vat_input_amount > 0 || (e.nonvat_or_vat !== 'NON-VATABLE' && e.vat_or_nonvat !== 'NONVAT');
-  const amount = Number(e.amount || e.expense_invoice_amount) || 0;
+  const amount = Number(e.amount || e.expense_invoice_amount || e.total_amount_vat_inclusive) || 0;
   const vatable = Number(e.vatable_amount || e.vatable_expense) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
   const vat = Number(e.vat_amount || e.vat_input_amount || e.vat) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
   const netOfVat = Number(e.total_amount_net_of_vat || e.amount_net_of_vat) || (amount - vat);
   const discount = Number(e.discount || e.discounts || e.less_discount) || 0;
   const withheld = Number(e.tax_withheld || e.withholding_2307_2306 || e.less_withholding_tax) || 0;
-  const totalDue = Number(e.total_amount_due) || (amount - discount - withheld);
+  const totalDue = Number(e.total_amount_due) || (amount - discount);
 
   return {
     id: e.id || Date.now(),
     company_name: e.company_name,
     registered_name: e.registered_name || e.service_provider_name || 'Vendor',
     vat_or_nonvat: isVat ? 'VAT' : 'NONVAT',
+    business_tax_type: e.business_tax_type,
+    expense_type: e.expense_type,
     tin: e.tin || e.service_provider_tin || e.sp_tin || '000-000-000-00000',
     address: e.address || e.sp_address || '',
-    type_of_transaction: (e.type_of_transaction || (e.expense_status === 'Paid' ? 'CASH' : 'ON ACCOUNT')) as any,
+    type_of_transaction: (e.type_of_transaction || (e.expense_status === 'Paid' || e.status === 'Paid' || e.status === 'Cash' ? 'CASH' : 'ON ACCOUNT')) as any,
     date: e.date || e.expense_date || new Date().toISOString().split('T')[0],
     invoice_type: e.invoice_type || 'OFFICIAL RECEIPT',
     voucher_number: e.voucher_number || e.voucher_no || '',
@@ -335,6 +342,11 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
     discount: discount,
     tax_withheld: withheld,
     total_amount_due: totalDue,
+    status: e.status || e.expense_status || (e.type_of_transaction === 'CASH' ? 'Paid' : 'On Account'),
+    amount_paid: e.amount_paid !== undefined ? Number(e.amount_paid) : undefined,
+    pending_balance: e.pending_balance !== undefined ? Number(e.pending_balance) : undefined,
+    settled_via_collections: Boolean(e.settled_via_collections),
+    installments: Array.isArray(e.installments) ? e.installments : undefined,
     is_cancelled: Boolean(e.is_cancelled || e.expense_status === 'Cancelled'),
     created_at: e.created_at || new Date().toISOString(),
     service_provider_name: e.registered_name || e.service_provider_name,
@@ -347,13 +359,15 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
 }
 
 function mapCollectionToUniform(c: any): UniformBookRecord {
-  const amount = Number(c.amount || c.amount_collected) || 0;
+  const amount = Number(c.amount || c.total_amount_vat_inclusive || c.amount_collected) || 0;
   const isVat = c.vat_or_nonvat !== 'NONVAT';
   const vatable = Number(c.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
   const vat = Number(c.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
   const withheld = Number(c.tax_withheld || c.amount_withheld_2307) || 0;
   const discount = Number(c.discount) || 0;
-  const totalDue = Number(c.total_amount_due) || (amount - discount - withheld);
+  const totalDue = Number(c.total_amount_due) || (amount - discount);
+  const collected = c.amount_collected !== undefined ? Number(c.amount_collected) : Math.max(0, totalDue - withheld);
+  const pending = c.pending_balance !== undefined ? Number(c.pending_balance) : Math.max(0, Math.round((totalDue - withheld - collected) * 100) / 100);
 
   return {
     id: c.id || Date.now(),
@@ -380,27 +394,35 @@ function mapCollectionToUniform(c: any): UniformBookRecord {
     discount: discount,
     tax_withheld: withheld,
     total_amount_due: totalDue,
+    status: c.status || (pending <= 0.01 ? 'Paid' : (collected > 0 ? 'Partial' : 'On Account')),
+    settled_via_collections: Boolean(c.settled_via_collections),
+    installments: Array.isArray(c.installments) ? c.installments : undefined,
     is_cancelled: Boolean(c.is_cancelled),
     created_at: c.created_at || new Date().toISOString(),
-    amount_collected: amount,
+    amount_collected: collected,
+    pending_balance: pending,
     amount_withheld_2307: withheld
   };
 }
 
 function mapPaymentToUniform(p: any): UniformBookRecord {
-  const amount = Number(p.amount || p.amount_paid) || 0;
+  const amount = Number(p.amount || p.total_amount_vat_inclusive || p.amount_paid) || 0;
   const isVat = p.vat_or_nonvat !== 'NONVAT';
   const vatable = Number(p.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
   const vat = Number(p.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
   const withheld = Number(p.tax_withheld || p.withholding_tax_2307) || 0;
   const discount = Number(p.discount) || 0;
-  const totalDue = Number(p.total_amount_due) || (amount - discount - withheld);
+  const totalDue = Number(p.total_amount_due) || (amount - discount);
+  const paid = p.amount_paid !== undefined ? Number(p.amount_paid) : Math.max(0, totalDue - withheld);
+  const pending = p.pending_balance !== undefined ? Number(p.pending_balance) : Math.max(0, Math.round((totalDue - withheld - paid) * 100) / 100);
 
   return {
     id: p.id || Date.now(),
     company_name: p.company_name,
     registered_name: p.registered_name || p.service_provider_name || p.payee_name || 'Payee',
     vat_or_nonvat: isVat ? 'VAT' : 'NONVAT',
+    business_tax_type: p.business_tax_type,
+    expense_type: p.expense_type,
     tin: p.tin || p.sp_tin || p.service_provider_TIN || '000-000-000-00000',
     address: p.address || p.sp_address || '',
     type_of_transaction: (p.type_of_transaction || 'CASH') as any,
@@ -421,9 +443,13 @@ function mapPaymentToUniform(p: any): UniformBookRecord {
     discount: discount,
     tax_withheld: withheld,
     total_amount_due: totalDue,
+    status: p.status || (pending <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'On Account')),
+    settled_via_collections: Boolean(p.settled_via_collections),
+    installments: Array.isArray(p.installments) ? p.installments : undefined,
     is_cancelled: Boolean(p.is_cancelled),
     created_at: p.created_at || new Date().toISOString(),
-    amount_paid: amount,
+    amount_paid: paid,
+    pending_balance: pending,
     withholding_tax_2307: withheld
   };
 }
@@ -468,7 +494,6 @@ export default function App() {
   const handleUpdateCashReceipts = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setCashReceipts(prev => {
       const next = updater(prev);
-      setCollections(next as any);
       return next;
     });
   };
@@ -476,7 +501,6 @@ export default function App() {
   const handleUpdateCashDisbursements = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setCashDisbursements(prev => {
       const next = updater(prev);
-      setPayments(next as any);
       return next;
     });
   };
@@ -590,47 +614,47 @@ export default function App() {
       if (Array.isArray(data.cashReceipts)) {
         const mapped = data.cashReceipts.map(mapCollectionToUniform);
         setCashReceipts(mapped);
-        setCollections(mapped as any);
-      } else if (Array.isArray(data.collections)) {
+      } else if (Array.isArray(data.collections) && !Array.isArray(data.collectionsRecords)) {
         const mapped = data.collections.map(mapCollectionToUniform);
         setCashReceipts(mapped);
-        setCollections(data.collections);
       } else {
         setCashReceipts([]);
-        setCollections([]);
       }
 
       if (Array.isArray(data.collectionsRecords)) {
         const mapped = data.collectionsRecords.map(mapCollectionToUniform);
         setCollectionsRecords(mapped);
+        setCollections(mapped as any);
       } else if (Array.isArray(data.collections)) {
         const mapped = data.collections.map(mapCollectionToUniform);
         setCollectionsRecords(mapped);
+        setCollections(data.collections);
       } else {
         setCollectionsRecords([]);
+        setCollections([]);
       }
 
       if (Array.isArray(data.cashDisbursements)) {
         const mapped = data.cashDisbursements.map(mapPaymentToUniform);
         setCashDisbursements(mapped);
-        setPayments(mapped as any);
-      } else if (Array.isArray(data.payments)) {
+      } else if (Array.isArray(data.payments) && !Array.isArray(data.paymentsRecords)) {
         const mapped = data.payments.map(mapPaymentToUniform);
         setCashDisbursements(mapped);
-        setPayments(data.payments);
       } else {
         setCashDisbursements([]);
-        setPayments([]);
       }
 
       if (Array.isArray(data.paymentsRecords)) {
         const mapped = data.paymentsRecords.map(mapPaymentToUniform);
         setPaymentsRecords(mapped);
+        setPayments(mapped as any);
       } else if (Array.isArray(data.payments)) {
         const mapped = data.payments.map(mapPaymentToUniform);
         setPaymentsRecords(mapped);
+        setPayments(data.payments);
       } else {
         setPaymentsRecords([]);
+        setPayments([]);
       }
 
       if (Array.isArray(data.ppeAssets)) setPpeAssets(data.ppeAssets);
@@ -641,7 +665,18 @@ export default function App() {
       if (data.pagibigConfig) setPagibigConfig(data.pagibigConfig);
       if (data.taxBrackets) setTaxBrackets(data.taxBrackets);
       if (data.accountTitles) setAccountTitles(data.accountTitles);
-      if (Array.isArray(data.specialEntries)) setSpecialEntries(data.specialEntries);
+      if (Array.isArray(data.specialEntries)) {
+        const cleanedSpecialEntries = data.specialEntries.filter((se: any) => {
+          const entryNo = String(se?.entry_number || '');
+          return !(
+            entryNo.startsWith('SJ-SLS-') ||
+            entryNo.startsWith('SJ-COL-') ||
+            entryNo.startsWith('SJ-PUR-') ||
+            entryNo.startsWith('SJ-DIS-')
+          );
+        });
+        setSpecialEntries(cleanedSpecialEntries);
+      }
       if (Array.isArray(data.incomeTaxRecords)) setIncomeTaxRecords(data.incomeTaxRecords);
       if (data.theme && ['neon_light', 'clean', 'dark', 'trial_layout'].includes(data.theme)) {
         setTheme(data.theme);
@@ -668,9 +703,9 @@ export default function App() {
         collectionsRecords,
         paymentsRecords,
         sales: subsidiarySales,
-        collections: cashReceipts,
+        collections: collectionsRecords,
         expenses: subsidiaryPurchases,
-        payments: cashDisbursements,
+        payments: paymentsRecords,
         ppeAssets,
         employees,
         payrollRecords,
@@ -700,7 +735,7 @@ export default function App() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [isLoaded, companies, activeCompany, customers, contractors, sales, collections, expenses, payments, ppeAssets, employees, payrollRecords, sssBrackets, philhealthConfig, pagibigConfig, taxBrackets, accountTitles, specialEntries, incomeTaxRecords, theme]);
+  }, [isLoaded, companies, activeCompany, customers, contractors, subsidiarySales, subsidiaryPurchases, cashReceipts, cashDisbursements, collectionsRecords, paymentsRecords, sales, collections, expenses, payments, ppeAssets, employees, payrollRecords, sssBrackets, philhealthConfig, pagibigConfig, taxBrackets, accountTitles, specialEntries, incomeTaxRecords, theme]);
 
   // NAVIGATION ACTIVE TAB
   const [activeTab, setActiveTab] = useState<
@@ -997,6 +1032,12 @@ export default function App() {
       activeCompanyId: activeCompany?.id,
       customers: updatedCustomers,
       contractors: updatedContractors,
+      subsidiarySales: updatedSales.map(mapSaleToUniform),
+      subsidiaryPurchases: updatedExpenses.map(mapExpenseToUniform),
+      cashReceipts: updatedCollections.map(mapCollectionToUniform),
+      cashDisbursements: updatedPayments.map(mapPaymentToUniform),
+      collectionsRecords: updatedCollections.map(mapCollectionToUniform),
+      paymentsRecords: updatedPayments.map(mapPaymentToUniform),
       sales: updatedSales,
       collections: updatedCollections,
       expenses: updatedExpenses,
@@ -1025,7 +1066,7 @@ export default function App() {
     }
 
     try {
-      localStorage.setItem('2os_ledger_data', JSON.stringify(syncPayload));
+      localStorage.setItem('2os_accounting_ledger_data', JSON.stringify(syncPayload));
     } catch (e) {
       console.warn('LocalStorage save failed:', e);
     }
@@ -1046,10 +1087,16 @@ export default function App() {
         activeCompanyId: activeCompany?.id,
         customers,
         contractors,
-        sales,
-        collections,
-        expenses,
-        payments,
+        subsidiarySales,
+        subsidiaryPurchases,
+        cashReceipts,
+        cashDisbursements,
+        collectionsRecords,
+        paymentsRecords,
+        sales: subsidiarySales,
+        collections: cashReceipts,
+        expenses: subsidiaryPurchases,
+        payments: cashDisbursements,
         ppeAssets,
         employees,
         payrollRecords,

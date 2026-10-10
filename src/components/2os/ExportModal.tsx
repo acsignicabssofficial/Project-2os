@@ -220,7 +220,12 @@ export default function ExportModal({
 
       // Handle SQL Dump
       if (selectedTarget === 'sql_dump' || format === 'sql') {
-        window.open('/api/export-sql', '_blank');
+        const a = document.createElement('a');
+        a.href = '/api/export-sql';
+        a.download = `${safeCompanyName}_transactions_${dateStr}.sql`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
         setExportedSuccess(`Exported transactions.sql backup script successfully!`);
         setIsExporting(false);
         return;
@@ -300,7 +305,7 @@ export default function ExportModal({
         setExportedSuccess(`Exported ${dataset.length} records to CSV (.csv) successfully!`);
       }
     } catch (err: any) {
-      alert(`Export error: ${err.message}`);
+      setExportedSuccess(`Export warning: ${err.message}`);
     } finally {
       setIsExporting(false);
     }

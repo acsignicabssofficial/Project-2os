@@ -45,38 +45,40 @@ export function getBookDisplayLabel(bookType: UniformBookType): { title: string;
   switch (bookType) {
     case 'cash_receipt':
       return {
-        title: 'Cash Receipt Register',
-        subtitle: 'Cash Receipts / Collections Book matching uniform database schema',
+        title: 'Cash Receipts Book (Books of Accounts)',
+        subtitle: 'Lists and tracks all fully paid sales transactions only',
         singular: 'Cash Receipt'
       };
     case 'cash_disbursement':
       return {
-        title: 'Cash Disbursement Register',
-        subtitle: 'Cash Disbursements / Payments Book matching uniform database schema',
+        title: 'Cash Disbursements Book (Books of Accounts)',
+        subtitle: 'Lists and tracks all fully paid purchase & expense disbursements only',
         singular: 'Cash Disbursement'
       };
     case 'subsidiary_sales':
       return {
-        title: 'Subsidiary Sales Register',
-        subtitle: 'Subsidiary Sales & Invoices Book matching uniform database schema',
+        title: 'Subsidiary Sales (Books of Accounts)',
+        subtitle: 'Lists and tracks all sales transactions entered by Sales (Other Transaction)',
         singular: 'Subsidiary Sale'
       };
     case 'subsidiary_purchases':
       return {
-        title: 'Subsidiary Purchases Register',
-        subtitle: 'Subsidiary Purchases & Expenses Book matching uniform database schema',
+        title: 'Subsidiary Purchases (Books of Accounts)',
+        subtitle: 'Lists and tracks all purchase & expense transactions entered by Purchases (Other Transaction)',
         singular: 'Subsidiary Purchase'
       };
     case 'collections':
+    case 'collections_book':
       return {
-        title: 'Collections Register',
-        subtitle: 'Cross-Matching Collections Book (On Account & Cash Transactions)',
+        title: 'Collections Book (Books of Accounts)',
+        subtitle: 'Lists and tracks all payments made to identify fully paid, partially paid, and pending sales balances',
         singular: 'Collection'
       };
     case 'payments':
+    case 'payments_book':
       return {
-        title: 'Payments Register',
-        subtitle: 'Cross-Matching Payments Book (On Account & Cash Transactions)',
+        title: 'Payments Book (Books of Accounts)',
+        subtitle: 'Lists and tracks all vendor disbursements to identify fully paid, partially paid, and pending payable balances',
         singular: 'Payment'
       };
     default:

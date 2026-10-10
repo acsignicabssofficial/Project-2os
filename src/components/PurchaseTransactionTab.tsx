@@ -247,16 +247,19 @@ export default function PurchaseTransactionTab({
     const commonId = Date.now();
 
     // 1. Prepare Base Record for Subsidiary Purchases
-    let assignedStatus: 'Cash' | 'On Account' | 'Partial' = 'On Account';
+    let assignedStatus: 'Cash' | 'On Account' | 'Partial' | 'Paid' = 'On Account';
     let assignedTransactionType: 'CASH' | 'ON ACCOUNT' = 'ON ACCOUNT';
 
     if (purchaseMode === 'ON CASH') {
-      assignedStatus = 'Cash';
+      assignedStatus = 'Paid';
       assignedTransactionType = 'CASH';
     } else if (purchaseMode === 'ON PARTIAL') {
       assignedStatus = 'Partial';
       assignedTransactionType = 'ON ACCOUNT';
     }
+
+    const totalEwt = liveFormulas.tax_withheld || 0;
+    const netCashForFullPayable = Math.max(0, Math.round((totalDue - totalEwt) * 100) / 100);
 
     const purchaseRecord: UniformBookRecord = {
       id: commonId,
@@ -283,29 +286,41 @@ export default function PurchaseTransactionTab({
       total_amount_vat_inclusive: liveFormulas.total_amount_vat_inclusive,
       total_amount_net_of_vat: liveFormulas.net_of_discount,
       discount: liveFormulas.discount,
-      tax_withheld: liveFormulas.tax_withheld,
+      tax_withheld: totalEwt,
       total_amount_due: totalDue,
       status: assignedStatus,
-      amount_paid: purchaseMode === 'ON PARTIAL' ? parseFloat(downPaymentAmount) || 0 : undefined,
+      amount_paid: purchaseMode === 'ON CASH' ? netCashForFullPayable : (purchaseMode === 'ON PARTIAL' ? parseFloat(downPaymentAmount) || 0 : 0),
+      pending_balance: purchaseMode === 'ON CASH' ? 0 : (purchaseMode === 'ON PARTIAL' ? Math.max(0, totalDue - (parseFloat(downPaymentAmount) || 0)) : totalDue),
       is_cancelled: false,
       created_at: nowIso
     };
 
-    // 2. Routing Logic based on user specification:
-    // 3.1 If ON ACCOUNT:
-    //     Record the transaction to subsidiary purchases only.
+    // 2. Routing Logic (Single-Entry Method - Books of Accounts generate General Journal entries):
+    // 2.1 If ON ACCOUNT:
     if (purchaseMode === 'ON ACCOUNT') {
       setSubsidiaryPurchases(prev => [purchaseRecord, ...prev]);
-      triggerAlert(`Purchase ${voucherNo} recorded to Subsidiary Purchases on Account (Payable: ₱${totalDue.toLocaleString()}).`, 'success');
+
+      // Track open payable in Payments Book with 0 paid so far
+      const openPayableRecord: UniformBookRecord = {
+        ...purchaseRecord,
+        id: commonId + 1,
+        type_of_transaction: 'ON ACCOUNT',
+        particulars: `Unpaid Voucher #${voucherNo.trim()} - ${particulars || expenseType} (Pending Balance: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+        amount_paid: 0,
+        pending_balance: totalDue,
+        status: 'On Account',
+        installments: []
+      };
+      setPayments(prev => [openPayableRecord, ...prev]);
+
+      triggerAlert(`Purchase ${voucherNo} recorded to Subsidiary Purchases & Payments Book on Account (Payable: ₱${totalDue.toLocaleString()}).`, 'success');
     }
 
-    // 3.2 If ON CASH:
-    //     Record transaction to BOTH subsidiary purchases AND cash disbursements (and payments).
+    // 2.2 If ON CASH (Paid in Full):
     else if (purchaseMode === 'ON CASH') {
-      // Record to Subsidiary Purchases
+      purchaseRecord.status = 'Paid';
       setSubsidiaryPurchases(prev => [purchaseRecord, ...prev]);
 
-      // Record to Cash Disbursements (Strictly cash-only book)
       const cashDisbursementRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
@@ -331,11 +346,13 @@ export default function PurchaseTransactionTab({
         total_amount_vat_inclusive: liveFormulas.total_amount_vat_inclusive,
         total_amount_net_of_vat: liveFormulas.net_of_discount,
         discount: liveFormulas.discount,
-        tax_withheld: liveFormulas.tax_withheld,
+        tax_withheld: totalEwt,
         total_amount_due: totalDue,
-        amount_paid: totalDue,
-        withholding_tax_2307: liveFormulas.tax_withheld,
-        status: 'Cash',
+        amount_paid: netCashForFullPayable,
+        pending_balance: 0,
+        withholding_tax_2307: totalEwt,
+        settled_via_collections: false,
+        status: 'Paid',
         is_cancelled: false,
         created_at: nowIso
       };
@@ -345,16 +362,17 @@ export default function PurchaseTransactionTab({
       const paymentRecord: UniformBookRecord = {
         ...cashDisbursementRecord,
         id: commonId + 2,
-        status: 'Paid'
+        status: 'Paid',
+        amount_paid: netCashForFullPayable,
+        pending_balance: 0,
+        settled_via_collections: false
       };
       setPayments(prev => [paymentRecord, ...prev]);
 
-      triggerAlert(`Cash Purchase ${voucherNo} recorded to BOTH Subsidiary Purchases & Cash Disbursements (₱${totalDue.toLocaleString()})!`, 'success');
+      triggerAlert(`Paid Purchase ${voucherNo} recorded to Subsidiary Purchases, Cash Disbursements & Payments Book (Cash Disbursed: ₱${netCashForFullPayable.toLocaleString()})!`, 'success');
     }
 
-    // 3.3 If ON PARTIAL:
-    //     Record transaction to both subsidiary purchases and payments.
-    //     If payments for a purchase reach full payment, that's when it will record to cash disbursements.
+    // 2.3 If ON PARTIAL:
     else if (purchaseMode === 'ON PARTIAL') {
       const downPmt = parseFloat(downPaymentAmount) || 0;
       const downWtax = parseFloat(downPaymentWithholding) || 0;
@@ -364,15 +382,17 @@ export default function PurchaseTransactionTab({
         return;
       }
 
-      const isFull = downPmt >= totalDue;
+      const isFull = (downPmt + totalEwt + downWtax) >= totalDue - 0.01;
+      const actualFirstCash = isFull ? netCashForFullPayable : downPmt;
+      const pendingBal = isFull ? 0 : Math.max(0, Math.round((netCashForFullPayable - downPmt) * 100) / 100);
 
-      if (isFull) {
-        purchaseRecord.status = 'Paid';
-      }
+      purchaseRecord.status = isFull ? 'Paid' : 'Partial';
+      purchaseRecord.amount_paid = actualFirstCash;
+      purchaseRecord.pending_balance = pendingBal;
 
       setSubsidiaryPurchases(prev => [purchaseRecord, ...prev]);
 
-      // Record partial payment in Payments
+      // Record partial payment in Payments Book with full purchase breakdown
       const partialPaymentRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
@@ -387,21 +407,34 @@ export default function PurchaseTransactionTab({
         invoice_type: 'OFFICIAL RECEIPT',
         voucher_number: voucherNo.trim(),
         invoice_number: invoiceNo.trim() || `EXP-${voucherNo.trim()}`,
-        particulars: `Partial Disbursement for Voucher #${voucherNo.trim()} (${isFull ? '100% Full' : 'Partial'})`,
-        qty: 1,
-        unit_price: downPmt,
-        amount: downPmt,
-        vatable_amount: Math.round((downPmt / 1.12) * 100) / 100,
-        vat_amount: Math.round((downPmt - downPmt / 1.12) * 100) / 100,
-        zero_rated_amount: 0,
-        vat_exempt_amount: 0,
-        total_amount_vat_inclusive: downPmt,
-        total_amount_net_of_vat: Math.round((downPmt / 1.12) * 100) / 100,
-        discount: 0,
-        tax_withheld: downWtax,
+        particulars: isFull
+          ? `Full Payment for Voucher #${voucherNo.trim()} (Cash Paid: ₱${actualFirstCash.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
+          : `1st Down Payment for Voucher #${voucherNo.trim()} (Paid: ₱${actualFirstCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}, Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+        qty: parseFloat(qty) || 1,
+        unit_price: parseFloat(unitPrice) || 0,
+        amount: liveFormulas.amount,
+        vatable_amount: liveFormulas.vatable_purchases,
+        vat_amount: liveFormulas.input_vat,
+        zero_rated_amount: parseFloat(zeroRated) || 0,
+        vat_exempt_amount: parseFloat(vatExempt) || 0,
+        total_amount_vat_inclusive: liveFormulas.total_amount_vat_inclusive,
+        total_amount_net_of_vat: liveFormulas.net_of_discount,
+        discount: liveFormulas.discount,
+        tax_withheld: totalEwt,
         total_amount_due: totalDue,
-        amount_paid: downPmt,
-        withholding_tax_2307: downWtax,
+        amount_paid: actualFirstCash,
+        pending_balance: pendingBal,
+        withholding_tax_2307: totalEwt,
+        settled_via_collections: true,
+        installments: [
+          {
+            payment_no: 1,
+            date: date,
+            ref_no: voucherNo.trim(),
+            cash_amount: actualFirstCash,
+            wtax_2307: isFull ? totalEwt : downWtax
+          }
+        ],
         status: isFull ? 'Paid' : 'Partial',
         is_cancelled: false,
         created_at: nowIso
@@ -410,64 +443,17 @@ export default function PurchaseTransactionTab({
       setPayments(prev => [partialPaymentRecord, ...prev]);
 
       if (isFull) {
-        // Automatically records to Cash Disbursements as full payment
-        setCashDisbursements(prev => [{ ...partialPaymentRecord, id: commonId + 2, type_of_transaction: 'CASH', status: 'Cash' }, ...prev]);
-        triggerAlert(`Purchase ${voucherNo} was fully covered! Recorded to Subsidiary Purchases, Payments, and Cash Disbursements.`, 'success');
+        setCashDisbursements(prev => [{
+          ...partialPaymentRecord,
+          id: commonId + 2,
+          type_of_transaction: 'CASH',
+          status: 'Paid',
+          settled_via_collections: true
+        }, ...prev]);
+        triggerAlert(`Purchase ${voucherNo} was fully paid! Recorded to Subsidiary Purchases, Payments Book, and Cash Disbursements.`, 'success');
       } else {
-        triggerAlert(`Partial Purchase ${voucherNo} recorded to Subsidiary Purchases & Payments. Disbursed: ₱${downPmt.toLocaleString()} (Remaining payable: ₱${(totalDue - downPmt).toLocaleString()}).`, 'info');
+        triggerAlert(`Partial Purchase ${voucherNo} recorded to Subsidiary Purchases & Payments Book. Disbursed: ₱${actualFirstCash.toLocaleString()} (Remaining payable: ₱${pendingBal.toLocaleString()}).`, 'info');
       }
-    }
-
-    // 3. RECORD SPECIAL JOURNAL ENTRIES FOR PURCHASE
-    if (setSpecialEntries) {
-      const newSJs: SpecialEntry[] = [];
-      const entryId = Date.now();
-      const expAmt = liveFormulas.vatable_purchases || liveFormulas.net_of_discount;
-      const inputVatAmt = liveFormulas.input_vat;
-
-      const pLines: SpecialEntryLine[] = [
-        { type: 'Debit', account_code: '6020', account_title: expenseType, amount: expAmt }
-      ];
-      if (inputVatAmt > 0) {
-        pLines.push({ type: 'Debit', account_code: '1030', account_title: 'Input Tax', amount: inputVatAmt });
-      }
-      pLines.push({ type: 'Credit', account_code: '2010', account_title: 'Accounts Payable', amount: totalDue });
-
-      newSJs.push({
-        id: entryId,
-        company_name: activeCompanyName,
-        entry_number: `SJ-PUR-${voucherNo.trim()}`,
-        voucher_no: voucherNo.trim(),
-        entry_date: date,
-        entry_type: 'Purchases / Expense Recognition',
-        description: `Expense Voucher #${voucherNo.trim()} - ${expenseType} (${providerName.trim()})`,
-        lines: pLines,
-        created_at: nowIso
-      });
-
-      if (purchaseMode === 'ON CASH') {
-        const cashDisbursed = Math.max(0, totalDue - (liveFormulas.tax_withheld || 0));
-        const disLines: SpecialEntryLine[] = [
-          { type: 'Debit', account_code: '2010', account_title: 'Accounts Payable', amount: totalDue },
-          { type: 'Credit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashDisbursed }
-        ];
-        if (liveFormulas.tax_withheld > 0) {
-          disLines.push({ type: 'Credit', account_code: '2030', account_title: 'Withholding Tax Payable - Expanded (BIR 2307)', amount: liveFormulas.tax_withheld });
-        }
-        newSJs.push({
-          id: entryId + 1,
-          company_name: activeCompanyName,
-          entry_number: `SJ-DIS-${voucherNo.trim()}`,
-          voucher_no: `CD-${voucherNo.trim()}`,
-          entry_date: date,
-          entry_type: 'Cash Disbursement / Settlement',
-          description: `Disbursement Settlement for Voucher #${voucherNo.trim()} (${providerName.trim()})`,
-          lines: disLines,
-          created_at: nowIso
-        });
-      }
-
-      setSpecialEntries(prev => [...newSJs, ...prev]);
     }
 
     // Reset Form for next entry
@@ -484,7 +470,7 @@ export default function PurchaseTransactionTab({
     if (!selectedPayableToPay) return;
 
     const paymentAmt = parseFloat(payAmount) || 0;
-    const wtaxAmt = parseFloat(payWtax) || 0;
+    const wtaxInputAmt = parseFloat(payWtax) || 0;
 
     if (paymentAmt <= 0) {
       triggerAlert('Please enter a valid disbursement amount.', 'error');
@@ -493,111 +479,151 @@ export default function PurchaseTransactionTab({
 
     const payRec = selectedPayableToPay;
     const payTotalDue = Number(payRec.total_amount_due || payRec.amount) || 0;
+    const payEwt = Number(payRec.tax_withheld || payRec.withholding_tax_2307) || 0;
+    const targetNetCash = Math.max(0, Math.round((payTotalDue - payEwt) * 100) / 100);
 
-    // Calculate previous disbursements
+    // Find existing Payments Book records for this voucher
     const existingMatching = payments.filter(pm => 
       !pm.is_cancelled && 
       ((pm.voucher_number && payRec.voucher_number && pm.voucher_number.trim().toLowerCase() === payRec.voucher_number.trim().toLowerCase()) ||
        (pm.invoice_number && payRec.invoice_number && pm.invoice_number.trim().toLowerCase() === payRec.invoice_number.trim().toLowerCase()))
     );
-    const prevPaid = existingMatching.reduce((sum, pm) => sum + (Number(pm.amount_paid || pm.amount) || 0), 0);
-    const newTotalPaid = prevPaid + paymentAmt;
-    const isNowFullyPaid = newTotalPaid >= payTotalDue;
+    const prevPaid = existingMatching.reduce((sum, pm) => sum + (Number(pm.amount_paid) || 0), 0);
+    const newTotalPaid = Math.round((prevPaid + paymentAmt) * 100) / 100;
+    const effectiveEwt = wtaxInputAmt > 0 ? wtaxInputAmt : payEwt;
+    const isNowFullyPaid = (newTotalPaid + effectiveEwt) >= payTotalDue - 0.01 || newTotalPaid >= targetNetCash - 0.01;
+    const remainingPending = isNowFullyPaid ? 0 : Math.max(0, Math.round((targetNetCash - newTotalPaid) * 100) / 100);
 
     const commonId = Date.now();
     const nowIso = new Date().toISOString();
 
-    // 1. Add record to Payments
-    const newPaymentRec: UniformBookRecord = {
-      id: commonId,
-      company_name: activeCompanyName,
-      registered_name: payRec.registered_name,
-      vat_or_nonvat: payRec.vat_or_nonvat,
-      tin: payRec.tin,
-      address: payRec.address,
-      type_of_transaction: 'ON ACCOUNT',
-      date: payDate,
-      invoice_type: 'OFFICIAL RECEIPT',
-      voucher_number: payRec.voucher_number,
-      invoice_number: payRec.invoice_number,
-      particulars: `Payment for Voucher #${payRec.voucher_number} (${isNowFullyPaid ? 'Final Full Payment' : 'Installment'})`,
-      qty: 1,
-      unit_price: paymentAmt,
-      amount: paymentAmt,
-      vatable_amount: Math.round((paymentAmt / 1.12) * 100) / 100,
-      vat_amount: Math.round((paymentAmt - paymentAmt / 1.12) * 100) / 100,
-      zero_rated_amount: 0,
-      vat_exempt_amount: 0,
-      total_amount_vat_inclusive: paymentAmt,
-      total_amount_net_of_vat: Math.round((paymentAmt / 1.12) * 100) / 100,
-      discount: 0,
-      tax_withheld: wtaxAmt,
-      total_amount_due: payTotalDue,
-      amount_paid: paymentAmt,
-      withholding_tax_2307: wtaxAmt,
-      status: isNowFullyPaid ? 'Paid' : 'Partial',
-      is_cancelled: false,
-      created_at: nowIso
-    };
-
-    setPayments(prev => [newPaymentRec, ...prev]);
+    // 1. Update or add record in Payments Book
+    if (existingMatching.length > 0) {
+      const primaryId = existingMatching[0].id;
+      setPayments(prev => prev.map(pm => {
+        if (pm.id === primaryId) {
+          const prevInst = Array.isArray(pm.installments) && pm.installments.length > 0
+            ? pm.installments
+            : (Number(pm.amount_paid) > 0 ? [{
+                payment_no: 1,
+                date: pm.date,
+                ref_no: pm.voucher_number || `PV-1`,
+                cash_amount: Number(pm.amount_paid) || 0
+              }] : []);
+          const nextInstallment = {
+            payment_no: prevInst.length + 1,
+            date: payDate,
+            ref_no: payRefNo.trim() || `PV-${Date.now().toString().slice(-4)}`,
+            cash_amount: paymentAmt,
+            wtax_2307: isNowFullyPaid ? effectiveEwt : wtaxInputAmt
+          };
+          return {
+            ...pm,
+            date: payDate,
+            vatable_amount: Number(payRec.vatable_amount) || pm.vatable_amount,
+            vat_amount: Number(payRec.vat_amount) || pm.vat_amount,
+            total_amount_vat_inclusive: Number(payRec.total_amount_vat_inclusive || payRec.amount) || pm.total_amount_vat_inclusive,
+            tax_withheld: effectiveEwt,
+            withholding_tax_2307: effectiveEwt,
+            total_amount_due: payTotalDue,
+            amount_paid: newTotalPaid,
+            pending_balance: remainingPending,
+            settled_via_collections: true,
+            installments: [...prevInst, nextInstallment],
+            status: isNowFullyPaid ? 'Paid' : 'Partial',
+            particulars: isNowFullyPaid
+              ? `Full Payment Completed for Voucher #${payRec.voucher_number} (Total Cash Disbursed: ₱${newTotalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
+              : `Partial Payment (${prevInst.length + 1}) for Voucher #${payRec.voucher_number} (Paid: ₱${newTotalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}, Pending: ₱${remainingPending.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
+          };
+        }
+        return pm;
+      }));
+    } else {
+      const newPaymentRec: UniformBookRecord = {
+        id: commonId,
+        company_name: activeCompanyName,
+        registered_name: payRec.registered_name,
+        vat_or_nonvat: payRec.vat_or_nonvat,
+        tin: payRec.tin,
+        address: payRec.address,
+        type_of_transaction: 'ON ACCOUNT',
+        date: payDate,
+        invoice_type: 'OFFICIAL RECEIPT',
+        voucher_number: payRec.voucher_number,
+        invoice_number: payRec.invoice_number,
+        particulars: `Payment for Voucher #${payRec.voucher_number} (${isNowFullyPaid ? 'Final Full Payment' : 'Installment'})`,
+        qty: Number(payRec.qty) || 1,
+        unit_price: Number(payRec.unit_price) || payTotalDue,
+        amount: Number(payRec.amount) || payTotalDue,
+        vatable_amount: Number(payRec.vatable_amount) || 0,
+        vat_amount: Number(payRec.vat_amount) || 0,
+        zero_rated_amount: Number(payRec.zero_rated_amount) || 0,
+        vat_exempt_amount: Number(payRec.vat_exempt_amount) || 0,
+        total_amount_vat_inclusive: Number(payRec.total_amount_vat_inclusive || payRec.amount) || payTotalDue,
+        total_amount_net_of_vat: Number(payRec.total_amount_net_of_vat) || 0,
+        discount: Number(payRec.discount) || 0,
+        tax_withheld: effectiveEwt,
+        total_amount_due: payTotalDue,
+        amount_paid: paymentAmt,
+        pending_balance: remainingPending,
+        withholding_tax_2307: effectiveEwt,
+        settled_via_collections: true,
+        installments: [
+          {
+            payment_no: 1,
+            date: payDate,
+            ref_no: payRefNo.trim() || `PV-${Date.now().toString().slice(-4)}`,
+            cash_amount: paymentAmt,
+            wtax_2307: isNowFullyPaid ? effectiveEwt : wtaxInputAmt
+          }
+        ],
+        status: isNowFullyPaid ? 'Paid' : 'Partial',
+        is_cancelled: false,
+        created_at: nowIso
+      };
+      setPayments(prev => [newPaymentRec, ...prev]);
+    }
 
     // 2. Update status in Subsidiary Purchases
     setSubsidiaryPurchases(prev => prev.map(p => {
       if (p.voucher_number === payRec.voucher_number) {
         return {
           ...p,
-          status: isNowFullyPaid ? 'Paid' : 'Partial'
+          status: isNowFullyPaid ? 'Paid' : 'Partial',
+          amount_paid: newTotalPaid,
+          pending_balance: remainingPending
         };
       }
       return p;
     }));
 
     // 3. If payments for this purchase reach FULL payment:
-    // That's when it will record to CASH DISBURSEMENTS!
+    // Record to CASH DISBURSEMENTS with settled_via_collections: true
     if (isNowFullyPaid) {
       const fullCashDisbursement: UniformBookRecord = {
-        ...newPaymentRec,
+        ...payRec,
         id: commonId + 1,
+        date: payDate,
         type_of_transaction: 'CASH',
-        status: 'Cash',
-        particulars: `Full Cash Settlement Cleared: Voucher #${payRec.voucher_number} (${payRec.registered_name})`
+        status: 'Paid',
+        amount_paid: newTotalPaid,
+        pending_balance: 0,
+        tax_withheld: effectiveEwt,
+        withholding_tax_2307: effectiveEwt,
+        settled_via_collections: true,
+        particulars: `Full Settlement Completed via Payments Book: Voucher #${payRec.voucher_number} (${payRec.registered_name})`
       };
       setCashDisbursements(prev => [fullCashDisbursement, ...prev]);
 
       triggerAlert(
-        `Voucher #${payRec.voucher_number} is now FULLY PAID (₱${newTotalPaid.toLocaleString()}) and has been automatically recorded to Cash Disbursements!`,
+        `Voucher #${payRec.voucher_number} is now FULLY PAID and has been automatically recorded to Cash Disbursements!`,
         'success'
       );
     } else {
       triggerAlert(
-        `Recorded partial disbursement of ₱${paymentAmt.toLocaleString()} for Voucher #${payRec.voucher_number}. Remaining payable: ₱${(payTotalDue - newTotalPaid).toLocaleString()}.`,
+        `Recorded partial disbursement of ₱${paymentAmt.toLocaleString()} for Voucher #${payRec.voucher_number}. Remaining payable: ₱${remainingPending.toLocaleString()}.`,
         'info'
       );
-    }
-
-    // 4. Record to Special Journal
-    if (setSpecialEntries) {
-      const cashDisbursed = Math.max(0, paymentAmt - wtaxAmt);
-      const disLines: SpecialEntryLine[] = [
-        { type: 'Debit', account_code: '2010', account_title: 'Accounts Payable', amount: paymentAmt },
-        { type: 'Credit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashDisbursed }
-      ];
-      if (wtaxAmt > 0) {
-        disLines.push({ type: 'Credit', account_code: '2030', account_title: 'Withholding Tax Payable - Expanded (BIR 2307)', amount: wtaxAmt });
-      }
-
-      setSpecialEntries(prev => [{
-        id: Date.now(),
-        company_name: activeCompanyName,
-        entry_number: `SJ-DIS-${payRec.voucher_number}-${Date.now().toString().slice(-4)}`,
-        voucher_no: payRefNo.trim() || `PV-${Date.now().toString().slice(-4)}`,
-        entry_date: payDate,
-        entry_type: 'Cash Disbursement / Settlement',
-        description: `Disbursement for Voucher #${payRec.voucher_number} (${payRec.registered_name})`,
-        lines: disLines,
-        created_at: new Date().toISOString()
-      }, ...prev]);
     }
 
     setSelectedPayableToPay(null);
