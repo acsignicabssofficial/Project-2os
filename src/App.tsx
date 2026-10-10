@@ -745,7 +745,7 @@ export default function App() {
     | 'companies' | 'customers' | 'providers' | 'related_parties' | 'employees' // Group 2
     | 'dashboard' | 'account_titles' | 'tax_calendar' | 'activities' | 'activity_lists' | 'about_app' | 'system_specs' | 'about' // Group 3
     | 'tax_reports' | 'income_tax' | 'ppe' | 'payroll' | 'contribution_tables' | 'cwt_customers' | 'cwt_providers' | 'special_entries' // Group 4
-    | 'fs_position' | 'fs_income' | 'fs_equity' | 'fs_cashflows' | 'fs_notes' // Group 5
+    | 'fs_balance_sheet' | 'fs_position' | 'fs_position_pfrs' | 'fs_income' | 'fs_equity' | 'fs_cashflows' | 'fs_notes' // Group 5
     | 'bir_2316' | 'bir_slsp' | 'bir_qap' | 'bir_sawt' // Group 6
     | 'reports' // Group 7
   >('dashboard');
@@ -1115,7 +1115,7 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen ${activeTheme.bgMain} flex flex-col font-sans antialiased ${activeTheme.textMain} transition-colors duration-200`}>
+    <div className={`min-h-screen ${activeTheme.isLight ? 'theme-light' : 'theme-dark'} ${activeTheme.bgMain} flex flex-col font-sans antialiased ${activeTheme.textMain} transition-colors duration-200`}>
       
       {/* ALERTS */}
       <AnimatePresence>
@@ -1626,6 +1626,7 @@ export default function App() {
                   accountTitles={accountTitles}
                   activeCompany={activeCompany}
                   theme={activeTheme}
+                  mode={activeTab === 'fs_balance_sheet' ? 'balance_sheet' : 'financial_position'}
                 />
               )}
 
