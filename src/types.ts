@@ -201,6 +201,7 @@ export interface Sale {
   is_cancelled?: boolean;
   cancel_reason?: string;
   cancel_date?: string;
+  is_various_customer?: boolean;
 }
 
 export interface Expense {
@@ -630,6 +631,7 @@ export interface UniformBookRecord {
   installments?: PaymentInstallment[];
   pending_balance?: number;
   settled_via_collections?: boolean;
+  is_various_customer?: boolean;
 
   // Inter-compatibility properties for existing components/reports
   customer_id?: string;

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Plus, Search, CheckCircle2, Calendar, FileText, Trash2, Pencil } from 'lucide-react';
 import { AccountTitle, Company, Sale, Collection, Expense, Payment, SpecialEntry } from '../types';
 import { INITIAL_ACCOUNT_TITLES } from '../data';
-import { computeSalesVAT, computeExpenseVAT } from '../utils/accounting';
+import { computeSalesVAT, computeExpenseVAT, buildMasterJournalEntries } from '../utils/accounting';
 
 interface AccountTitlesTabProps {
   accountTitles: AccountTitle[];
@@ -148,114 +148,31 @@ export default function AccountTitlesTab({
       cur.credit += cleanCr;
     };
 
-    // Sales
-    // CWT (2307) is only recognized here for sales already "Paid" at
-    // invoicing AND that have no separate Collection entries logged against
-    // them yet. For Partial/Pending sales - and any "Paid" sale that
-    // unexpectedly already has Collections against it - CWT is recognized
-    // later via the matching Collection (below) instead.
-    const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    sales.filter(s => isDateInPeriod(s.invoice_date)).forEach(s => {
-      const invAmt = Number(s.invoice_amount) || 0;
-      const w2307 = Number(s.withholding_2307) || 0;
-      const vatExempt = Number(s.vat_exempt_amount) || 0;
-      const discounts = Number(s.discounts) || 0;
-      const { vatable_amount: vatableCalc, output_vat: outVatCalc, net_of_discount: netInvoice } = computeSalesVAT(invAmt, vatExempt, discounts);
-      const vatable = Number(s.vatable_amount) || vatableCalc;
-      const outVat = Number(s.output_vat) || outVatCalc;
-      const hasCollections = collections.some(c => normalizeDocNo(c.invoice_number) === normalizeDocNo(s.invoice_number));
+    // Derive double-entry postings strictly from buildMasterJournalEntries
+    const periodSales = sales.filter(s => isDateInPeriod((s as any).invoice_date || (s as any).date));
+    const periodColls = collections.filter(c => isDateInPeriod((c as any).collection_date || (c as any).date));
+    const periodExp = expenses.filter(e => isDateInPeriod((e as any).expense_date || (e as any).date));
+    const periodPay = payments.filter(p => isDateInPeriod((p as any).payment_date || (p as any).date));
+    const periodSpecial = specialEntries.filter(s => isDateInPeriod((s as any).date || (s as any).entry_date));
 
-      // 4010 Sales Revenue (Cr) - booked gross, discount shown separately below
-      addVal('4010', 0, vatable + vatExempt + discounts);
-      // 4015 Sales Discounts (Dr, contra-revenue)
-      if (discounts > 0) addVal('4015', discounts, 0);
-      // 2020 Output VAT (Cr)
-      if (outVat > 0) addVal('2020', 0, outVat);
-
-      if (s.sales_status === 'Paid' && !hasCollections) {
-        // 1010 Cash (Dr)
-        addVal('1010', Math.max(0, netInvoice - w2307), 0);
-        // 1040 2307 CWT (Dr)
-        if (w2307 > 0) addVal('1040', w2307, 0);
-      } else {
-        const dp = Number(s.down_payment) || 0;
-        if (dp > 0) {
-          addVal('1010', Math.min(dp, netInvoice), 0);
-          addVal('1020', Math.max(0, netInvoice - dp), 0);
-        } else {
-          // 1020 AR (Dr)
-          addVal('1020', netInvoice, 0);
-        }
-      }
+    const masterEntries = buildMasterJournalEntries({
+      sales: periodSales,
+      collections: periodColls,
+      cashReceipts: [],
+      expenses: periodExp,
+      payments: periodPay,
+      cashDisbursements: [],
+      specialEntries: periodSpecial,
+      accountTitles: effectiveAccountTitles,
+      companyName: activeCompany?.company_name || ''
     });
 
-    // Collections
-    collections.filter(c => isDateInPeriod(c.collection_date)).forEach(c => {
-      const colAmt = Number(c.amount_collected) || 0;
-      const w2307 = Number(c.amount_withheld_2307 || (c as any).tax_withheld) || 0;
-      const discount = Number((c as any).discount || (c as any).discounts) || 0;
-      // 1010 Cash (Dr)
-      addVal('1010', colAmt, 0);
-      // 4015 Sales Discounts (Dr)
-      if (discount > 0) addVal('4015', discount, 0);
-      // 1040 2307 CWT (Dr)
-      if (w2307 > 0) addVal('1040', w2307, 0);
-      // 1020 AR (Cr) - gross receivable cleared
-      addVal('1020', 0, colAmt + discount + w2307);
-    });
-
-    // Expenses
-    // EWT payable is only recognized here for vouchers already "Paid". For
-    // unpaid vouchers, it is recognized later via the matching Payment.
-    expenses.filter(e => isDateInPeriod(e.expense_date)).forEach(e => {
-      const expInvAmt = Number(e.expense_invoice_amount) || 0;
-      const w2307 = Number(e.withholding_2307_2306) || 0;
-      const discounts = Number(e.discounts) || 0;
-      const isVat = e.nonvat_or_vat === 'VAT';
-      const { vatable_expense_amount, vat_input_amount, nonvat_expense_amount, net_of_discount: netInvoice } = computeExpenseVAT(expInvAmt, discounts, isVat);
-      const inputVat = Number(e.vat_input_amount) || vat_input_amount;
-      const expAmt = isVat ? (Number(e.vatable_expense_amount) || vatable_expense_amount) : (Number(e.nonvat_expense_amount) || nonvat_expense_amount);
-
-      const matched = effectiveAccountTitles.find(a => a.title.toLowerCase() === e.expense_type.toLowerCase() || a.category === e.expense_type);
-      const expCode = matched ? matched.code : '6100';
-
-      addVal(expCode, expAmt, 0);
-
-      // 1030 Input VAT (Dr)
-      if (inputVat > 0) addVal('1030', inputVat, 0);
-
-      if (e.expense_status === 'Paid') {
-        // 1010 Cash (Cr)
-        addVal('1010', 0, netInvoice - w2307);
-        // 2030 Expanded Withholding (Cr)
-        if (w2307 > 0) addVal('2030', 0, w2307);
-      } else {
-        // 2010 AP (Cr)
-        addVal('2010', 0, netInvoice);
-      }
-    });
-
-    // Payments
-    payments.filter(p => isDateInPeriod(p.payment_date)).forEach(p => {
-      const amtPaid = Number(p.amount_paid) || 0;
-      const w2307 = Number(p.withholding_tax_2307) || 0;
-      // 2010 AP (Dr)
-      addVal('2010', amtPaid + w2307, 0);
-      // 1010 Cash (Cr)
-      addVal('1010', 0, amtPaid);
-      // 2030 Expanded Withholding Tax Payable (Cr)
-      if (w2307 > 0) addVal('2030', 0, w2307);
-    });
-
-    // Special Entries
-    specialEntries.filter(s => isDateInPeriod(s.entry_date)).forEach(s => {
-      s.lines.forEach(l => {
-        const amt = Number(l.amount) || 0;
-        if (l.type === 'Debit') {
-          addVal(l.account_code, amt, 0);
-        } else {
-          addVal(l.account_code, 0, amt);
-        }
+    masterEntries.forEach(entry => {
+      entry.debits.forEach(d => {
+        addVal(d.account_code, Number(d.amount) || 0, 0);
+      });
+      entry.credits.forEach(c => {
+        addVal(c.account_code, 0, Number(c.amount) || 0);
       });
     });
 

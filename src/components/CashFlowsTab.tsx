@@ -1,15 +1,19 @@
 import React, { useMemo } from 'react';
 import { Activity } from 'lucide-react';
-import { Sale, Collection, Expense, Payment, PPEAsset, PayrollRecord, SpecialEntry, Company } from '../types';
+import { Sale, Collection, Expense, Payment, PPEAsset, PayrollRecord, SpecialEntry, Company, AccountTitle } from '../types';
+import { computeAccountingSummaries } from '../utils/accounting';
 
 interface CashFlowsTabProps {
   sales: Sale[];
   collections: Collection[];
+  cashReceipts?: any[];
   expenses: Expense[];
   payments: Payment[];
+  cashDisbursements?: any[];
   ppeAssets?: PPEAsset[];
   payrollRecords?: PayrollRecord[];
   specialEntries?: SpecialEntry[];
+  accountTitles?: AccountTitle[];
   activeCompany: Company | null;
   theme: any;
 }
@@ -17,54 +21,42 @@ interface CashFlowsTabProps {
 export default function CashFlowsTab({
   sales,
   collections,
+  cashReceipts = [],
   expenses,
   payments,
+  cashDisbursements = [],
   ppeAssets = [],
   payrollRecords = [],
   specialEntries = [],
+  accountTitles = [],
   activeCompany,
   theme
 }: CashFlowsTabProps) {
+  const companyName = activeCompany?.company_name || '';
 
   const cf = useMemo(() => {
-    // Operating Cash Inflows
-    const cashFromColls = collections.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
-    const cashFromPaidSales = sales.filter(s => s.sales_status === 'Paid').reduce((sum, s) =>
-      sum + Math.max(0, (Number(s.invoice_amount) || 0) - (Number(s.discounts) || 0)) - (Number(s.withholding_2307) || 0), 0);
-    const totalOperatingInflows = cashFromColls + cashFromPaidSales;
-
-    // Operating Cash Outflows
-    const cashPaidExpenses = expenses.filter(e => e.expense_status === 'Paid').reduce((sum, e) =>
-      sum + Math.max(0, (Number(e.expense_invoice_amount) || 0) - (Number(e.discounts) || 0)) - (Number(e.withholding_2307_2306) || 0), 0);
-    const cashDisbursedPayments = payments.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
-    const netPayDisbursed = payrollRecords.reduce((sum, p) => sum + (Number(p.net_pay) || 0), 0);
-    const totalOperatingOutflows = cashPaidExpenses + cashDisbursedPayments + netPayDisbursed;
-
-    const netOperatingCashFlow = totalOperatingInflows - totalOperatingOutflows;
-
-    // Investing Cash Outflows
-    const ppeAdditions = ppeAssets.reduce((sum, a) => sum + (Number(a.acquisition_cost) || 0), 0);
-    const netInvestingCashFlow = -ppeAdditions;
-
-    // Financing Cash Flows - derived only from actual recorded transactions
-    // (owner capital contributions/withdrawals recorded via Special Entries,
-    // Debit/Credit account 3010). No hardcoded seed capital.
-    let capitalContributions = 0;
-    let ownerDrawings = 0;
-    specialEntries.forEach(s => {
-      s.lines.forEach(l => {
-        if (l.account_code === '3010') {
-          const amt = Number(l.amount) || 0;
-          if (l.type === 'Credit') capitalContributions += amt;
-          else ownerDrawings += amt;
-        }
-      });
+    const s = computeAccountingSummaries({
+      sales,
+      collections,
+      cashReceipts,
+      expenses,
+      payments,
+      cashDisbursements,
+      ppeAssets,
+      specialEntries,
+      payrollRecords,
+      accountTitles,
+      companyName
     });
-    const netFinancingCashFlow = capitalContributions - ownerDrawings;
 
-    const netChangeInCash = netOperatingCashFlow + netInvestingCashFlow + netFinancingCashFlow;
+    const totalOperatingInflows = s.cashInflowsFromCustomers;
+    const totalOperatingOutflows = Math.round((s.cashOutflowsToSuppliersAndExpenses + s.cashOutflowsToPayroll) * 100) / 100;
+    const netOperatingCashFlow = s.netOperatingCashFlow;
+    const netInvestingCashFlow = s.netInvestingCashFlow;
+    const netFinancingCashFlow = s.netFinancingCashFlow;
+    const netChangeInCash = Math.round((netOperatingCashFlow + netInvestingCashFlow + netFinancingCashFlow) * 100) / 100;
     const beginningCash = 0;
-    const endingCash = beginningCash + netChangeInCash;
+    const endingCash = s.cash;
 
     return {
       totalOperatingInflows,
@@ -76,7 +68,7 @@ export default function CashFlowsTab({
       beginningCash,
       endingCash
     };
-  }, [sales, collections, expenses, payments, ppeAssets, payrollRecords, specialEntries]);
+  }, [sales, collections, cashReceipts, expenses, payments, cashDisbursements, ppeAssets, payrollRecords, specialEntries, accountTitles, companyName]);
 
   return (
     <div className="space-y-6">

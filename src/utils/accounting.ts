@@ -425,6 +425,11 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
   const entries: JournalEntry[] = [];
   let idCounter = 1;
 
+  // Track invoices and vouchers already journalized by Cash Receipts / Cash Disbursements
+  // to strictly prevent double-counting in Collections Book and Payments Book (Clarifications 5.4 & 6.3)
+  const directCashReceiptInvoices = new Set<string>();
+  const directCashDisbursementVouchers = new Set<string>();
+
   // Filter out any legacy auto-generated SJ-SLS / SJ-COL / SJ-PUR / SJ-DIS special entries to prevent double-counting
   const manualSpecialEntries = specialEntries.filter(s => {
     const vNo = (s.voucher_no || s.entry_number || '').toUpperCase();
@@ -536,39 +541,86 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const matchingColls = collections.filter(c => !c.is_cancelled && normalizeDocNo(c.invoice_number) === normInv);
 
     // Determine if this was a direct Full Cash Sale (5.3) vs Partial/Installment Sale (6.4)
-    const isDirectFullCashSale =
-      s.type_of_transaction === 'CASH' &&
-      matchingColls.length <= 1 &&
-      (matchingColls.length === 0 || matchingColls[0].type_of_transaction === 'CASH');
+    const isSaleCashPaid =
+      (s.type_of_transaction || '').toUpperCase().includes('CASH') ||
+      (s.status || '').toLowerCase() === 'paid' ||
+      (s.status || '').toLowerCase() === 'cash' ||
+      (s.sales_status || '').toLowerCase() === 'paid' ||
+      (s.payment_type || '').toLowerCase() === 'paid';
 
-    if (isDirectFullCashSale && (s.status === 'Paid' || s.status === 'Cash' || s.sales_status === 'Paid' || s.type_of_transaction === 'CASH')) {
-      // 5.3 Cash Receipts Book records the journal entry for direct full cash sales:
-      // Dr Cash (22,767.86), Dr Creditable Withholding Tax (2,232.14), (Dr Discount), Cr Accounts Receivable (25,000)
+    const isPartialOrInstallment =
+      (s.status || '').toLowerCase() === 'partial' ||
+      (s.status || '').toLowerCase() === 'on account' ||
+      (s.sales_status || '').toLowerCase() === 'partial' ||
+      (s.sales_status || '').toLowerCase() === 'on account' ||
+      (s.payment_type || '').toLowerCase() === 'partial' ||
+      (s.payment_type || '').toLowerCase() === 'on_account' ||
+      (Number(s.down_payment) > 0 && Number(s.down_payment) < totalGrossSales - 0.5) ||
+      matchingColls.some(c => Array.isArray(c.installments) && c.installments.length > 1) ||
+      matchingColls.length > 1;
+
+    const isDirectFullCashSale = isSaleCashPaid && !isPartialOrInstallment;
+
+    if (isDirectFullCashSale) {
+      // 5.3 Cash Receipts Book records the journal entries for direct full cash sales:
       const cashReceived = Math.max(0, Math.round((totalGrossSales - discounts - w2307) * 100) / 100);
-      const crDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-      if (cashReceived > 0) {
-        crDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashReceived });
-      }
-      if (discounts > 0) {
-        crDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discounts });
-      }
-      if (w2307 > 0) {
-        crDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
+      const cashPlusDisc = Math.round((cashReceived + discounts) * 100) / 100;
+
+      // Journal Entry 1: Cash Collection (and Sales Discounts if any)
+      // Dr Cash (22,767.86), (Dr Sales Discounts), Cr Accounts Receivable (22,767.86)
+      if (cashPlusDisc > 0) {
+        const crDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
+        if (cashReceived > 0) {
+          crDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashReceived });
+        }
+        if (discounts > 0) {
+          crDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discounts });
+        }
+
+        entries.push({
+          id: idCounter++,
+          company_name: s.company_name || companyName,
+          entry_no: `GJ-CR-${s.invoice_number}`,
+          date: saleDate,
+          ref_type: 'Collection',
+          ref_no: s.invoice_number,
+          description: `Cash Receipts Book: Journal entry 1 (cash collection for Invoice #${s.invoice_number}) - ${customerName}`,
+          debits: crDebits,
+          credits: [
+            { account_code: '1020', account_title: 'Accounts Receivable', amount: cashPlusDisc }
+          ]
+        });
       }
 
-      entries.push({
-        id: idCounter++,
-        company_name: s.company_name || companyName,
-        entry_no: `GJ-CR-${s.invoice_number}`,
-        date: saleDate,
-        ref_type: 'Collection',
-        ref_no: s.invoice_number,
-        description: `Cash Receipts Book: Full Payment for Invoice #${s.invoice_number} - ${customerName}`,
-        debits: crDebits,
-        credits: [
-          { account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
-        ]
-      });
+      // Journal Entry 2 (to recognize full payment / 2307 CWT):
+      // Dr Creditable Withholding Tax (BIR 2307), Cr Accounts Receivable
+      if (w2307 > 0) {
+        entries.push({
+          id: idCounter++,
+          company_name: s.company_name || companyName,
+          entry_no: `GJ-CWT-${s.invoice_number}`,
+          date: saleDate,
+          ref_type: 'Collection',
+          ref_no: s.invoice_number,
+          description: `Cash Receipts Book: Journal entry 2 (to recognize full payment / CWT 2307 for Invoice #${s.invoice_number}) - ${customerName}`,
+          debits: [
+            { account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 }
+          ],
+          credits: [
+            { account_code: '1020', account_title: 'Accounts Receivable', amount: w2307 }
+          ]
+        });
+      }
+
+      if (normInv) {
+        directCashReceiptInvoices.add(normInv);
+      }
+      if (s.invoice_number) {
+        directCashReceiptInvoices.add(s.invoice_number.trim().toLowerCase());
+      }
+      if (s.voucher_number) {
+        directCashReceiptInvoices.add(normalizeDocNo(s.voucher_number));
+      }
     }
   });
 
@@ -580,17 +632,37 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
   sortedCollections.forEach((c, idx) => {
     if (c.is_cancelled) return;
     const normInv = normalizeDocNo(c.invoice_number);
+    const rawInvLower = (c.invoice_number || '').trim().toLowerCase();
+    const normVoucher = normalizeDocNo(c.voucher_number);
+
+    // 5.4 Collections book also records a cash sale, but NO duplicate journal entry (already journalized in 5.3 Cash Receipts)
+    if (
+      (normInv && directCashReceiptInvoices.has(normInv)) ||
+      (rawInvLower && directCashReceiptInvoices.has(rawInvLower)) ||
+      (normVoucher && directCashReceiptInvoices.has(normVoucher)) ||
+      c.settled_via_collections === true
+    ) {
+      return;
+    }
+
     const matchingSale = sales.find(s => !s.is_cancelled && normalizeDocNo(s.invoice_number) === normInv);
+    const sameInvColls = sortedCollections.filter(col => !col.is_cancelled && normalizeDocNo(col.invoice_number) === normInv);
 
     if (matchingSale) {
-      const matchingColls = sortedCollections.filter(col => !col.is_cancelled && normalizeDocNo(col.invoice_number) === normInv);
-      const isDirectFullCashSale =
-        matchingSale.type_of_transaction === 'CASH' &&
-        matchingColls.length <= 1 &&
-        (c.type_of_transaction === 'CASH') &&
+      const isSaleCashPaid =
+        (matchingSale.type_of_transaction || '').toUpperCase().includes('CASH') ||
+        (matchingSale.status || '').toLowerCase() === 'paid' ||
+        (matchingSale.sales_status || '').toLowerCase() === 'paid';
+      const isNotPartial =
+        !matchingSale.down_payment ||
+        Number(matchingSale.down_payment) <= 0 ||
+        Number(matchingSale.down_payment) >= (Number(matchingSale.total_amount_vat_inclusive || matchingSale.amount) || 0) - 0.5;
+      const isSingleCollection =
+        sameInvColls.length <= 1 &&
         (!Array.isArray(c.installments) || c.installments.length <= 1);
-      if (isDirectFullCashSale) {
-        // 5.4 Collections book also records a cash sale, but NO journal entry (already journalized in 5.3 Cash Receipts)
+
+      if (isSaleCashPaid && isNotPartial && isSingleCollection) {
+        // Direct cash sale already accounted for; do not duplicate in Collections Book
         return;
       }
     }
@@ -656,7 +728,6 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     }
 
     // Fallback for multi-row or single-row collection records without installments array
-    const sameInvColls = sortedCollections.filter(col => !col.is_cancelled && normalizeDocNo(col.invoice_number) === normInv);
     const pmtOrder = sameInvColls.findIndex(col => col.id === c.id) + 1 || (idx + 1);
     const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd collection' : `for #${pmtOrder} collection`;
 
@@ -764,10 +835,21 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     // Check if paid in full directly without separate payment records, or via direct cash purchase
     const normVoucher = normalizeDocNo(vNo);
     const matchingPmts = payments.filter(p => !p.is_cancelled && (normalizeDocNo(p.voucher_number) === normVoucher || normalizeDocNo(p.invoice_number) === normVoucher));
-    const isDirectCashPurchase =
-      e.type_of_transaction === 'CASH' &&
-      matchingPmts.length <= 1 &&
-      (matchingPmts.length === 0 || (matchingPmts[0].type_of_transaction === 'CASH' && (!Array.isArray(matchingPmts[0].installments) || matchingPmts[0].installments.length <= 1)));
+    const isExpCashPaid =
+      (e.type_of_transaction || '').toUpperCase().includes('CASH') ||
+      (e.status || '').toLowerCase() === 'paid' ||
+      (e.expense_status || '').toLowerCase() === 'paid' ||
+      (e.payment_type || '').toLowerCase() === 'paid';
+    const isExpPartial =
+      (e.status || '').toLowerCase() === 'partial' ||
+      (e.status || '').toLowerCase() === 'on account' ||
+      (e.expense_status || '').toLowerCase() === 'partial' ||
+      (e.expense_status || '').toLowerCase() === 'on account' ||
+      (Number(e.down_payment) > 0 && Number(e.down_payment) < grossPayable - 0.5) ||
+      matchingPmts.some(p => Array.isArray(p.installments) && p.installments.length > 1) ||
+      matchingPmts.length > 1;
+
+    const isDirectCashPurchase = isExpCashPaid && !isExpPartial;
 
     if (isDirectCashPurchase) {
       const cashPaid = Math.max(0, Math.round((grossPayable - w2307) * 100) / 100);
@@ -790,6 +872,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         ],
         credits: cdCredits
       });
+
+      if (normVoucher) {
+        directCashDisbursementVouchers.add(normVoucher);
+      }
+      if (e.invoice_number) {
+        directCashDisbursementVouchers.add(normalizeDocNo(e.invoice_number));
+      }
+      if (vNo) {
+        directCashDisbursementVouchers.add(vNo.trim().toLowerCase());
+      }
     }
   });
 
@@ -801,17 +893,38 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     if (p.is_cancelled) return;
     const vNo = p.voucher_number || p.invoice_number || `PAY-${p.id}`;
     const normVoucher = normalizeDocNo(vNo);
+    const rawVoucherLower = (vNo || '').trim().toLowerCase();
+    const normVoucherNo = normalizeDocNo(p.voucher_number);
+    const normInvNo = normalizeDocNo(p.invoice_number);
+
+    if (
+      (normVoucher && directCashDisbursementVouchers.has(normVoucher)) ||
+      (rawVoucherLower && directCashDisbursementVouchers.has(rawVoucherLower)) ||
+      (normVoucherNo && directCashDisbursementVouchers.has(normVoucherNo)) ||
+      (normInvNo && directCashDisbursementVouchers.has(normInvNo)) ||
+      p.settled_via_collections === true
+    ) {
+      return; // Already journalized in Cash Disbursements Book above; do not duplicate in Payments Book
+    }
+
     const matchingExp = expenses.find(e => !e.is_cancelled && (normalizeDocNo(e.voucher_number) === normVoucher || normalizeDocNo(e.invoice_number) === normVoucher));
+    const sameVoucherPmts = sortedPayments.filter(pm => !pm.is_cancelled && (normalizeDocNo(pm.voucher_number) === normVoucher || normalizeDocNo(pm.invoice_number) === normVoucher));
 
     if (matchingExp) {
-      const matchingPmts = sortedPayments.filter(pm => !pm.is_cancelled && (normalizeDocNo(pm.voucher_number) === normVoucher || normalizeDocNo(pm.invoice_number) === normVoucher));
-      const isDirectCashPurchase =
-        matchingExp.type_of_transaction === 'CASH' &&
-        matchingPmts.length <= 1 &&
-        p.type_of_transaction === 'CASH' &&
+      const isExpCashPaid =
+        (matchingExp.type_of_transaction || '').toUpperCase().includes('CASH') ||
+        (matchingExp.status || '').toLowerCase() === 'paid' ||
+        (matchingExp.expense_status || '').toLowerCase() === 'paid';
+      const isNotPartial =
+        !matchingExp.down_payment ||
+        Number(matchingExp.down_payment) <= 0 ||
+        Number(matchingExp.down_payment) >= (Number(matchingExp.total_amount_vat_inclusive || matchingExp.amount) || 0) - 0.5;
+      const isSinglePayment =
+        sameVoucherPmts.length <= 1 &&
         (!Array.isArray(p.installments) || p.installments.length <= 1);
-      if (isDirectCashPurchase) {
-        return; // Already journalized in Cash Disbursements above
+
+      if (isExpCashPaid && isNotPartial && isSinglePayment) {
+        return; // Direct cash purchase already accounted for
       }
     }
 
@@ -866,7 +979,6 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       return;
     }
 
-    const sameVoucherPmts = sortedPayments.filter(pm => !pm.is_cancelled && (normalizeDocNo(pm.voucher_number) === normVoucher || normalizeDocNo(pm.invoice_number) === normVoucher));
     const pmtOrder = sameVoucherPmts.findIndex(pm => pm.id === p.id) + 1 || (idx + 1);
     const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd payment' : `for #${pmtOrder} payment`;
 

@@ -223,15 +223,15 @@ export default function ExecutiveDashboard({
   const companyRawPay = useMemo(() => payments.filter(p => !compName || p.company_name === compName), [payments, compName]);
 
   // Selected period transactions (month or year)
-  const compSales = useMemo(() => companyRawSales.filter(s => isDateMatch(s.invoice_date || s.issue_date)), [companyRawSales, isDateMatch]);
-  const compColls = useMemo(() => companyRawColls.filter(c => isDateMatch(c.collection_date)), [companyRawColls, isDateMatch]);
-  const compExp = useMemo(() => companyRawExp.filter(e => isDateMatch(e.expense_date || e.issue_date)), [companyRawExp, isDateMatch]);
-  const compPay = useMemo(() => companyRawPay.filter(p => isDateMatch(p.payment_date)), [companyRawPay, isDateMatch]);
+  const compSales = useMemo(() => companyRawSales.filter(s => isDateMatch(s.invoice_date || s.issue_date || (s as any).date)), [companyRawSales, isDateMatch]);
+  const compColls = useMemo(() => companyRawColls.filter(c => isDateMatch(c.collection_date || (c as any).date)), [companyRawColls, isDateMatch]);
+  const compExp = useMemo(() => companyRawExp.filter(e => isDateMatch(e.expense_date || e.issue_date || (e as any).date)), [companyRawExp, isDateMatch]);
+  const compPay = useMemo(() => companyRawPay.filter(p => isDateMatch(p.payment_date || (p as any).date)), [companyRawPay, isDateMatch]);
 
   // Entire active year transactions for multi-period line and area charts
   const compYearSales = useMemo(() => companyRawSales.filter(s => {
     if (currentYear === undefined) return true;
-    const d = s.invoice_date || s.issue_date;
+    const d = s.invoice_date || s.issue_date || (s as any).date;
     if (!d) return true;
     const dt = new Date(d);
     return !isNaN(dt.getTime()) ? dt.getFullYear() === currentYear : true;
@@ -239,7 +239,7 @@ export default function ExecutiveDashboard({
 
   const compYearColls = useMemo(() => companyRawColls.filter(c => {
     if (currentYear === undefined) return true;
-    const d = c.collection_date || c.date;
+    const d = c.collection_date || (c as any).date;
     if (!d) return true;
     const dt = new Date(d);
     return !isNaN(dt.getTime()) ? dt.getFullYear() === currentYear : true;
@@ -247,7 +247,7 @@ export default function ExecutiveDashboard({
 
   const compYearExp = useMemo(() => companyRawExp.filter(e => {
     if (currentYear === undefined) return true;
-    const d = e.expense_date || e.issue_date;
+    const d = e.expense_date || e.issue_date || (e as any).date;
     if (!d) return true;
     const dt = new Date(d);
     return !isNaN(dt.getTime()) ? dt.getFullYear() === currentYear : true;
@@ -320,8 +320,10 @@ export default function ExecutiveDashboard({
     // Expense Categorization for Compact Donut Chart
     const categoryMap: Record<string, number> = {};
     compExp.forEach(e => {
-      const cat = e.expense_category || e.expense_type || 'Operations';
-      categoryMap[cat] = (categoryMap[cat] || 0) + (e.expense_invoice_amount - (e.discounts || 0));
+      const cat = e.expense_category || e.expense_type || (e as any).particulars || 'Operations';
+      const expAmt = Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount) || 0;
+      const expDisc = Number(e.discounts ?? (e as any).discount) || 0;
+      categoryMap[cat] = (categoryMap[cat] || 0) + Math.max(0, expAmt - expDisc);
     });
 
     const sortedCategories = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
@@ -358,18 +360,25 @@ export default function ExecutiveDashboard({
     // Top Customers Ranking
     const customerMap: Record<string, { totalInvoiced: number; totalCollected: number; invoiceCount: number; tin: string }> = {};
     compSales.forEach(s => {
-      const cName = s.customer_name || 'General Client';
+      const cName = s.customer_name || (s as any).registered_name || 'General Client';
+      const cTin = s.customer_tin || (s as any).tin || 'N/A';
       if (!customerMap[cName]) {
-        customerMap[cName] = { totalInvoiced: 0, totalCollected: 0, invoiceCount: 0, tin: s.customer_tin || 'N/A' };
+        customerMap[cName] = { totalInvoiced: 0, totalCollected: 0, invoiceCount: 0, tin: cTin };
       }
-      const invAmt = s.invoice_amount - (s.discounts || 0);
-      customerMap[cName].totalInvoiced += invAmt;
+      const invAmt = Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount) || 0;
+      const disc = Number(s.discounts ?? (s as any).discount) || 0;
+      const netInv = Math.max(0, invAmt - disc);
+      const downPmt = Number((s as any).down_payment) || 0;
+      const sStatus = (s.sales_status || (s as any).status || '').toLowerCase();
+
+      customerMap[cName].totalInvoiced += netInv;
       customerMap[cName].invoiceCount += 1;
       
-      const colMatches = compColls.filter(c => c.invoice_number.toLowerCase() === s.invoice_number.toLowerCase());
+      const sInvNo = (s.invoice_number || '').trim().toLowerCase();
+      const colMatches = sInvNo ? compColls.filter(c => (c.invoice_number || '').trim().toLowerCase() === sInvNo) : [];
       const colAmt = colMatches.length > 0 
-        ? colMatches.reduce((a, b) => a + b.amount_collected + b.amount_withheld_2307, 0) + s.down_payment
-        : (s.sales_status === 'Paid' ? invAmt : (s.sales_status === 'Partial' ? s.down_payment : 0));
+        ? colMatches.reduce((a, b) => a + (Number(b.amount_collected ?? (b as any).amount) || 0) + (Number(b.amount_withheld_2307 ?? (b as any).tax_withheld) || 0), 0) + downPmt
+        : (sStatus === 'paid' || sStatus === 'cash' ? netInv : (sStatus === 'partial' ? downPmt : 0));
       customerMap[cName].totalCollected += colAmt;
     });
 
@@ -493,32 +502,32 @@ export default function ExecutiveDashboard({
     ];
     
     compYearSales.forEach(s => {
-      const d = s.invoice_date || s.issue_date;
+      const d = s.invoice_date || s.issue_date || (s as any).date;
       if (d) {
         const m = new Date(d).getMonth();
         const qIdx = Math.floor(m / 3);
         if (qIdx >= 0 && qIdx < 4) {
-          qData[qIdx].sales += Number(s.invoice_amount || s.amount) || 0;
+          qData[qIdx].sales += Number(s.invoice_amount || (s as any).total_amount_vat_inclusive || s.amount) || 0;
         }
       }
     });
     compYearColls.forEach(c => {
-      const d = c.collection_date || c.date;
+      const d = c.collection_date || (c as any).date;
       if (d) {
         const m = new Date(d).getMonth();
         const qIdx = Math.floor(m / 3);
         if (qIdx >= 0 && qIdx < 4) {
-          qData[qIdx].collections += Number(c.amount_collected) || 0;
+          qData[qIdx].collections += Number(c.amount_collected || (c as any).amount) || 0;
         }
       }
     });
     compYearExp.forEach(e => {
-      const d = e.expense_date || e.issue_date;
+      const d = e.expense_date || e.issue_date || (e as any).date;
       if (d) {
         const m = new Date(d).getMonth();
         const qIdx = Math.floor(m / 3);
         if (qIdx >= 0 && qIdx < 4) {
-          qData[qIdx].expenses += Number(e.expense_invoice_amount || e.amount) || 0;
+          qData[qIdx].expenses += Number(e.expense_invoice_amount || (e as any).total_amount_vat_inclusive || e.amount) || 0;
         }
       }
     });
@@ -532,22 +541,22 @@ export default function ExecutiveDashboard({
     return months.map((name, mIdx) => {
       const monthSales = compYearSales
         .filter(s => {
-          const d = s.invoice_date || s.issue_date;
+          const d = s.invoice_date || s.issue_date || (s as any).date;
           return d && new Date(d).getMonth() === mIdx;
         })
-        .reduce((sum, s) => sum + (Number(s.invoice_amount || s.amount) || 0), 0);
+        .reduce((sum, s) => sum + (Number(s.invoice_amount || (s as any).total_amount_vat_inclusive || s.amount) || 0), 0);
       const monthColls = compYearColls
         .filter(c => {
-          const d = c.collection_date || c.date;
+          const d = c.collection_date || (c as any).date;
           return d && new Date(d).getMonth() === mIdx;
         })
-        .reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+        .reduce((sum, c) => sum + (Number(c.amount_collected || (c as any).amount) || 0), 0);
       const monthExp = compYearExp
         .filter(e => {
-          const d = e.expense_date || e.issue_date;
+          const d = e.expense_date || e.issue_date || (e as any).date;
           return d && new Date(d).getMonth() === mIdx;
         })
-        .reduce((sum, e) => sum + (Number(e.expense_invoice_amount || e.amount) || 0), 0);
+        .reduce((sum, e) => sum + (Number(e.expense_invoice_amount || (e as any).total_amount_vat_inclusive || e.amount) || 0), 0);
 
       return {
         name,

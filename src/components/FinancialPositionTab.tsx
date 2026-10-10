@@ -37,6 +37,7 @@ export default function FinancialPositionTab({
   const companyName = activeCompany?.company_name || 'No Active Company';
   const [showAuditPanel, setShowAuditPanel] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statementLayout, setStatementLayout] = useState<'dr_cr_table' | 'cards'>('dr_cr_table');
 
   // Compute Balance Sheet Items with Accounting Integrity strictly synchronized with Master Journal
   const bs = useMemo(() => {
@@ -167,26 +168,360 @@ export default function FinancialPositionTab({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Format Toggle */}
+            <div className="flex items-center p-1 rounded-xl bg-zinc-800/30 border border-zinc-700/40 text-xs font-semibold">
+              <button
+                onClick={() => setStatementLayout('dr_cr_table')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                  statementLayout === 'dr_cr_table'
+                    ? 'bg-cyan-500 text-white font-bold shadow-xs'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Debit / Credit Format
+              </button>
+              <button
+                onClick={() => setStatementLayout('cards')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                  statementLayout === 'cards'
+                    ? 'bg-cyan-500 text-white font-bold shadow-xs'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Card Summary
+              </button>
+            </div>
+
             <button
               onClick={() => setShowAuditPanel(!showAuditPanel)}
               className="px-3 py-2 rounded-xl text-xs font-semibold bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-600/30 transition flex items-center gap-1.5 cursor-pointer"
             >
               <Scale className="w-4 h-4 text-cyan-400" />
-              {showAuditPanel ? 'Hide Account Title Audit' : 'Auto-Compute & Trace Discrepancy'}
+              {showAuditPanel ? 'Hide Audit Panel' : 'Audit Breakdown'}
             </button>
 
             <div className={`px-4 py-2 rounded-xl border flex items-center gap-2 font-mono text-xs font-bold ${
               bs.isBalanced ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
             }`}>
               <CheckCircle className="w-4 h-4" />
-              <span>BALANCE SHEET EQUATION PERFECTLY BALANCED</span>
+              <span>{bs.isBalanced ? 'BALANCE SHEET IN EQUILIBRIUM' : 'OUT OF BALANCE'}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* BALANCE SHEET CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* 1. DEBIT / CREDIT TWO-COLUMN REPORT FORMAT (EXACT USER SPECIFICATION) */}
+      {statementLayout === 'dr_cr_table' ? (
+        <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm overflow-hidden p-6 space-y-4`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-zinc-800/40">
+            <div>
+              <h3 className={`text-base font-bold font-display ${theme.textTitle} tracking-wide`}>
+                STATEMENT OF FINANCIAL POSITION (BALANCE SHEET)
+              </h3>
+              <p className={`text-xs ${theme.textMuted}`}>
+                Report presentation showing ending balances classified in Debit and Credit columns
+              </p>
+            </div>
+            <div className="text-right text-xs font-mono text-zinc-400">
+              Currency: <span className="font-bold text-cyan-400">Philippine Peso (₱)</span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className={`bg-zinc-500/10 ${theme.textTitle} uppercase font-bold tracking-wider border-b-2 border-zinc-700/60`}>
+                  <th className="p-3 w-1/2">Account Title / Classification</th>
+                  <th className="p-3 w-28 text-center">Account Code</th>
+                  <th className="p-3 w-40 text-right font-mono text-emerald-400">DEBIT (₱)</th>
+                  <th className="p-3 w-40 text-right font-mono text-teal-400">CREDIT (₱)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/20 font-sans">
+                {/* ================= ASSETS ================= */}
+                <tr className="bg-cyan-500/10 font-bold border-t border-cyan-500/30">
+                  <td colSpan={4} className="p-2.5 text-cyan-300 uppercase tracking-wider text-xs">
+                    Assets
+                  </td>
+                </tr>
+
+                {/* Current Assets Section */}
+                <tr className="font-semibold text-zinc-300 bg-zinc-800/10">
+                  <td className="p-2 pl-4 text-zinc-300">Current Assets</td>
+                  <td className="p-2 text-center font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                {/* Line: Cash and Cash Equivalents */}
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Cash and Cash Equivalents</td>
+                  <td className="p-2 text-center font-mono text-cyan-400">1010</td>
+                  <td className="p-2 text-right font-mono font-semibold text-emerald-400">
+                    ₱{bs.cash.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                {/* Line: Accounts Receivable (Net) */}
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Accounts Receivable (Net)</td>
+                  <td className="p-2 text-center font-mono text-cyan-400">1020</td>
+                  <td className="p-2 text-right font-mono font-semibold text-emerald-400">
+                    ₱{bs.ar.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                {/* Line: Advances to Suppliers */}
+                {bs.supplierAdvances > 0 && (
+                  <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                    <td className="p-2 pl-8 font-medium text-purple-400">Advances to Suppliers (Supplier Debit Balance)</td>
+                    <td className="p-2 text-center font-mono text-purple-400">1028</td>
+                    <td className="p-2 text-right font-mono font-semibold text-purple-400">
+                      ₱{bs.supplierAdvances.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  </tr>
+                )}
+
+                {/* Line: Creditable Input VAT */}
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Creditable Input VAT</td>
+                  <td className="p-2 text-center font-mono text-cyan-400">1030</td>
+                  <td className="p-2 text-right font-mono font-semibold text-emerald-400">
+                    ₱{bs.inputVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                {/* Line: Creditable Withholding Tax (2307) */}
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Creditable Withholding Tax (2307)</td>
+                  <td className="p-2 text-center font-mono text-cyan-400">1040</td>
+                  <td className="p-2 text-right font-mono font-semibold text-emerald-400">
+                    ₱{bs.cwt2307.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                {/* Subtotal Current Assets */}
+                <tr className="font-bold bg-cyan-500/5 text-cyan-300 border-t border-b border-cyan-500/20">
+                  <td className="p-2.5 pl-6">Total Current Assets</td>
+                  <td className="p-2.5 text-center font-mono">-</td>
+                  <td className="p-2.5 text-right font-mono">
+                    ₱{bs.totalCurrentAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-2.5 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                {/* Non-Current Assets Section */}
+                <tr className="font-semibold text-zinc-300 bg-zinc-800/10">
+                  <td className="p-2 pl-4 text-zinc-300">Non-Current Assets</td>
+                  <td className="p-2 text-center font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Property, Plant & Equipment (Gross)</td>
+                  <td className="p-2 text-center font-mono text-cyan-400">1510</td>
+                  <td className="p-2 text-right font-mono font-semibold text-emerald-400">
+                    ₱{bs.ppeCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className="p-2 pl-8 font-medium text-rose-400">Less: Accumulated Depreciation</td>
+                  <td className="p-2 text-center font-mono text-rose-400">1520</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono font-semibold text-rose-400">
+                    ₱{bs.accumDep.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                {/* Net PPE Subtotal */}
+                <tr className="font-bold bg-cyan-500/5 text-cyan-300 border-t border-b border-cyan-500/20">
+                  <td className="p-2.5 pl-6">Net Fixed Assets (PPE)</td>
+                  <td className="p-2.5 text-center font-mono">-</td>
+                  <td className="p-2.5 text-right font-mono">
+                    ₱{bs.netPPE.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-2.5 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                {/* TOTAL ASSETS */}
+                <tr className="bg-cyan-500/20 font-bold border-t-2 border-b-2 border-cyan-400 text-cyan-300 text-sm">
+                  <td className="p-3 pl-4 tracking-wider uppercase">TOTAL ASSETS</td>
+                  <td className="p-3 text-center font-mono text-xs">-</td>
+                  <td className="p-3 text-right font-mono font-bold">
+                    ₱{bs.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-3 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                {/* ================= LIABILITIES ================= */}
+                <tr className="bg-amber-500/10 font-bold border-t-2 border-amber-500/30">
+                  <td colSpan={4} className="p-2.5 text-amber-300 uppercase tracking-wider text-xs">
+                    Liabilities
+                  </td>
+                </tr>
+
+                <tr className="font-semibold text-zinc-300 bg-zinc-800/10">
+                  <td className="p-2 pl-4 text-zinc-300">Current Liabilities</td>
+                  <td className="p-2 text-center font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                </tr>
+
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Accounts Payable</td>
+                  <td className="p-2 text-center font-mono text-amber-400">2010</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono font-semibold text-teal-400">
+                    ₱{bs.ap.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                {bs.customerAdvances > 0 && (
+                  <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                    <td className="p-2 pl-8 font-medium text-cyan-400">Customer Advances (Customer Credit Balance)</td>
+                    <td className="p-2 text-center font-mono text-cyan-400">2018</td>
+                    <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                    <td className="p-2 text-right font-mono font-semibold text-cyan-400">
+                      ₱{bs.customerAdvances.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                )}
+
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Output VAT Payable</td>
+                  <td className="p-2 text-center font-mono text-amber-400">2020</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono font-semibold text-teal-400">
+                    ₱{bs.outputVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Expanded Withholding Tax Payable (0619-E)</td>
+                  <td className="p-2 text-center font-mono text-amber-400">2030</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono font-semibold text-teal-400">
+                    ₱{bs.ewtPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                {bs.payrollDeductionsPayable > 0 && (
+                  <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                    <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>SSS, PhilHealth, Pag-IBIG & Tax Withheld (Payroll)</td>
+                    <td className="p-2 text-center font-mono text-amber-400">2050</td>
+                    <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                    <td className="p-2 text-right font-mono font-semibold text-teal-400">
+                      ₱{bs.payrollDeductionsPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                )}
+
+                {/* Subtotal Current Liabilities */}
+                <tr className="font-bold bg-amber-500/5 text-amber-300 border-t border-b border-amber-500/20">
+                  <td className="p-2.5 pl-6">Total Current Liabilities</td>
+                  <td className="p-2.5 text-center font-mono">-</td>
+                  <td className="p-2.5 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2.5 text-right font-mono">
+                    ₱{bs.totalLiabilities.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                {/* TOTAL LIABILITIES */}
+                <tr className="bg-amber-500/15 font-bold border-t border-b border-amber-400 text-amber-300">
+                  <td className="p-3 pl-4 tracking-wider uppercase">TOTAL LIABILITIES</td>
+                  <td className="p-3 text-center font-mono text-xs">-</td>
+                  <td className="p-3 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-3 text-right font-mono font-bold">
+                    ₱{bs.totalLiabilities.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                {/* ================= EQUITY ================= */}
+                <tr className="bg-purple-500/10 font-bold border-t-2 border-purple-500/30">
+                  <td colSpan={4} className="p-2.5 text-purple-300 uppercase tracking-wider text-xs">
+                    Stockholders' Equity
+                  </td>
+                </tr>
+
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Capital Stock / Paid-in Capital</td>
+                  <td className="p-2 text-center font-mono text-purple-400">3010</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono font-semibold text-purple-400">
+                    ₱{bs.capitalStock.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Retained Earnings (Net Income After Depreciation & Tax)</td>
+                  <td className="p-2 text-center font-mono text-purple-400">3020</td>
+                  {bs.retainedEarnings < 0 ? (
+                    <>
+                      <td className="p-2 text-right font-mono font-semibold text-rose-400">
+                        ₱{Math.abs(bs.retainedEarnings).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                      <td className="p-2 text-right font-mono font-semibold text-emerald-400">
+                        ₱{bs.retainedEarnings.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                    </>
+                  )}
+                </tr>
+
+                {/* Subtotal Stockholders' Equity */}
+                <tr className="font-bold bg-purple-500/5 text-purple-300 border-t border-b border-purple-500/20">
+                  <td className="p-2.5 pl-6">Total Stockholders' Equity</td>
+                  <td className="p-2.5 text-center font-mono">-</td>
+                  <td className="p-2.5 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2.5 text-right font-mono">
+                    ₱{bs.totalEquity.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                {/* TOTAL LIABILITIES & EQUITY */}
+                <tr className="bg-amber-500/20 font-bold border-t-2 border-b-2 border-amber-400 text-amber-300 text-sm">
+                  <td className="p-3 pl-4 tracking-wider uppercase">TOTAL LIABILITIES & STOCKHOLDERS' EQUITY</td>
+                  <td className="p-3 text-center font-mono text-xs">-</td>
+                  <td className="p-3 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-3 text-right font-mono font-bold">
+                    ₱{bs.totalLiabilitiesAndEquity.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                {/* EQUILIBRIUM CHECK ROW */}
+                <tr className={`font-mono text-xs font-bold ${
+                  bs.isBalanced ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                }`}>
+                  <td className="p-3 pl-4">
+                    {bs.isBalanced ? '✓ Equation Proof: Assets = Liabilities + Equity' : '⚠ Out of Balance Difference:'}
+                  </td>
+                  <td className="p-3 text-center">CHECK</td>
+                  <td className="p-3 text-right">
+                    ₱{bs.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="p-3 text-right">
+                    ₱{bs.totalLiabilitiesAndEquity.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        /* 2. CARD VIEW (SIDE-BY-SIDE SUMMARY CARDS) */
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* ASSETS */}
         <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm overflow-hidden p-5 space-y-4`}>
           <h3 className={`text-base font-bold font-display border-b ${theme.borderCard} pb-2 text-cyan-400 uppercase tracking-wider`}>
@@ -317,6 +652,7 @@ export default function FinancialPositionTab({
           )}
         </div>
       </div>
+      )}
 
       {/* AUTO-COMPUTE & DISCREPANCY TRACEABILITY AUDIT PANEL */}
       {showAuditPanel && (

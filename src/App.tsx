@@ -809,8 +809,10 @@ export default function App() {
 
   const companySales = sales.filter(s => !activeCompanyName || s.company_name === activeCompanyName);
   const companyCollections = collections.filter(c => !activeCompanyName || c.company_name === activeCompanyName);
+  const companyCashReceipts = cashReceipts.filter(r => !activeCompanyName || r.company_name === activeCompanyName);
   const companyExpenses = expenses.filter(e => !activeCompanyName || e.company_name === activeCompanyName);
   const companyPayments = payments.filter(p => !activeCompanyName || p.company_name === activeCompanyName);
+  const companyCashDisbursements = cashDisbursements.filter(d => !activeCompanyName || d.company_name === activeCompanyName);
   const companySpecialEntries = specialEntries.filter(s => !activeCompanyName || s.company_name === activeCompanyName);
   const companyIncomeTaxRecords = incomeTaxRecords.filter(r => !activeCompanyName || r.company_name === activeCompanyName);
   const companyPpeAssets = ppeAssets.filter(a => !activeCompanyName || a.company_name === activeCompanyName);
@@ -1232,18 +1234,21 @@ export default function App() {
             >
               {activeTab === 'dashboard' && (
                 <ExecutiveDashboard 
-                  sales={sales}
-                  collections={collections}
-                  expenses={expenses}
-                  payments={payments}
+                  sales={companySales}
+                  collections={companyCollections}
+                  cashReceipts={companyCashReceipts}
+                  expenses={companyExpenses}
+                  payments={companyPayments}
+                  cashDisbursements={companyCashDisbursements}
                   companies={companies}
                   customers={customers}
                   serviceProviders={contractors as any}
-                  payrollRecords={payrollRecords}
-                  employees={employees}
-                  ppeAssets={ppeAssets}
-                  specialEntries={specialEntries}
-                  incomeTaxRecords={incomeTaxRecords}
+                  payrollRecords={companyPayrollRecords}
+                  employees={companyEmployees}
+                  ppeAssets={companyPpeAssets}
+                  specialEntries={companySpecialEntries}
+                  accountTitles={accountTitles}
+                  incomeTaxRecords={companyIncomeTaxRecords}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   themeMode={theme}
@@ -1357,6 +1362,7 @@ export default function App() {
                   collections={collectionsRecords}
                   setCollections={handleUpdateCollectionsRecords}
                   customers={customers}
+                  setCustomers={setCustomers}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
@@ -1391,11 +1397,14 @@ export default function App() {
                 <GeneralJournalTab 
                   sales={companySales}
                   collections={companyCollections}
+                  cashReceipts={companyCashReceipts}
                   expenses={companyExpenses}
                   payments={companyPayments}
+                  cashDisbursements={companyCashDisbursements}
                   ppeAssets={companyPpeAssets}
                   payrollRecords={companyPayrollRecords}
                   specialEntries={companySpecialEntries}
+                  accountTitles={accountTitles}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
@@ -1408,8 +1417,10 @@ export default function App() {
                   accountTitles={accountTitles}
                   sales={companySales}
                   collections={companyCollections}
+                  cashReceipts={companyCashReceipts}
                   expenses={companyExpenses}
                   payments={companyPayments}
+                  cashDisbursements={companyCashDisbursements}
                   ppeAssets={companyPpeAssets}
                   payrollRecords={companyPayrollRecords}
                   specialEntries={companySpecialEntries}
@@ -1452,6 +1463,10 @@ export default function App() {
                   accountTitles={accountTitles}
                   globalSearch={globalSearch}
                   initialSubTab={activeTab === 'providers' ? 'providers' : 'customers'}
+                  subsidiarySales={subsidiarySales}
+                  setSubsidiarySales={handleUpdateSubsidiarySales}
+                  collectionsRecords={collectionsRecords}
+                  setCollectionsRecords={handleUpdateCollectionsRecords}
                 />
               )}
 
@@ -1600,12 +1615,15 @@ export default function App() {
                 <FinancialPositionTab 
                   sales={companySales}
                   collections={companyCollections}
+                  cashReceipts={companyCashReceipts}
                   expenses={companyExpenses}
                   payments={companyPayments}
+                  cashDisbursements={companyCashDisbursements}
                   ppeAssets={companyPpeAssets}
                   specialEntries={companySpecialEntries}
                   payrollRecords={companyPayrollRecords}
                   incomeTaxRecords={companyIncomeTaxRecords}
+                  accountTitles={accountTitles}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                 />
@@ -1639,11 +1657,14 @@ export default function App() {
                 <CashFlowsTab 
                   sales={companySales}
                   collections={companyCollections}
+                  cashReceipts={companyCashReceipts}
                   expenses={companyExpenses}
                   payments={companyPayments}
+                  cashDisbursements={companyCashDisbursements}
                   ppeAssets={companyPpeAssets}
                   payrollRecords={companyPayrollRecords}
                   specialEntries={companySpecialEntries}
+                  accountTitles={accountTitles}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                 />

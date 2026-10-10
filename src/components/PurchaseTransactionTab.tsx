@@ -1041,7 +1041,12 @@ export default function PurchaseTransactionTab({
               </div>
 
               <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>CWT 2307 Withheld (₱)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className={`text-xs font-bold ${theme.textMuted}`}>CWT 2307 Withheld (₱)</label>
+                  <span className="text-[10px] text-amber-400 font-mono">
+                    {liveFormulas.vatable_expense > 0 && `(10% = ₱${(Math.round(liveFormulas.vatable_expense * 0.10 * 100) / 100).toFixed(2)})`}
+                  </span>
+                </div>
                 <input
                   type="number"
                   min="0"
@@ -1050,6 +1055,43 @@ export default function PurchaseTransactionTab({
                   onChange={(e) => setTaxWithheld(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono text-amber-400 ${theme.borderInput}`}
                 />
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld('0')}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono transition"
+                  >
+                    0%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_expense * 0.01 * 100) / 100).toFixed(2))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
+                  >
+                    1% Goods
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_expense * 0.02 * 100) / 100).toFixed(2))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
+                  >
+                    2% Services
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_expense * 0.05 * 100) / 100).toFixed(2))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
+                  >
+                    5% Rent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_expense * 0.10 * 100) / 100).toFixed(2))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono font-bold border border-amber-500/40 transition"
+                  >
+                    10% (₱{(Math.round(liveFormulas.vatable_expense * 0.10 * 100) / 100).toFixed(2)})
+                  </button>
+                </div>
               </div>
             </div>
 

@@ -31,6 +31,7 @@ interface SalesTransactionTabProps {
   collections: UniformBookRecord[];
   setCollections: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
   customers: Customer[];
+  setCustomers?: React.Dispatch<React.SetStateAction<Customer[]>>;
   activeCompany: Company | null;
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
@@ -48,6 +49,7 @@ export default function SalesTransactionTab({
   collections,
   setCollections,
   customers,
+  setCustomers,
   activeCompany,
   theme,
   triggerAlert,
@@ -69,7 +71,7 @@ export default function SalesTransactionTab({
   const [tin, setTin] = useState('');
   const [address, setAddress] = useState('');
   const [invoiceType, setInvoiceType] = useState('SALES INVOICE');
-  const [invoiceNo, setInvoiceNo] = useState(`SI-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+  const [invoiceNo, setInvoiceNo] = useState(`INV #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
   const [voucherNo, setVoucherNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [particulars, setParticulars] = useState('');
@@ -83,20 +85,27 @@ export default function SalesTransactionTab({
   // Transaction Mode: 'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'
   const [saleMode, setSaleMode] = useState<'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'>('ON CASH');
 
-  // Partial mode fields
+  // Partial mode fields (Requirement 6: ask only for down payment)
   const [downPaymentAmount, setDownPaymentAmount] = useState('15000');
   const [downPaymentWithholding, setDownPaymentWithholding] = useState('0');
-  const [collectionRef, setCollectionRef] = useState(`OR-${Date.now().toString().slice(-4)}`);
-  const [recordSecondPaymentNow, setRecordSecondPaymentNow] = useState(true);
-  const [secondPaymentDate, setSecondPaymentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [secondPaymentRef, setSecondPaymentRef] = useState(`OR-2ND-${Date.now().toString().slice(-4)}`);
+  const [collectionRef, setCollectionRef] = useState(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+
+  // Prompt modal to add new customer with TIN to database (Requirement 3)
+  const [newCustomerPrompt, setNewCustomerPrompt] = useState<{
+    isOpen: boolean;
+    customerName: string;
+    tin: string;
+    address: string;
+    taxType: 'VAT' | 'Non-VAT';
+    pendingSaleData?: any;
+  } | null>(null);
 
   // Quick collection modal for open invoices
   const [selectedInvoiceToCollect, setSelectedInvoiceToCollect] = useState<UniformBookRecord | null>(null);
   const [collectAmount, setCollectAmount] = useState('');
   const [collectDiscount, setCollectDiscount] = useState('0');
   const [collectWtax, setCollectWtax] = useState('0');
-  const [collectRefNo, setCollectRefNo] = useState('');
+  const [collectRefNo, setCollectRefNo] = useState(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
   const [collectDate, setCollectDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Preview modal state
@@ -104,6 +113,22 @@ export default function SalesTransactionTab({
 
   // Search filter for open invoices
   const [openSearch, setOpenSearch] = useState('');
+
+  // Live TIN Conflict Check (Requirement 2)
+  const tinMatchCustomer = useMemo(() => {
+    const digits = tin.replace(/\D/g, '');
+    if (digits.length < 9 || /^0+$/.test(digits)) return null;
+    return customers.find(c => {
+      const cDigits = (c.client_TIN || c.customer_tin || '').replace(/\D/g, '');
+      return cDigits.length >= 9 && cDigits.startsWith(digits.slice(0, 9));
+    }) || null;
+  }, [tin, customers]);
+
+  const hasTinNameConflict = useMemo(() => {
+    if (!tinMatchCustomer || !customerName.trim()) return false;
+    const registeredName = (tinMatchCustomer.registered_name || tinMatchCustomer.customer_name || tinMatchCustomer.trade_name || '').trim();
+    return registeredName.toLowerCase() !== customerName.trim().toLowerCase();
+  }, [tinMatchCustomer, customerName]);
 
   // Auto-fill TIN & Customer details
   const handleSelectCustomer = (custName: string) => {
@@ -129,7 +154,7 @@ export default function SalesTransactionTab({
     if (digits.length > 9) formatted += '-' + digits.slice(9, 14);
     setTin(formatted);
 
-    if (digits.length >= 9) {
+    if (digits.length >= 9 && !/^0+$/.test(digits)) {
       const found = customers.find(c => (c.client_TIN || c.customer_tin || '').replace(/\D/g, '').startsWith(digits.slice(0, 9)));
       if (found) {
         if (!customerName) setCustomerName(found.registered_name || found.customer_name || found.trade_name || '');
@@ -1045,7 +1070,12 @@ export default function SalesTransactionTab({
               </div>
 
               <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>CWT 2307 Withheld (₱)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className={`text-xs font-bold ${theme.textMuted}`}>CWT 2307 Withheld (₱)</label>
+                  <span className="text-[10px] text-amber-400 font-mono">
+                    {liveFormulas.vatable_sales > 0 && `(10% = ₱${(Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2)})`}
+                  </span>
+                </div>
                 <input
                   type="number"
                   min="0"
@@ -1054,6 +1084,43 @@ export default function SalesTransactionTab({
                   onChange={(e) => setTaxWithheld(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono text-amber-400 ${theme.borderInput}`}
                 />
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld('0')}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono transition"
+                  >
+                    0%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.01 * 100) / 100).toFixed(2))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
+                  >
+                    1% Goods
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.02 * 100) / 100).toFixed(2))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
+                  >
+                    2% Services
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.05 * 100) / 100).toFixed(2))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
+                  >
+                    5% Rent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono font-bold border border-amber-500/40 transition"
+                  >
+                    10% (₱{(Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2)})
+                  </button>
+                </div>
               </div>
             </div>
 

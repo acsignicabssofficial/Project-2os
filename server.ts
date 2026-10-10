@@ -1,24 +1,52 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import initSqlJs, { Database } from "sql.js";
+import initSqlJs, { type Database } from "sql.js";
 import { createServer as createViteServer } from "vite";
-import {
-  INITIAL_COMPANIES,
-  INITIAL_CUSTOMERS,
-  INITIAL_CONTRACTORS,
-  INITIAL_SALES,
-  INITIAL_COLLECTIONS,
-  INITIAL_EXPENSES,
-  INITIAL_PAYMENTS,
-  INITIAL_PPE,
-  INITIAL_ACCOUNT_TITLES,
-  INITIAL_SPECIAL_ENTRIES,
-  INITIAL_INCOME_TAX_RECORDS
-} from "./src/data";
+const INITIAL_COMPANIES: any[] = [];
+const INITIAL_CUSTOMERS: any[] = [];
+const INITIAL_CONTRACTORS: any[] = [];
+const INITIAL_SALES: any[] = [];
+const INITIAL_COLLECTIONS: any[] = [];
+const INITIAL_EXPENSES: any[] = [];
+const INITIAL_PAYMENTS: any[] = [];
+const INITIAL_PPE: any[] = [];
+const INITIAL_SPECIAL_ENTRIES: any[] = [];
+const INITIAL_INCOME_TAX_RECORDS: any[] = [];
+const INITIAL_ACCOUNT_TITLES = [
+  { id: 1, code: "1010", title: "Cash and Cash Equivalents", type: "Asset", category: "Current Assets", description: "Cash on hand and bank deposits" },
+  { id: 2, code: "1020", title: "Accounts Receivable", type: "Asset", category: "Current Assets", description: "Trade receivables from clients" },
+  { id: 3, code: "1030", title: "Input VAT", type: "Asset", category: "Current Assets", description: "12% Creditable Input VAT from purchases" },
+  { id: 4, code: "1040", title: "Creditable Withholding Tax (BIR 2307)", type: "Asset", category: "Current Assets", description: "Prepaid income tax withheld by customers" },
+  { id: 5, code: "1050", title: "Prepaid Expenses", type: "Asset", category: "Current Assets", description: "Advance payments for rent, insurance, etc." },
+  { id: 6, code: "1510", title: "Property, Plant & Equipment", type: "Asset", category: "Non-Current Assets", description: "Office furniture, computers, vehicles, machineries" },
+  { id: 7, code: "1520", title: "Accumulated Depreciation", type: "Asset", category: "Non-Current Assets", description: "Contra-asset for cumulative depreciation" },
+  { id: 8, code: "2010", title: "Accounts Payable", type: "Liability", category: "Current Liabilities", description: "Trade payables to suppliers and service providers" },
+  { id: 9, code: "2020", title: "Output VAT Payable", type: "Liability", category: "Current Liabilities", description: "12% Output VAT collected on sales" },
+  { id: 10, code: "2030", title: "Expanded Withholding Tax Payable (BIR 0619-E)", type: "Liability", category: "Current Liabilities", description: "Withholding tax payable to BIR for vendors" },
+  { id: 11, code: "2040", title: "Income Tax Payable (BIR 1702/1701)", type: "Liability", category: "Current Liabilities", description: "Income tax payable provision due to BIR" },
+  { id: 22, code: "2035", title: "Withholding Tax Payable - Compensation (BIR 1601-C)", type: "Liability", category: "Current Liabilities", description: "Withholding tax deducted from employee payroll" },
+  { id: 23, code: "2041", title: "SSS Premium Payable", type: "Liability", category: "Current Liabilities", description: "SSS contributions payable to Social Security System (EE & ER Share)" },
+  { id: 24, code: "2042", title: "PhilHealth Premium Payable", type: "Liability", category: "Current Liabilities", description: "PhilHealth premiums payable to PHIC (EE & ER Share)" },
+  { id: 25, code: "2043", title: "Pag-IBIG Premium Payable", type: "Liability", category: "Current Liabilities", description: "HDMF contributions payable to Pag-IBIG Fund (EE & ER Share)" },
+  { id: 26, code: "2050", title: "Other Employee Payables & Deductions", type: "Liability", category: "Current Liabilities", description: "Other employee payroll deductions and advances" },
+  { id: 12, code: "3010", title: "Capital Stock / Owner's Equity", type: "Equity", category: "Equity", description: "Contributed capital by stockholders or owner" },
+  { id: 13, code: "3020", title: "Retained Earnings", type: "Equity", category: "Equity", description: "Cumulative net earnings retained in business" },
+  { id: 14, code: "4010", title: "Sales / Service Revenue", type: "Revenue", category: "Operating Revenue", description: "Gross revenues from sales and services" },
+  { id: 15, code: "4015", title: "Sales Discounts", type: "Revenue", category: "Operating Revenue", description: "Contra-revenue: trade/cash discounts granted to customers" },
+  { id: 16, code: "4020", title: "Other Operating Income", type: "Revenue", category: "Operating Revenue", description: "Miscellaneous income and gains" },
+  { id: 17, code: "6010", title: "Salaries, Wages & Benefits", type: "Expense", category: "Operating Expenses", description: "Employee gross compensation and allowances" },
+  { id: 27, code: "6015", title: "Employer SSS Contribution Expense", type: "Expense", category: "Operating Expenses", description: "Employer share of SSS & EC contributions" },
+  { id: 28, code: "6016", title: "Employer PhilHealth Contribution Expense", type: "Expense", category: "Operating Expenses", description: "Employer share of PhilHealth premiums" },
+  { id: 29, code: "6017", title: "Employer Pag-IBIG Contribution Expense", type: "Expense", category: "Operating Expenses", description: "Employer share of Pag-IBIG HDMF contributions" },
+  { id: 18, code: "6020", title: "Rent Expense", type: "Expense", category: "Operating Expenses", description: "Office and warehouse space rental" },
+  { id: 19, code: "6030", title: "Utilities Expense", type: "Expense", category: "Operating Expenses", description: "Electricity, water, internet, telephone" },
+  { id: 20, code: "6080", title: "Depreciation Expense", type: "Expense", category: "Operating Expenses", description: "Periodic depreciation of fixed assets" },
+  { id: 21, code: "7010", title: "Provision for Income Tax Expense", type: "Expense", category: "Tax Provision", description: "Income tax expense provision" }
+];
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const DB_SQLITE_FILE = path.join(process.cwd(), "2os_database.db");
 const DB_JSON_BACKUP = path.join(process.cwd(), "2os_database.json");
 
