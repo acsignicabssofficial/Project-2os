@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import CustomersTab from './CustomersTab';
 import ProvidersTab from './ProvidersTab';
-import { Customer, Contractor, Sale, Collection, Company } from '../types';
+import { Customer, Contractor, Sale, Collection, Expense, Payment, AccountTitle, Company } from '../types';
 import { Users, Truck, Handshake } from 'lucide-react';
 
 interface RelatedPartiesTabProps {
@@ -16,6 +16,11 @@ interface RelatedPartiesTabProps {
   collections: Collection[];
   setSales: React.Dispatch<React.SetStateAction<Sale[]>>;
   setCollections: React.Dispatch<React.SetStateAction<Collection[]>>;
+  expenses?: Expense[];
+  payments?: Payment[];
+  setExpenses?: React.Dispatch<React.SetStateAction<Expense[]>>;
+  setPayments?: React.Dispatch<React.SetStateAction<Payment[]>>;
+  accountTitles?: AccountTitle[];
   globalSearch?: string;
   initialSubTab?: 'customers' | 'providers';
 }
@@ -32,6 +37,11 @@ export default function RelatedPartiesTab({
   collections,
   setSales,
   setCollections,
+  expenses = [],
+  payments = [],
+  setExpenses,
+  setPayments,
+  accountTitles = [],
   globalSearch,
   initialSubTab = 'customers'
 }: RelatedPartiesTabProps) {

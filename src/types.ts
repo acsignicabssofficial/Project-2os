@@ -94,6 +94,7 @@ export interface OtherParty {
   customer_branch_code?: string;
   provider_branch_code?: string;
   business_tax_type?: 'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated' | string;
+  expense_type?: string;
 }
 
 export type Customer = OtherParty;
@@ -287,6 +288,9 @@ export interface Collection {
   entry_number?: string;
   registered_name?: string;
   balance?: number;
+  discount?: number;
+  discounts?: number;
+  total_amount_due?: number;
 }
 
 export interface Payment {

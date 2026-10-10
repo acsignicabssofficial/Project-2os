@@ -1398,6 +1398,11 @@ export default function App() {
                   collections={collections}
                   setSales={setSales}
                   setCollections={setCollections}
+                  expenses={expenses}
+                  payments={payments}
+                  setExpenses={setExpenses}
+                  setPayments={setPayments}
+                  accountTitles={accountTitles}
                   globalSearch={globalSearch}
                   initialSubTab={activeTab === 'providers' ? 'providers' : 'customers'}
                 />
