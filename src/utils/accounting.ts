@@ -424,6 +424,18 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
 
   const entries: JournalEntry[] = [];
   let idCounter = 1;
+  let sjCounter = 1;
+  let gjCounter = 1;
+
+  const getSjNo = (dateStr?: string) => {
+    const yr = (dateStr ? dateStr.slice(0, 4) : '') || String(new Date().getFullYear());
+    return `SJ${yr}-${String(sjCounter++).padStart(4, '0')}`;
+  };
+
+  const getGjNo = (dateStr?: string) => {
+    const yr = (dateStr ? dateStr.slice(0, 4) : '') || String(new Date().getFullYear());
+    return `GJ${yr}-${String(gjCounter++).padStart(4, '0')}`;
+  };
 
   // Track invoices and vouchers already journalized by Cash Receipts / Cash Disbursements
   // to strictly prevent double-counting in Collections Book and Payments Book (Clarifications 5.4 & 6.3)
@@ -525,7 +537,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     entries.push({
       id: idCounter++,
       company_name: s.company_name || companyName,
-      entry_no: `GJ-SLS-${s.invoice_number}`,
+      entry_no: getSjNo(saleDate),
       date: saleDate,
       ref_type: 'Sales',
       ref_no: s.invoice_number,
@@ -580,7 +592,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         entries.push({
           id: idCounter++,
           company_name: s.company_name || companyName,
-          entry_no: `GJ-CR-${s.invoice_number}`,
+          entry_no: getSjNo(saleDate),
           date: saleDate,
           ref_type: 'Collection',
           ref_no: s.invoice_number,
@@ -598,7 +610,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         entries.push({
           id: idCounter++,
           company_name: s.company_name || companyName,
-          entry_no: `GJ-CWT-${s.invoice_number}`,
+          entry_no: getSjNo(saleDate),
           date: saleDate,
           ref_type: 'Collection',
           ref_no: s.invoice_number,
@@ -692,7 +704,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
           entries.push({
             id: idCounter++,
             company_name: c.company_name || companyName,
-            entry_no: `GJ-COL-${c.invoice_number}-${pmtNo}`,
+            entry_no: getSjNo(instDate),
             date: instDate,
             ref_type: 'Collection',
             ref_no: c.invoice_number,
@@ -709,7 +721,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
           entries.push({
             id: idCounter++,
             company_name: c.company_name || companyName,
-            entry_no: `GJ-CWT-${c.invoice_number}-${pmtNo}`,
+            entry_no: getSjNo(instDate),
             date: instDate,
             ref_type: 'Collection',
             ref_no: c.invoice_number,
@@ -752,7 +764,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       entries.push({
         id: idCounter++,
         company_name: c.company_name || companyName,
-        entry_no: `GJ-COL-${c.voucher_number || c.entry_number || c.id || idx + 1}`,
+        entry_no: getSjNo(colDate),
         date: colDate,
         ref_type: 'Collection',
         ref_no: c.invoice_number,
@@ -771,7 +783,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       entries.push({
         id: idCounter++,
         company_name: c.company_name || companyName,
-        entry_no: `GJ-CWT-${c.voucher_number || c.entry_number || c.id || idx + 1}`,
+        entry_no: getSjNo(colDate),
         date: colDate,
         ref_type: 'Collection',
         ref_no: c.invoice_number,
@@ -821,7 +833,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     entries.push({
       id: idCounter++,
       company_name: e.company_name || companyName,
-      entry_no: `GJ-EXP-${vNo}`,
+      entry_no: getSjNo(expDate),
       date: expDate,
       ref_type: 'Expense',
       ref_no: vNo,
@@ -862,7 +874,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       entries.push({
         id: idCounter++,
         company_name: e.company_name || companyName,
-        entry_no: `GJ-CD-${vNo}`,
+        entry_no: getSjNo(expDate),
         date: expDate,
         ref_type: 'Payment',
         ref_no: vNo,
@@ -943,7 +955,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
           entries.push({
             id: idCounter++,
             company_name: p.company_name || companyName,
-            entry_no: `GJ-PAY-${vNo}-${pmtNo}`,
+            entry_no: getSjNo(instDate),
             date: instDate,
             ref_type: 'Payment',
             ref_no: vNo,
@@ -961,7 +973,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
           entries.push({
             id: idCounter++,
             company_name: p.company_name || companyName,
-            entry_no: `GJ-EWT-${vNo}-${pmtNo}`,
+            entry_no: getSjNo(instDate),
             date: instDate,
             ref_type: 'Payment',
             ref_no: vNo,
@@ -992,7 +1004,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       entries.push({
         id: idCounter++,
         company_name: p.company_name || companyName,
-        entry_no: `GJ-PAY-${p.id || idx + 1}`,
+        entry_no: getSjNo(payDate),
         date: payDate,
         ref_type: 'Payment',
         ref_no: vNo,
@@ -1011,7 +1023,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       entries.push({
         id: idCounter++,
         company_name: p.company_name || companyName,
-        entry_no: `GJ-EWT-${p.id || idx + 1}`,
+        entry_no: getSjNo(payDate),
         date: payDate,
         ref_type: 'Payment',
         ref_no: vNo,
@@ -1036,7 +1048,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       entries.push({
         id: idCounter++,
         company_name: p.company_name || companyName,
-        entry_no: `GJ-PPE-${p.asset_code || p.id}`,
+        entry_no: getGjNo(acqDate),
         date: acqDate,
         ref_type: 'PPE Acquisition',
         ref_no: p.asset_code || String(p.id),
@@ -1053,7 +1065,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       entries.push({
         id: idCounter++,
         company_name: p.company_name || companyName,
-        entry_no: `GJ-DEP-${p.asset_code || p.id}`,
+        entry_no: getGjNo(acqDate),
         date: acqDate,
         ref_type: 'Depreciation',
         ref_no: p.asset_code || String(p.id),
@@ -1102,7 +1114,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     entries.push({
       id: idCounter++,
       company_name: pr.company_name || companyName,
-      entry_no: `GJ-PAYROLL-${pr.employee_id}-${pr.payroll_period || pr.id}`,
+      entry_no: getGjNo(),
       date: new Date().toISOString().split('T')[0],
       ref_type: 'Payroll',
       ref_no: String(pr.employee_id || ''),
@@ -1124,7 +1136,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     entries.push({
       id: idCounter++,
       company_name: s.company_name || companyName,
-      entry_no: s.voucher_no || s.entry_number || `SJ-${s.id}`,
+      entry_no: getGjNo(s.entry_date),
       date: s.entry_date || new Date().toISOString().split('T')[0],
       ref_type: s.entry_type || 'Adjusting Entry',
       ref_no: s.voucher_no || s.entry_number || `SJ-${s.id}`,

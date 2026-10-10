@@ -17,7 +17,9 @@ import {
   CreditCard,
   Layers,
   ArrowUpRight,
-  Eye
+  Eye,
+  UserPlus,
+  X
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import { UniformBookRecord, Customer, Company, SpecialEntry, SpecialEntryLine } from '../types';
@@ -205,23 +207,33 @@ export default function SalesTransactionTab({
     );
   }, [openInvoices, openSearch, globalSearch]);
 
-  // SUBMIT NEW SALE TRANSACTION
-  const handleSubmitSale = (e: React.FormEvent) => {
-    e.preventDefault();
+  // EXECUTE SALE RECORDING (Called directly or after New Customer confirmation)
+  const executeRecordSale = (saveAsCustomer: boolean = false, isVariousCustomer: boolean = false) => {
+    const rawTinDigits = tin.replace(/\D/g, '');
+    const hasValidTin = rawTinDigits.length >= 9 && !/^0+$/.test(rawTinDigits);
+    const finalIsVarious = isVariousCustomer || !hasValidTin;
 
-    if (!activeCompany || !activeCompany.company_name || activeCompany.company_name.trim() === '' || activeCompany.company_name === 'Select Company...') {
-      triggerAlert('Strict Validation: Please setup or select an Entity Profile first before entering sales transactions! (Saan mapupunta ang transaction kung walang designated entity?)', 'error');
-      if (onNavigateToTab) onNavigateToTab('companies');
-      return;
-    }
-
-    if (!customerName.trim()) {
-      triggerAlert('Please enter or select a Customer Name.', 'error');
-      return;
-    }
-    if (!invoiceNo.trim()) {
-      triggerAlert('Invoice Number is required.', 'error');
-      return;
+    // Requirement 3: Save customer to database if user chose to add new customer
+    if (saveAsCustomer && setCustomers && hasValidTin) {
+      const custNameToSave = (newCustomerPrompt?.customerName || customerName).trim();
+      const newCust: Customer = {
+        id: Date.now(),
+        company_name: activeCompanyName,
+        registered_name: custNameToSave,
+        customer_name: custNameToSave,
+        trade_name: custNameToSave,
+        client_TIN: tin.trim(),
+        customer_tin: tin.trim(),
+        tin_number: tin.trim(),
+        client_Address: (newCustomerPrompt?.address || address).trim(),
+        customer_address: (newCustomerPrompt?.address || address).trim(),
+        address: (newCustomerPrompt?.address || address).trim(),
+        tax_type: newCustomerPrompt?.taxType || (vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'),
+        vat_status: newCustomerPrompt?.taxType || (vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'),
+        client_status: 'Active'
+      };
+      setCustomers(prev => [newCust, ...prev]);
+      triggerAlert(`Customer "${custNameToSave}" (TIN: ${tin.trim()}) added to Customer Masterlist successfully.`, 'success');
     }
 
     const totalDue = liveFormulas.total_amount_due;
@@ -246,7 +258,7 @@ export default function SalesTransactionTab({
       assignedTransactionType = 'CASH';
     } else if (saleMode === 'ON PARTIAL') {
       const downPmt = parseFloat(downPaymentAmount) || 0;
-      assignedStatus = (recordSecondPaymentNow || downPmt >= totalDue) ? 'Paid' : 'Partial';
+      assignedStatus = downPmt >= totalDue ? 'Paid' : 'Partial';
       assignedTransactionType = 'ON ACCOUNT';
     }
 
@@ -260,7 +272,7 @@ export default function SalesTransactionTab({
       type_of_transaction: assignedTransactionType,
       date: date,
       invoice_type: invoiceType,
-      voucher_number: voucherNo.trim(),
+      voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
       invoice_number: invoiceNo.trim(),
       particulars: particulars.trim() || 'Sales of Goods & Services',
       qty: parseFloat(qty) || 1,
@@ -278,16 +290,16 @@ export default function SalesTransactionTab({
       status: assignedStatus,
       down_payment: saleMode === 'ON PARTIAL' ? parseFloat(downPaymentAmount) || 0 : undefined,
       is_cancelled: false,
+      is_various: finalIsVarious,
       created_at: nowIso
     };
 
     // 2. Routing Logic based on user specification:
-    // 5.1 / 6.1 Sales (other transaction) is single-entry method -> NO journal entry created directly here.
-    // 5.2 / 6.2 Subsidiary Sales records the sale (and General Journal derives the A/R & Sales entry from Subsidiary Sales).
+    // 5.1 / 6.1 Sales (other transaction) single-entry method -> recorded in Subsidiary Sales
     setSubsidiarySales(prev => [saleRecord, ...prev]);
 
     if (saleMode === 'ON ACCOUNT') {
-      // Also record in Collections Book as 'On Account' with pending balance so Collections Book tracks all pending receivables (Clarification #4)
+      // Record in Collections Book as 'On Account' with pending balance so Collections Book tracks pending receivables
       const onAccountTrackingRecord: UniformBookRecord = {
         ...saleRecord,
         id: commonId + 1,
@@ -313,7 +325,7 @@ export default function SalesTransactionTab({
         type_of_transaction: 'CASH',
         date: date,
         invoice_type: 'OFFICIAL RECEIPT',
-        voucher_number: voucherNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
+        voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
         invoice_number: invoiceNo.trim(),
         particulars: `Full Cash Settlement for Invoice #${invoiceNo.trim()} - ${particulars || 'Sales'}`,
         qty: parseFloat(qty) || 1,
@@ -333,6 +345,7 @@ export default function SalesTransactionTab({
         amount_withheld_2307: liveFormulas.less_withholding_tax,
         status: 'Paid',
         is_cancelled: false,
+        is_various: finalIsVarious,
         created_at: nowIso
       };
       setCashReceipts(prev => [cashReceiptRecord, ...prev]);
@@ -348,45 +361,16 @@ export default function SalesTransactionTab({
 
       triggerAlert(`Full Cash Sale ${invoiceNo} recorded to Subsidiary Sales, Cash Receipts & Collections Book (Cash Received: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})!`, 'success');
     } else if (saleMode === 'ON PARTIAL') {
+      // Requirement 6: Simply ask for Down Payment (do not auto-calculate 2nd payment)
       const downPmt = parseFloat(downPaymentAmount) || 0;
-      const downWtax = parseFloat(downPaymentWithholding) || 0;
-
       if (downPmt <= 0) {
-        triggerAlert('Please enter a valid Down Payment / 1st Collection amount.', 'error');
+        triggerAlert('Please enter a valid Down Payment amount.', 'error');
         return;
       }
 
-      const remainingCashBalance = Math.max(0, Math.round((totalDue - downPmt) * 100) / 100);
-      const isCompletedWithSecondPayment = recordSecondPaymentNow || remainingCashBalance <= 0.01;
+      const pendingBal = Math.max(0, Math.round((totalDue - downPmt) * 100) / 100);
 
-      const installments = [
-        {
-          payment_no: 1,
-          date: date,
-          ref_no: collectionRef.trim() || `OR-1ST-${Date.now().toString().slice(-4)}`,
-          cash_amount: downPmt,
-          discount: 0,
-          wtax_2307: remainingCashBalance <= 0.01 ? liveFormulas.less_withholding_tax : downWtax,
-          is_final: remainingCashBalance <= 0.01
-        }
-      ];
-
-      if (recordSecondPaymentNow && remainingCashBalance > 0.01) {
-        installments.push({
-          payment_no: 2,
-          date: secondPaymentDate || date,
-          ref_no: secondPaymentRef.trim() || `OR-2ND-${Date.now().toString().slice(-4)}`,
-          cash_amount: remainingCashBalance,
-          discount: 0,
-          wtax_2307: Math.max(0, Math.round((liveFormulas.less_withholding_tax - downWtax) * 100) / 100),
-          is_final: true
-        });
-      }
-
-      const totalCashCollected = isCompletedWithSecondPayment ? totalDue : downPmt;
-      const pendingBal = isCompletedWithSecondPayment ? 0 : remainingCashBalance;
-
-      // 6.4 Record in Collections Book with full sale figures (vatable sales 22,321.43, vat output 2,678.57, 2307 2,232.14, cash received 22,767.86) and installments
+      // Record in Collections Book with 1st payment / down payment
       const partialCollectionRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
@@ -395,13 +379,11 @@ export default function SalesTransactionTab({
         tin: tin.trim() || '000-000-000-00000',
         address: address.trim(),
         type_of_transaction: 'ON ACCOUNT',
-        date: isCompletedWithSecondPayment ? (secondPaymentDate || date) : date,
+        date: date,
         invoice_type: 'OFFICIAL RECEIPT',
-        voucher_number: collectionRef.trim() || `COL-${Date.now().toString().slice(-4)}`,
+        voucher_number: collectionRef.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
         invoice_number: invoiceNo.trim(),
-        particulars: isCompletedWithSecondPayment
-          ? `Paid in Partial (1st Down Payment: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} | 2nd Payment: ₱${remainingCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
-          : `1st Payment / Down Payment for Invoice #${invoiceNo.trim()} (Collected: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} | Pending: ₱${remainingCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+        particulars: `1st Payment / Down Payment for Invoice #${invoiceNo.trim()} (Down Payment: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} | Pending Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
         qty: parseFloat(qty) || 1,
         unit_price: parseFloat(unitPrice) || 0,
         amount: liveFormulas.amount,
@@ -414,38 +396,92 @@ export default function SalesTransactionTab({
         discount: liveFormulas.less_discount,
         tax_withheld: liveFormulas.less_withholding_tax,
         total_amount_due: totalDue,
-        amount_collected: totalCashCollected,
+        amount_collected: downPmt,
         pending_balance: pendingBal,
         amount_withheld_2307: liveFormulas.less_withholding_tax,
-        status: isCompletedWithSecondPayment ? 'Paid' : 'Partial',
-        installments,
+        status: pendingBal <= 0.01 ? 'Paid' : 'Partial',
+        installments: [
+          {
+            payment_no: 1,
+            date: date,
+            ref_no: collectionRef.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
+            cash_amount: downPmt,
+            discount: 0,
+            wtax_2307: 0,
+            is_final: pendingBal <= 0.01
+          }
+        ],
         is_cancelled: false,
+        is_various: finalIsVarious,
         created_at: nowIso
       };
 
       setCollections(prev => [partialCollectionRecord, ...prev]);
 
-      if (isCompletedWithSecondPayment) {
-        // 6.3 Cash Receipts also records the fully paid sale (no duplicate journal entry since journalized in Collections Book)
-        setCashReceipts(prev => [{
-          ...partialCollectionRecord,
-          id: commonId + 2,
-          type_of_transaction: 'ON ACCOUNT',
-          status: 'Paid',
-          settled_via_collections: true,
-          particulars: `Full Settlement Completed via Collections Book for Invoice #${invoiceNo.trim()} (1st: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} + 2nd: ₱${remainingCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
-        }, ...prev]);
-        triggerAlert(`Partial Sale ${invoiceNo} (1st: ₱${downPmt.toLocaleString()} + 2nd: ₱${remainingCashBalance.toLocaleString()}) recorded to Subsidiary Sales, Collections Book, and Cash Receipts!`, 'success');
-      } else {
-        triggerAlert(`Partial Sale ${invoiceNo} recorded to Subsidiary Sales & Collections Book. 1st Payment: ₱${downPmt.toLocaleString()} (Pending Balance: ₱${remainingCashBalance.toLocaleString()}).`, 'info');
-      }
+      triggerAlert(`Partial Sale ${invoiceNo} recorded to Subsidiary Sales & Collections Book (1st Down Payment: ₱${downPmt.toLocaleString()} | Pending Balance: ₱${pendingBal.toLocaleString()}).`, 'info');
     }
 
-    // Reset Form for next entry
-    setInvoiceNo(`SI-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+    // Reset Form for next entry with Requirement 4 prefixes
+    setInvoiceNo(`INV #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+    setCollectionRef(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
     setParticulars('');
     setUnitPrice('25000');
     setDownPaymentAmount('15000');
+    setNewCustomerPrompt(null);
+  };
+
+  // SUBMIT NEW SALE TRANSACTION
+  const handleSubmitSale = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!activeCompany || !activeCompany.company_name || activeCompany.company_name.trim() === '' || activeCompany.company_name === 'Select Company...') {
+      triggerAlert('Strict Validation: Please setup or select an Entity Profile first before entering sales transactions! (Saan mapupunta ang transaction kung walang designated entity?)', 'error');
+      if (onNavigateToTab) onNavigateToTab('companies');
+      return;
+    }
+
+    if (!customerName.trim()) {
+      triggerAlert('Please enter or select a Customer Name.', 'error');
+      return;
+    }
+    if (!invoiceNo.trim()) {
+      triggerAlert('Invoice Number is required.', 'error');
+      return;
+    }
+
+    const rawTinDigits = tin.replace(/\D/g, '');
+    const hasValidTin = rawTinDigits.length >= 9 && !/^0+$/.test(rawTinDigits);
+
+    // Requirement 2: Strict TIN Conflict Validation
+    // If TIN already exists in customer database, customer registered name MUST match!
+    if (hasValidTin) {
+      const existingCustomerWithTin = customers.find(c => {
+        const cDigits = (c.client_TIN || c.customer_tin || '').replace(/\D/g, '');
+        return cDigits.length >= 9 && cDigits.startsWith(rawTinDigits.slice(0, 9));
+      });
+
+      if (existingCustomerWithTin) {
+        const registeredName = (existingCustomerWithTin.registered_name || existingCustomerWithTin.customer_name || existingCustomerWithTin.trade_name || '').trim();
+        if (registeredName.toLowerCase() !== customerName.trim().toLowerCase()) {
+          triggerAlert(`Validation Error: TIN "${tin}" already exists and is registered under customer "${registeredName}". The transaction is BLOCKED because entered name "${customerName.trim()}" does not match the registered profile.`, 'error');
+          return;
+        }
+      } else {
+        // Requirement 3: Customer has valid TIN but is NOT registered in database.
+        // Prompt user asking if they want to add to customer database:
+        setNewCustomerPrompt({
+          isOpen: true,
+          customerName: customerName.trim(),
+          tin: tin.trim(),
+          address: address.trim(),
+          taxType: vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'
+        });
+        return;
+      }
+    }
+
+    // If customer already registered or no valid TIN entered (counts as Various Customer), proceed directly:
+    executeRecordSale(false, !hasValidTin);
   };
 
   // EXECUTE COLLECTION ON AN OPEN INVOICE
@@ -831,37 +867,30 @@ export default function SalesTransactionTab({
               </div>
             </div>
 
-            {/* PARTIAL DOWN PAYMENT DETAILS IF SELECTED */}
+            {/* PARTIAL DOWN PAYMENT DETAILS IF SELECTED (Requirement 6: ask only for down payment) */}
             {saleMode === 'ON PARTIAL' && (
               <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 flex flex-col gap-3 animate-fadeIn">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold text-cyan-300 mb-1">
-                      1st Payment / Down Payment (₱) *
+                      Down Payment Amount (₱) *
                     </label>
                     <input
                       type="number"
                       step="any"
+                      placeholder="Enter down payment..."
                       value={downPaymentAmount}
                       onChange={(e) => setDownPaymentAmount(e.target.value)}
                       className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
                       required
                     />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-amber-300 mb-1">
-                      2nd Payment / Balance Due (₱)
-                    </label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={`₱${Math.max(0, liveFormulas.total_amount_due - (parseFloat(downPaymentAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-amber-500/40 bg-zinc-950 text-amber-300 font-mono font-bold"
-                    />
+                    <p className="text-[10px] text-zinc-400 mt-1">
+                      Remaining balance will be tracked in Collections Book for subsequent installment payments.
+                    </p>
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-cyan-300 mb-1">
-                      1st Payment OR # / Ref
+                      1st Collection Ref / OR #
                     </label>
                     <input
                       type="text"
@@ -869,33 +898,10 @@ export default function SalesTransactionTab({
                       onChange={(e) => setCollectionRef(e.target.value)}
                       className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
                     />
+                    <p className="text-[10px] text-zinc-400 mt-1">
+                      Official Receipt / Collection Voucher reference
+                    </p>
                   </div>
-                </div>
-
-                <div className="pt-2 border-t border-cyan-500/20 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-cyan-200 font-medium">
-                    <input
-                      type="checkbox"
-                      checked={recordSecondPaymentNow}
-                      onChange={(e) => setRecordSecondPaymentNow(e.target.checked)}
-                      className="rounded border-cyan-500 bg-zinc-900 text-cyan-500 focus:ring-cyan-500"
-                    />
-                    <span>
-                      2nd Payment (Balance of <strong>₱{Math.max(0, liveFormulas.total_amount_due - (parseFloat(downPaymentAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>) is also paid / collected
-                    </span>
-                  </label>
-
-                  {recordSecondPaymentNow && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-cyan-300 font-bold whitespace-nowrap">2nd OR # / Ref:</span>
-                      <input
-                        type="text"
-                        value={secondPaymentRef}
-                        onChange={(e) => setSecondPaymentRef(e.target.value)}
-                        className="w-36 px-2.5 py-1 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
-                      />
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -929,6 +935,16 @@ export default function SalesTransactionTab({
                     </select>
                   )}
                 </div>
+
+                {/* Requirement 2: Visual warning if entered customer name conflicts with registered TIN */}
+                {hasTinNameConflict && tinMatchCustomer && (
+                  <div className="mt-2 p-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>
+                      <strong>TIN Conflict:</strong> TIN {tin} is already registered to <strong>{tinMatchCustomer.registered_name || tinMatchCustomer.customer_name}</strong>. Entering a different customer name is blocked.
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -939,8 +955,12 @@ export default function SalesTransactionTab({
                   value={tin}
                   onChange={(e) => handleTinChange(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
-                  required
                 />
+                {!tin.replace(/\D/g, '') && (
+                  <p className="text-[10px] text-amber-400/90 mt-1">
+                    ℹ If no TIN is entered, this sale will be counted as "Various Customer" (Directory &gt; Customers &gt; Various Customers).
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1213,33 +1233,25 @@ export default function SalesTransactionTab({
                 <span className="font-bold text-zinc-300 uppercase tracking-wider text-[10px]">Destination Books:</span>
                 <div className="flex items-center gap-1.5 text-emerald-400">
                   <Check className="w-3.5 h-3.5" />
-                  <span>Subsidiary Sales Register (Status: {saleMode === 'ON CASH' ? 'Paid' : saleMode === 'ON PARTIAL' ? (recordSecondPaymentNow ? 'Paid' : 'Partial') : 'On Account'})</span>
+                  <span>Subsidiary Sales Register (Status: {saleMode === 'ON CASH' ? 'Paid' : saleMode === 'ON PARTIAL' ? 'Partial' : 'On Account'})</span>
                 </div>
                 {saleMode === 'ON CASH' && (
                   <>
                     <div className="flex items-center gap-1.5 text-cyan-400">
                       <Check className="w-3.5 h-3.5" />
-                      <span>Cash Receipts Book (Fully Paid Entry)</span>
+                      <span>Cash Receipts Book (Fully Paid Entry &rarr; Dr Cash, Dr CWT 2307, Cr A/R)</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-purple-400">
                       <Check className="w-3.5 h-3.5" />
-                      <span>Collections Book (Paid Settlement)</span>
+                      <span>Collections Book (Payment Audit Tracking)</span>
                     </div>
                   </>
                 )}
                 {saleMode === 'ON PARTIAL' && (
-                  <>
-                    {recordSecondPaymentNow && (
-                      <div className="flex items-center gap-1.5 text-cyan-400">
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Cash Receipts Book (Completed Payment)</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-1.5 text-purple-400">
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Collections Book ({recordSecondPaymentNow ? '1st & 2nd Payments Recorded' : '1st Down Payment Recorded'})</span>
-                    </div>
-                  </>
+                  <div className="flex items-center gap-1.5 text-purple-400">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Collections Book (1st Down Payment Disbursed & Pending Receivable Tracked)</span>
+                  </div>
                 )}
               </div>
 
@@ -1398,7 +1410,7 @@ export default function SalesTransactionTab({
                                 setCollectAmount(String(balance));
                                 setCollectDiscount('0');
                                 setCollectWtax('0');
-                                setCollectRefNo(`OR-${Date.now().toString().slice(-4)}`);
+                                setCollectRefNo(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
                               }}
                               className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1"
                             >
@@ -1563,6 +1575,103 @@ export default function SalesTransactionTab({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* NEW CUSTOMER PROMPT MODAL (Requirement 3) */}
+      {newCustomerPrompt && newCustomerPrompt.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className={`w-full max-w-lg p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-2xl space-y-4 animate-scaleUp`}>
+            <div className="flex items-center justify-between border-b border-zinc-700/40 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className={`text-base font-bold ${theme.textTitle}`}>New Customer Detected</h3>
+                  <p className={`text-xs ${theme.textMuted}`}>Customer has a valid TIN and is not in Customer Directory</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setNewCustomerPrompt(null)}
+                className="p-1 text-zinc-400 hover:text-white rounded cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className={`text-xs ${theme.textMain}`}>
+              Customer <strong>"{newCustomerPrompt.customerName}"</strong> with TIN <strong>{newCustomerPrompt.tin}</strong> is not registered in your customer masterlist. How would you like to save this customer and record the transaction?
+            </p>
+
+            <div className="space-y-3 p-3.5 bg-zinc-800/30 rounded-xl border border-zinc-700/30 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-zinc-400 mb-1">Registered Trade Name</label>
+                <input 
+                  type="text"
+                  value={newCustomerPrompt.customerName}
+                  onChange={(e) => setNewCustomerPrompt({ ...newCustomerPrompt, customerName: e.target.value })}
+                  className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-900 ${theme.borderInput} ${theme.textMain} text-xs`}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 mb-1">Customer TIN</label>
+                  <input 
+                    type="text"
+                    value={newCustomerPrompt.tin}
+                    readOnly
+                    className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-950 font-mono text-cyan-400 font-bold border-zinc-700/50 text-xs`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 mb-1">Tax Classification</label>
+                  <select
+                    value={newCustomerPrompt.taxType}
+                    onChange={(e) => setNewCustomerPrompt({ ...newCustomerPrompt, taxType: e.target.value as any })}
+                    className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-900 ${theme.borderInput} ${theme.textMain} text-xs`}
+                  >
+                    <option value="VAT">VAT Registered (12%)</option>
+                    <option value="Non-VAT">Non-VAT / Percentage</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-zinc-400 mb-1">Business Address</label>
+                <input 
+                  type="text"
+                  placeholder="Enter customer business address..."
+                  value={newCustomerPrompt.address}
+                  onChange={(e) => setNewCustomerPrompt({ ...newCustomerPrompt, address: e.target.value })}
+                  className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-900 ${theme.borderInput} ${theme.textMain} text-xs`}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => executeRecordSale(true, false)}
+                className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-white bg-cyan-600 hover:bg-cyan-500 transition shadow-sm cursor-pointer"
+              >
+                ✓ Add to Customer Database & Record Sale
+              </button>
+              <button
+                type="button"
+                onClick={() => executeRecordSale(false, true)}
+                className="px-4 py-2.5 text-xs font-bold rounded-xl text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition cursor-pointer"
+              >
+                Track as Various Customer Only
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewCustomerPrompt(null)}
+                className="px-3 py-2 text-xs font-semibold rounded-xl text-zinc-400 hover:text-white border border-zinc-700/40 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

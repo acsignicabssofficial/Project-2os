@@ -70,8 +70,8 @@ export default function PurchaseTransactionTab({
   const [tin, setTin] = useState('');
   const [address, setAddress] = useState('');
   const [invoiceType, setInvoiceType] = useState('OFFICIAL RECEIPT');
-  const [voucherNo, setVoucherNo] = useState(`PV-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
-  const [invoiceNo, setInvoiceNo] = useState(`INV-${Date.now().toString().slice(-4)}`);
+  const [voucherNo, setVoucherNo] = useState(`VOUCHER #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+  const [invoiceNo, setInvoiceNo] = useState(`EXP #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [particulars, setParticulars] = useState('');
   const [qty, setQty] = useState('1');
@@ -113,7 +113,7 @@ export default function PurchaseTransactionTab({
   // Partial mode fields
   const [downPaymentAmount, setDownPaymentAmount] = useState('5000');
   const [downPaymentWithholding, setDownPaymentWithholding] = useState('0');
-  const [disbursementRef, setDisbursementRef] = useState(`CD-${Date.now().toString().slice(-4)}`);
+  const [disbursementRef, setDisbursementRef] = useState(`PYMT #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
 
   // Quick payment modal for open payables
   const [selectedPayableToPay, setSelectedPayableToPay] = useState<UniformBookRecord | null>(null);
@@ -456,9 +456,10 @@ export default function PurchaseTransactionTab({
       }
     }
 
-    // Reset Form for next entry
-    setVoucherNo(`PV-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
-    setInvoiceNo(`INV-${Date.now().toString().slice(-4)}`);
+    // Reset Form for next entry with Requirement 4 prefixes
+    setVoucherNo(`VOUCHER #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+    setInvoiceNo(`EXP #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+    setDisbursementRef(`PYMT #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
     setParticulars('');
     setUnitPrice('15000');
     setDownPaymentAmount('5000');
@@ -1369,7 +1370,7 @@ export default function PurchaseTransactionTab({
                               onClick={() => {
                                 setSelectedPayableToPay(p);
                                 setPayAmount(String(balance));
-                                setPayRefNo(`PV-${Date.now().toString().slice(-4)}`);
+                                setPayRefNo(`PYMT #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
                               }}
                               className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1"
                             >

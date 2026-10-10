@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Book, Search, Filter } from 'lucide-react';
+import { Book, Search, Filter, ChevronDown, ChevronRight } from 'lucide-react';
 import { Sale, Collection, Expense, Payment, SpecialEntry, AccountTitle, Company, PPEAsset, PayrollRecord } from '../types';
 import { buildMasterJournalEntries } from '../utils/accounting';
 
@@ -38,6 +38,25 @@ export default function GeneralLedgerTab({
   const [selectedAccount, setSelectedAccount] = useState<string>('ALL');
   const [ledgerCategory, setLedgerCategory] = useState<'ALL' | 'GENERAL' | 'SPECIAL'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Requirement 5: Collapsible Account Titles in Ledger
+  const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
+
+  const toggleExpandAccount = (code: string) => {
+    setExpandedAccounts(prev => ({
+      ...prev,
+      [code]: !prev[code]
+    }));
+  };
+
+  const toggleExpandAllAccounts = () => {
+    const allExpanded = displayAccounts.every(a => expandedAccounts[a.code]);
+    const nextState: Record<string, boolean> = {};
+    displayAccounts.forEach(a => {
+      nextState[a.code] = !allExpanded;
+    });
+    setExpandedAccounts(nextState);
+  };
 
   // Default Chart of Accounts list if none provided
   const coaList = useMemo(() => {
@@ -241,118 +260,147 @@ export default function GeneralLedgerTab({
           </div>
         </div>
 
-        {/* LEDGER CATEGORY TOGGLE TABS */}
-        <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center gap-2">
+        {/* LEDGER CATEGORY TOGGLE TABS & EXPAND TOGGLE */}
+        <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setLedgerCategory('ALL')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
+                ledgerCategory === 'ALL'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
+              }`}
+            >
+              📖 All Account Ledgers
+            </button>
+            <button
+              type="button"
+              onClick={() => setLedgerCategory('GENERAL')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
+                ledgerCategory === 'GENERAL'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
+              }`}
+            >
+              📒 General Ledger (GJ)
+            </button>
+            <button
+              type="button"
+              onClick={() => setLedgerCategory('SPECIAL')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
+                ledgerCategory === 'SPECIAL'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
+              }`}
+            >
+              📗 Special Ledger (SL)
+            </button>
+          </div>
+
           <button
             type="button"
-            onClick={() => setLedgerCategory('ALL')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-              ledgerCategory === 'ALL'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-            }`}
+            onClick={toggleExpandAllAccounts}
+            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition cursor-pointer"
           >
-            📖 All Account Ledgers
-          </button>
-          <button
-            type="button"
-            onClick={() => setLedgerCategory('GENERAL')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-              ledgerCategory === 'GENERAL'
-                ? 'bg-purple-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-            }`}
-          >
-            📒 General Ledger (Payroll, Tax, Depreciation, Adjusting, Closing, Reversing)
-          </button>
-          <button
-            type="button"
-            onClick={() => setLedgerCategory('SPECIAL')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-              ledgerCategory === 'SPECIAL'
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-            }`}
-          >
-            📗 Special Ledger (Sales, Collections, Expenses, Payments, Cancellations)
+            {displayAccounts.every(a => expandedAccounts[a.code]) ? '▲ Collapse All Accounts' : '▼ Expand All Accounts'}
           </button>
         </div>
       </div>
 
-      {/* T-ACCOUNT CARDS */}
-      <div className="space-y-6">
-        {displayAccounts.map((acc) => (
-          <div key={acc.code} className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm overflow-hidden`}>
-            {/* Account Card Header */}
-            <div className={`p-4 border-b ${theme.borderCard} bg-zinc-500/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2`}>
-              <div className="flex items-center gap-3">
-                <span className="px-2.5 py-1 text-xs font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-lg">
-                  CODE: {acc.code}
-                </span>
-                <h3 className={`font-bold text-sm ${theme.textTitle}`}>{acc.title}</h3>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                  acc.type === 'Asset' ? 'bg-cyan-500/10 text-cyan-400' :
-                  acc.type === 'Liability' ? 'bg-amber-500/10 text-amber-400' :
-                  acc.type === 'Equity' ? 'bg-purple-500/10 text-purple-400' :
-                  acc.type === 'Revenue' ? 'bg-emerald-500/10 text-emerald-400' :
-                  'bg-rose-500/10 text-rose-400'
-                }`}>
-                  {acc.type}
-                </span>
-              </div>
+      {/* T-ACCOUNT CARDS (Requirement 5: Shows list of account titles with sum Dr/Cr/Running Balance, collapsible on click) */}
+      <div className="space-y-4">
+        {displayAccounts.map((acc) => {
+          const isExpanded = !!expandedAccounts[acc.code];
 
-              <div className="flex items-center gap-4 text-xs font-mono">
-                <div className="text-zinc-400">Total Dr: <span className="text-emerald-400 font-bold">₱{acc.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
-                <div className="text-zinc-400">Total Cr: <span className="text-teal-400 font-bold">₱{acc.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
-                <div className="text-zinc-300 bg-zinc-500/10 px-3 py-1 rounded-lg border border-zinc-700/30">
-                  Ending Balance: <span className="text-cyan-300 font-bold">₱{acc.netBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+          return (
+            <div key={acc.code} className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm overflow-hidden transition-all duration-150`}>
+              {/* Account Card Header (Click to toggle postings list) */}
+              <div 
+                onClick={() => toggleExpandAccount(acc.code)}
+                className={`p-4 ${isExpanded ? 'border-b ' + theme.borderCard : ''} bg-zinc-500/5 hover:bg-zinc-500/10 cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors`}
+              >
+                <div className="flex items-center gap-3">
+                  <button 
+                    type="button"
+                    aria-label="Toggle account transactions"
+                    className="p-1 rounded text-cyan-400 hover:text-cyan-300"
+                  >
+                    {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                  </button>
+                  <span className="px-2.5 py-1 text-xs font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-lg">
+                    CODE: {acc.code}
+                  </span>
+                  <h3 className={`font-bold text-sm ${theme.textTitle}`}>{acc.title}</h3>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                    acc.type === 'Asset' ? 'bg-cyan-500/10 text-cyan-400' :
+                    acc.type === 'Liability' ? 'bg-amber-500/10 text-amber-400' :
+                    acc.type === 'Equity' ? 'bg-purple-500/10 text-purple-400' :
+                    acc.type === 'Revenue' ? 'bg-emerald-500/10 text-emerald-400' :
+                    'bg-rose-500/10 text-rose-400'
+                  }`}>
+                    {acc.type}
+                  </span>
+                  <span className="text-[11px] text-zinc-400 font-mono">
+                    ({acc.postings.length} {acc.postings.length === 1 ? 'entry' : 'entries'})
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs font-mono flex-wrap">
+                  <div className="text-zinc-400">Total Dr: <span className="text-emerald-400 font-bold">₱{acc.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                  <div className="text-zinc-400">Total Cr: <span className="text-teal-400 font-bold">₱{acc.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                  <div className="text-zinc-300 bg-zinc-500/10 px-3 py-1 rounded-lg border border-zinc-700/30">
+                    Running Balance: <span className="text-cyan-300 font-bold">₱{acc.netBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Postings Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className={`bg-zinc-500/5 ${theme.textMuted} uppercase font-bold tracking-wider border-b ${theme.borderCard}`}>
-                    <th className="p-3 w-28">Posting Date</th>
-                    <th className="p-3 w-32">Ref / Voucher #</th>
-                    <th className="p-3">Particulars & Transaction Details</th>
-                    <th className="p-3 text-right w-32">Debit (Dr)</th>
-                    <th className="p-3 text-right w-32">Credit (Cr)</th>
-                    <th className="p-3 text-right w-36">Running Balance</th>
-                  </tr>
-                </thead>
-                <tbody className={`divide-y ${theme.borderCard}`}>
-                  {acc.postings.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="p-6 text-center text-zinc-500">
-                        No transactions posted to this account title yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    acc.postings.map((p, idx) => (
-                      <tr key={idx} className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/30'} transition-colors`}>
-                        <td className="p-3 font-mono text-zinc-300">{p.date}</td>
-                        <td className="p-3 font-mono font-bold text-cyan-400">{p.ref}</td>
-                        <td className={`p-3 font-medium ${theme.textMain}`}>{p.particulars}</td>
-                        <td className="p-3 text-right font-mono font-semibold text-emerald-400">
-                          {p.debit > 0 ? `₱${p.debit.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
-                        </td>
-                        <td className="p-3 text-right font-mono font-semibold text-teal-400">
-                          {p.credit > 0 ? `₱${p.credit.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
-                        </td>
-                        <td className="p-3 text-right font-mono font-bold text-cyan-300">
-                          ₱{p.runningBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
+              {/* Postings Table (Shown when expanded) */}
+              {isExpanded && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className={`bg-zinc-500/5 ${theme.textMuted} uppercase font-bold tracking-wider border-b ${theme.borderCard}`}>
+                        <th className="p-3 w-28">Posting Date</th>
+                        <th className="p-3 w-32">Ref / Voucher #</th>
+                        <th className="p-3">Particulars & Transaction Details</th>
+                        <th className="p-3 text-right w-32">Debit (Dr)</th>
+                        <th className="p-3 text-right w-32">Credit (Cr)</th>
+                        <th className="p-3 text-right w-36">Running Balance</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody className={`divide-y ${theme.borderCard}`}>
+                      {acc.postings.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-6 text-center text-zinc-500">
+                            No transactions posted to this account title yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        acc.postings.map((p, idx) => (
+                          <tr key={idx} className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/30'} transition-colors`}>
+                            <td className="p-3 font-mono text-zinc-300">{p.date}</td>
+                            <td className="p-3 font-mono font-bold text-cyan-400">{p.ref}</td>
+                            <td className={`p-3 font-medium ${theme.textMain}`}>{p.particulars}</td>
+                            <td className="p-3 text-right font-mono font-semibold text-emerald-400">
+                              {p.debit > 0 ? `₱${p.debit.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                            </td>
+                            <td className="p-3 text-right font-mono font-semibold text-teal-400">
+                              {p.credit > 0 ? `₱${p.credit.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                            </td>
+                            <td className="p-3 text-right font-mono font-bold text-cyan-300">
+                              ₱{p.runningBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

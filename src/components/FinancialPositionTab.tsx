@@ -233,8 +233,8 @@ export default function FinancialPositionTab({
                 <tr className={`bg-zinc-500/10 ${theme.textTitle} uppercase font-bold tracking-wider border-b-2 border-zinc-700/60`}>
                   <th className="p-3 w-1/2">Account Title / Classification</th>
                   <th className="p-3 w-28 text-center">Account Code</th>
-                  <th className="p-3 w-40 text-right font-mono text-emerald-400">DEBIT (₱)</th>
-                  <th className="p-3 w-40 text-right font-mono text-teal-400">CREDIT (₱)</th>
+                  <th className="p-3 w-44 text-right font-mono text-emerald-400">DEBIT (₱)</th>
+                  <th className="p-3 w-44 text-right font-mono text-teal-400">CREDIT (₱)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/20 font-sans">
@@ -247,7 +247,7 @@ export default function FinancialPositionTab({
 
                 {/* Current Assets Section */}
                 <tr className="font-semibold text-zinc-300 bg-zinc-800/10">
-                  <td className="p-2 pl-4 text-zinc-300">Current Assets</td>
+                  <td className="p-2 pl-4 text-zinc-300"> Current Assets</td>
                   <td className="p-2 text-center font-mono text-zinc-500">-</td>
                   <td className="p-2 text-right font-mono text-zinc-500">-</td>
                   <td className="p-2 text-right font-mono text-zinc-500">-</td>
@@ -255,12 +255,16 @@ export default function FinancialPositionTab({
 
                 {/* Line: Cash and Cash Equivalents */}
                 <tr className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
-                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>Cash and Cash Equivalents</td>
+                  <td className={`p-2 pl-8 font-medium ${theme.textMain}`}>
+                    Cash and Cash Equivalent
+                  </td>
                   <td className="p-2 text-center font-mono text-cyan-400">1010</td>
                   <td className="p-2 text-right font-mono font-semibold text-emerald-400">
                     ₱{bs.cash.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
-                  <td className="p-2 text-right font-mono text-zinc-500">-</td>
+                  <td className="p-2 text-right font-mono text-zinc-500">
+                    {bs.cash < 0 ? `₱${Math.abs(bs.cash).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                  </td>
                 </tr>
 
                 {/* Line: Accounts Receivable (Net) */}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { BookOpen, Search, Pencil, X } from 'lucide-react';
+import { BookOpen, Search, Pencil, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { Sale, Collection, Expense, Payment, SpecialEntry, AccountTitle, Company, JournalEntry, PPEAsset, PayrollRecord } from '../types';
 import { computeSalesVAT, computeExpenseVAT, buildMasterJournalEntries } from '../utils/accounting';
 
@@ -47,6 +47,25 @@ export default function GeneralJournalTab({
   // Custom overrides for edited journal entries
   const [editedEntries, setEditedEntries] = useState<Record<string, JournalEntry>>({});
   const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
+
+  // Requirement 5: Collapsible Journal Entries (expanded state per entry)
+  const [expandedEntries, setExpandedEntries] = useState<Record<string, boolean>>({});
+
+  const toggleExpandEntry = (entryNo: string) => {
+    setExpandedEntries(prev => ({
+      ...prev,
+      [entryNo]: !prev[entryNo]
+    }));
+  };
+
+  const toggleExpandAll = () => {
+    const allExpanded = filteredEntries.every(e => expandedEntries[e.entry_no]);
+    const nextState: Record<string, boolean> = {};
+    filteredEntries.forEach(e => {
+      nextState[e.entry_no] = !allExpanded;
+    });
+    setExpandedEntries(nextState);
+  };
 
   // Compute double-entry journal entries automatically
   const baseJournalEntries = useMemo(() => {
@@ -410,10 +429,23 @@ export default function GeneralJournalTab({
 
       {/* JOURNAL ENTRIES TABLE */}
       <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm overflow-hidden`}>
+        <div className="p-3 border-b border-zinc-800/40 bg-zinc-500/5 flex items-center justify-between">
+          <span className="text-xs font-semibold text-zinc-400">
+            Showing <strong className="text-cyan-400">{filteredEntries.length}</strong> journal transaction entries. Click the arrow or row to view double-entry lines.
+          </span>
+          <button
+            type="button"
+            onClick={toggleExpandAll}
+            className="px-3 py-1 text-xs font-semibold rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition cursor-pointer"
+          >
+            {filteredEntries.every(e => expandedEntries[e.entry_no]) ? '▲ Collapse All' : '▼ Expand All'}
+          </button>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className={`bg-zinc-500/5 ${theme.textMuted} uppercase font-bold tracking-wider border-b ${theme.borderCard}`}>
+                <th className="p-3 w-10 text-center"></th>
                 <th className="p-3">Entry # / Ref</th>
                 <th className="p-3">Date</th>
                 <th className="p-3">Description & Particulars</th>
@@ -426,7 +458,7 @@ export default function GeneralJournalTab({
             <tbody className={`divide-y ${theme.borderCard}`}>
               {filteredEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-zinc-500">
+                  <td colSpan={8} className="p-8 text-center text-zinc-500">
                     No journal entries found matching the filter criteria.
                   </td>
                 </tr>
@@ -435,11 +467,24 @@ export default function GeneralJournalTab({
                   const totalDr = entry.debits.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
                   const totalCr = entry.credits.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
                   const isBal = Math.abs(totalDr - totalCr) < 0.01;
+                  const isExpanded = !!expandedEntries[entry.entry_no];
 
                   return (
                     <React.Fragment key={entry.entry_no}>
-                      {/* Entry Header Row */}
-                      <tr className={`${theme.isLight ? 'bg-slate-100/50' : 'bg-zinc-800/40'} font-semibold border-t ${theme.borderCard}`}>
+                      {/* Entry Header Row (Collapsible on click) */}
+                      <tr 
+                        onClick={() => toggleExpandEntry(entry.entry_no)}
+                        className={`${theme.isLight ? 'bg-slate-100/50 hover:bg-slate-100' : 'bg-zinc-800/40 hover:bg-zinc-800/70'} font-semibold border-t ${theme.borderCard} cursor-pointer transition-colors`}
+                      >
+                        <td className="p-3 text-center">
+                          <button 
+                            type="button" 
+                            aria-label="Toggle entry details"
+                            className="p-1 rounded text-cyan-400 hover:text-cyan-300"
+                          >
+                            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                          </button>
+                        </td>
                         <td className="p-3 font-mono text-cyan-400 font-bold">{entry.entry_no}</td>
                         <td className="p-3 font-mono text-zinc-300">{entry.date}</td>
                         <td colSpan={2} className={`p-3 ${theme.textTitle}`}>
@@ -460,7 +505,7 @@ export default function GeneralJournalTab({
                             {isBal ? '✓ Balanced' : '⚠ Unbalanced'}
                           </span>
                         </td>
-                        <td className="p-3 text-center">
+                        <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => handleStartEdit(entry)}
                             className="p-1 px-2.5 py-1 text-[11px] font-medium rounded-md border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition cursor-pointer"
@@ -470,11 +515,12 @@ export default function GeneralJournalTab({
                         </td>
                       </tr>
 
-                      {/* Debits */}
-                      {entry.debits.map((d, idx) => {
+                      {/* Debits (Shown when expanded) */}
+                      {isExpanded && entry.debits.map((d, idx) => {
                         const drAmt = Number(d.amount) || 0;
                         return (
-                          <tr key={`dr-${idx}`} className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                          <tr key={`dr-${idx}`} className={`${theme.isLight ? 'bg-slate-50/70 hover:bg-slate-100/60' : 'bg-zinc-900/60 hover:bg-zinc-800/30'}`}>
+                            <td className="p-2"></td>
                             <td className="p-2"></td>
                             <td className="p-2"></td>
                             <td className={`p-2 pl-6 font-medium ${theme.textMain}`}>{d.account_title}</td>
@@ -488,11 +534,12 @@ export default function GeneralJournalTab({
                         );
                       })}
 
-                      {/* Credits */}
-                      {entry.credits.map((c, idx) => {
+                      {/* Credits (Shown when expanded) */}
+                      {isExpanded && entry.credits.map((c, idx) => {
                         const crAmt = Number(c.amount) || 0;
                         return (
-                          <tr key={`cr-${idx}`} className={`${theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}`}>
+                          <tr key={`cr-${idx}`} className={`${theme.isLight ? 'bg-slate-50/70 hover:bg-slate-100/60' : 'bg-zinc-900/60 hover:bg-zinc-800/30'}`}>
+                            <td className="p-2"></td>
                             <td className="p-2"></td>
                             <td className="p-2"></td>
                             <td className={`p-2 pl-12 font-medium ${theme.textMuted} italic`}>{c.account_title}</td>

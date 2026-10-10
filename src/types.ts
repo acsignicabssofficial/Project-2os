@@ -95,6 +95,7 @@ export interface OtherParty {
   provider_branch_code?: string;
   business_tax_type?: 'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated' | string;
   expense_type?: string;
+  client_status?: string;
 }
 
 export type Customer = OtherParty;
@@ -632,6 +633,7 @@ export interface UniformBookRecord {
   pending_balance?: number;
   settled_via_collections?: boolean;
   is_various_customer?: boolean;
+  is_various?: boolean;
 
   // Inter-compatibility properties for existing components/reports
   customer_id?: string;
