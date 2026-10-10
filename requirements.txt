@@ -1,5 +1,0 @@
-# 2OS Accounting System - Desktop App Requirements
-# Standard Python 3.8+ works OUT-OF-THE-BOX with standard library (no pip packages needed)
-#
-# (Optional) If you want an embedded native OS WebView2 desktop window:
-pywebview>=5.0

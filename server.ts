@@ -18,7 +18,7 @@ import {
 } from "./src/data";
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const DB_SQLITE_FILE = path.join(process.cwd(), "2os_database.db");
 const DB_JSON_BACKUP = path.join(process.cwd(), "2os_database.json");
 
@@ -416,57 +416,12 @@ function queryTableRows(tableName: string) {
 }
 
 function getLedgerDataFromSqlite() {
-  // Check if full_ledger_json exists in app_settings for lossless 6-book and installment persistence
-  const fullJsonRow = queryTableRows("app_settings").find(s => s.setting_key === "full_ledger_json");
-  if (fullJsonRow && fullJsonRow.setting_value) {
-    try {
-      const parsed = JSON.parse(fullJsonRow.setting_value);
-      if (parsed && typeof parsed === "object") {
-        if (Array.isArray(parsed.specialEntries)) {
-          parsed.specialEntries = parsed.specialEntries.filter((se: any) => {
-            const entryNo = String(se?.entry_number || "");
-            return !(
-              entryNo.startsWith("SJ-SLS-") ||
-              entryNo.startsWith("SJ-COL-") ||
-              entryNo.startsWith("SJ-PUR-") ||
-              entryNo.startsWith("SJ-DIS-")
-            );
-          });
-        }
-        return parsed;
-      }
-    } catch (e) {
-      console.warn("Failed parsing full_ledger_json from SQLite, falling back to relational tables:", e);
-    }
-  }
-
   const companies = queryTableRows("companies").map(c => ({
     ...c,
-    rdo: c.rdo_code || "",
-    company_address: c.address || "",
-    registered_address: c.address || "",
-    company_email: c.email || "",
-    company_contact: c.phone || "",
-    vat_or_non_vat: c.is_vat_registered ? "VATABLE" : "NON-VAT",
-    entity_type: c.tax_regime || "CORPORATION",
     is_vat_registered: Boolean(c.is_vat_registered)
   }));
-  const customers = queryTableRows("customers").map(c => ({
-    ...c,
-    registered_name: c.customer_name || "",
-    client_TIN: c.customer_tin || "",
-    client_Address: c.address || "",
-    customer_address: c.address || ""
-  }));
-  const contractors = queryTableRows("contractors").map(c => ({
-    ...c,
-    registered_name: c.contractor_name || "",
-    service_provider_name: c.contractor_name || "",
-    service_provider_TIN: c.contractor_tin || "",
-    sp_tin: c.contractor_tin || "",
-    service_provider_Address: c.address || "",
-    sp_address: c.address || ""
-  }));
+  const customers = queryTableRows("customers");
+  const contractors = queryTableRows("contractors");
   const sales = queryTableRows("sales");
   const collections = queryTableRows("collections");
   const expenses = queryTableRows("expenses");
@@ -482,33 +437,12 @@ function getLedgerDataFromSqlite() {
       ...s,
       lines
     };
-  }).filter((se: any) => {
-    const entryNo = String(se?.entry_number || "");
-    return !(
-      entryNo.startsWith("SJ-SLS-") ||
-      entryNo.startsWith("SJ-COL-") ||
-      entryNo.startsWith("SJ-PUR-") ||
-      entryNo.startsWith("SJ-DIS-")
-    );
   });
-  const incomeTaxRecords = queryTableRows("income_tax_records").map(r => ({
-    ...r,
-    tax_year: Number(r.taxable_year) || 2026,
-    period: r.quarter_period || "",
-    quarter: r.quarter_period || "",
-    gross_income: Number(r.gross_sales) || 0,
-    less_creditable_tax_2307: Number(r.creditable_tax_2307) || 0,
-    less_quarterly_tax_payments: Number(r.quarterly_tax_payments) || 0,
-    tax_due: Number(r.computed_tax_due) || 0
-  }));
+  const incomeTaxRecords = queryTableRows("income_tax_records");
   const payrollRecords = queryTableRows("payroll_records");
   const employees = queryTableRows("employees").map(e => ({
     ...e,
-    sss_no: e.sss_number || "",
-    philhealth_no: e.philhealth_number || "",
-    pagibig_no: e.pagibig_number || "",
-    is_subject_to_contributions: Boolean(e.is_subject_to_contributions),
-    subject_to_contributions: Boolean(e.is_subject_to_contributions)
+    is_subject_to_contributions: Boolean(e.is_subject_to_contributions)
   }));
 
   // Query 2OS Uniform Books of Accounts Tables
@@ -781,20 +715,10 @@ function saveLedgerToSqlite(data: any) {
   if (Array.isArray(data.companies)) {
     const stmt = db.prepare(`INSERT INTO companies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.companies.forEach((c: any) => {
-      const isVat = c.is_vat_registered !== undefined ? Boolean(c.is_vat_registered) : (c.vat_or_non_vat !== "NON-VAT" && c.vat_or_non_vat !== "EXEMPT");
       stmt.run([
-        c.id,
-        c.company_name || c.trade_name || "",
-        c.company_tin || "",
-        c.rdo_code || c.rdo || "",
-        c.line_of_business || "",
-        c.address || c.company_address || c.registered_address || "",
-        c.zip_code || "",
-        c.email || c.company_email || "",
-        c.phone || c.company_contact || "",
-        isVat ? 1 : 0,
-        c.tax_regime || c.entity_type || "CORPORATION",
-        c.created_at || c.date_of_entry || new Date().toISOString()
+        c.id, c.company_name, c.company_tin, c.rdo_code, c.line_of_business,
+        c.address, c.zip_code, c.email, c.phone, c.is_vat_registered ? 1 : 0,
+        c.tax_regime, c.created_at || new Date().toISOString()
       ]);
       try {
         createEntityDirectoryTree(c.company_name, c.tin_branch_code || "00000", c.created_at || c.birthday_or_incorporation_date);
@@ -810,15 +734,8 @@ function saveLedgerToSqlite(data: any) {
     const stmt = db.prepare(`INSERT INTO customers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.customers.forEach((c: any) => {
       stmt.run([
-        c.id,
-        c.company_name || "",
-        c.customer_name || c.registered_name || "",
-        c.customer_tin || c.client_TIN || c.tin_number || "",
-        c.address || c.client_Address || c.customer_address || "",
-        c.contact_person || "",
-        c.email || "",
-        c.phone || c.contact_number || "",
-        c.created_at || new Date().toISOString()
+        c.id, c.company_name, c.customer_name, c.customer_tin, c.address,
+        c.contact_person, c.email, c.phone, c.created_at || new Date().toISOString()
       ]);
     });
     stmt.free();
@@ -829,16 +746,8 @@ function saveLedgerToSqlite(data: any) {
     const stmt = db.prepare(`INSERT INTO contractors VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.contractors.forEach((c: any) => {
       stmt.run([
-        c.id,
-        c.company_name || "",
-        c.contractor_name || c.service_provider_name || c.registered_name || "",
-        c.contractor_tin || c.service_provider_TIN || c.sp_tin || c.tin_number || "",
-        c.address || c.service_provider_Address || c.sp_address || "",
-        c.service_type || c.expense_type || "",
-        c.atc_code || "",
-        c.email || "",
-        c.phone || c.contact_number || "",
-        c.created_at || new Date().toISOString()
+        c.id, c.company_name, c.contractor_name, c.contractor_tin, c.address,
+        c.service_type, c.atc_code, c.email, c.phone, c.created_at || new Date().toISOString()
       ]);
     });
     stmt.free();
@@ -1109,19 +1018,10 @@ function saveLedgerToSqlite(data: any) {
     stmt.free();
   }
 
-  // 10. Special Entries (Filter out auto-generated SJ-SLS/COL/PUR/DIS entries to prevent double counting)
+  // 10. Special Entries
   if (Array.isArray(data.specialEntries)) {
-    const cleanedSJs = data.specialEntries.filter((se: any) => {
-      const entryNo = String(se?.entry_number || "");
-      return !(
-        entryNo.startsWith("SJ-SLS-") ||
-        entryNo.startsWith("SJ-COL-") ||
-        entryNo.startsWith("SJ-PUR-") ||
-        entryNo.startsWith("SJ-DIS-")
-      );
-    });
     const stmt = db.prepare(`INSERT INTO special_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    cleanedSJs.forEach((s: any) => {
+    data.specialEntries.forEach((s: any) => {
       stmt.run([
         s.id, s.company_name, s.entry_number, s.voucher_no, s.entry_date, s.entry_type,
         s.description || "", JSON.stringify(s.lines || []), s.created_at || new Date().toISOString()
@@ -1135,23 +1035,10 @@ function saveLedgerToSqlite(data: any) {
     const stmt = db.prepare(`INSERT INTO income_tax_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.incomeTaxRecords.forEach((t: any) => {
       stmt.run([
-        t.id,
-        t.company_name || "",
-        String(t.taxable_year || t.tax_year || 2026),
-        t.quarter_period || t.period || t.quarter || "",
-        t.entity_type || "CORPORATION",
-        t.tax_regime || "Regular",
-        t.deduction_method || "Itemized",
-        Number(t.gross_sales ?? t.gross_income) || 0,
-        Number(t.cost_of_sales) || 0,
-        Number(t.itemized_expenses ?? t.allowable_deductions) || 0,
-        Number(t.allowable_deductions) || 0,
-        Number(t.taxable_income) || 0,
-        Number(t.computed_tax_due ?? t.tax_due) || 0,
-        Number(t.creditable_tax_2307 ?? t.less_creditable_tax_2307) || 0,
-        Number(t.quarterly_tax_payments ?? t.less_quarterly_tax_payments) || 0,
-        Number(t.net_tax_payable) || 0,
-        t.created_at || new Date().toISOString()
+        t.id, t.company_name, t.taxable_year, t.quarter_period, t.entity_type, t.tax_regime,
+        t.deduction_method, t.gross_sales, t.cost_of_sales || 0, t.itemized_expenses,
+        t.allowable_deductions, t.taxable_income, t.computed_tax_due, t.creditable_tax_2307,
+        t.quarterly_tax_payments, t.net_tax_payable, t.created_at || new Date().toISOString()
       ]);
     });
     stmt.free();
@@ -1176,21 +1063,10 @@ function saveLedgerToSqlite(data: any) {
     const stmt = db.prepare(`INSERT INTO employees VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.employees.forEach((e: any) => {
       stmt.run([
-        e.id,
-        e.company_name || "",
-        String(e.employee_id || e.employee_code || ""),
-        e.full_name || `${e.first_name || ""} ${e.last_name || ""}`.trim(),
-        e.tin || "",
-        e.sss_number || e.sss_no || "",
-        e.philhealth_number || e.philhealth_no || "",
-        e.pagibig_number || e.pagibig_no || "",
-        e.position || "",
-        e.department || "",
-        Number(e.monthly_rate) || 0,
-        Number(e.daily_rate) || 0,
-        e.tax_status || "S",
-        (e.is_subject_to_contributions !== undefined ? e.is_subject_to_contributions : (e.subject_to_contributions ?? true)) ? 1 : 0,
-        e.created_at || new Date().toISOString()
+        e.id, e.company_name, e.employee_id, e.full_name, e.tin, e.sss_number,
+        e.philhealth_number, e.pagibig_number, e.position, e.department,
+        e.monthly_rate || 0, e.daily_rate || 0, e.tax_status || "S",
+        e.is_subject_to_contributions ? 1 : 0, e.created_at || new Date().toISOString()
       ]);
     });
     stmt.free();
@@ -1222,40 +1098,6 @@ app.get("/api/ledger-data", (req, res) => {
   } catch (e) {
     console.error("Error reading from SQLite database:", e);
     res.status(500).json({ error: "Failed to read database" });
-  }
-});
-
-app.get("/api/export-sql", (req, res) => {
-  try {
-    const tables = [
-      "companies", "customers", "contractors", "subsidiary_sales",
-      "subsidiary_purchases", "cash_receipts", "cash_disbursements",
-      "ppe_assets", "account_titles", "special_entries",
-      "income_tax_records", "payroll_records", "employees"
-    ];
-    let sqlDump = `-- 2OS Accounting System Relational SQL Backup\n-- Generated: ${new Date().toISOString()}\n\n`;
-    for (const tbl of tables) {
-      const rows = queryTableRows(tbl);
-      if (rows.length > 0) {
-        sqlDump += `-- Table: ${tbl} (${rows.length} rows)\n`;
-        for (const r of rows) {
-          const cols = Object.keys(r);
-          const vals = cols.map(k => {
-            const v = r[k];
-            if (v === null || v === undefined) return "NULL";
-            if (typeof v === "number") return String(v);
-            return `'${String(v).replace(/'/g, "''")}'`;
-          });
-          sqlDump += `INSERT INTO ${tbl} (${cols.join(", ")}) VALUES (${vals.join(", ")});\n`;
-        }
-        sqlDump += "\n";
-      }
-    }
-    res.setHeader("Content-Disposition", 'attachment; filename="transactions.sql"');
-    res.setHeader("Content-Type", "application/sql; charset=utf-8");
-    res.send(sqlDump);
-  } catch (e: any) {
-    res.status(500).send(`-- Failed to generate SQL dump: ${e.message}`);
   }
 });
 

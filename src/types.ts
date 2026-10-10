@@ -582,19 +582,7 @@ export type UniformBookType =
   | 'subsidiary_sales'
   | 'subsidiary_purchases'
   | 'collections'
-  | 'collections_book'
-  | 'payments'
-  | 'payments_book';
-
-export interface PaymentInstallment {
-  payment_no: number;
-  date: string;
-  ref_no: string;
-  cash_amount: number;
-  discount?: number;
-  wtax_2307?: number;
-  is_final?: boolean;
-}
+  | 'payments';
 
 export interface UniformBookRecord {
   id: number;
@@ -627,9 +615,6 @@ export interface UniformBookRecord {
   status?: 'Cash' | 'On Account' | 'Partial' | 'Paid' | 'Unpaid' | string;
   is_cancelled?: boolean;
   created_at?: string;
-  installments?: PaymentInstallment[];
-  pending_balance?: number;
-  settled_via_collections?: boolean;
 
   // Inter-compatibility properties for existing components/reports
   customer_id?: string;

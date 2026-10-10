@@ -66,8 +66,7 @@ export default function UniformBookTab({
 }: UniformBookTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const labels = getBookDisplayLabel(bookType);
-  const isDisbursementOrPurchase = bookType === 'cash_disbursement' || bookType === 'subsidiary_purchases' || bookType === 'payments' || bookType === 'payments_book';
-  const isCollectionsOrPaymentsBook = bookType === 'collections' || bookType === 'collections_book' || bookType === 'payments' || bookType === 'payments_book';
+  const isDisbursementOrPurchase = bookType === 'cash_disbursement' || bookType === 'subsidiary_purchases';
 
   // Dynamic Chart of Accounts Expenses options
   const selectableExpenseAccounts = useMemo(() => {
@@ -194,13 +193,6 @@ export default function UniformBookTab({
       if (activeCompanyName && r.company_name && r.company_name !== activeCompanyName) {
         return false;
       }
-      // Cash Receipts & Cash Disbursements strictly list fully paid transactions only
-      if (bookType === 'cash_receipt' || bookType === 'cash_disbursement') {
-        const st = String(r.status || '').toLowerCase();
-        if (st === 'partial' || st === 'on account') {
-          return false;
-        }
-      }
       if (filterVat !== 'ALL' && r.vat_or_nonvat !== filterVat) {
         return false;
       }
@@ -216,7 +208,7 @@ export default function UniformBookTab({
         (r.particulars || '').toLowerCase().includes(q)
       );
     });
-  }, [records, activeCompanyName, bookType, searchTerm, globalSearch, filterVat, filterType]);
+  }, [records, activeCompanyName, searchTerm, globalSearch, filterVat, filterType]);
 
   // Totals of currently filtered records
   const summaryTotals = useMemo(() => {
@@ -631,39 +623,19 @@ export default function UniformBookTab({
                 <th className="p-3 min-w-[90px] text-right font-mono text-rose-400">19. DISCOUNT</th>
                 <th className="p-3 min-w-[100px] text-right font-mono text-amber-500">20. TAX WITHHELD</th>
                 <th className="p-3 min-w-[130px] text-right font-mono font-extrabold text-amber-500">21. TOTAL DUE</th>
-                {isCollectionsOrPaymentsBook && (
-                  <>
-                    <th className="p-3 min-w-[140px] text-right font-mono font-extrabold text-emerald-400">
-                      {isDisbursementOrPurchase ? '22. CASH PAID' : '22. CASH RECEIVED'}
-                    </th>
-                    <th className="p-3 min-w-[140px] text-right font-mono font-extrabold text-rose-400">
-                      23. PENDING BALANCE
-                    </th>
-                  </>
-                )}
                 <th className="p-3 text-center min-w-[100px] sticky right-0 bg-zinc-100 dark:bg-zinc-900 border-l ${theme.borderCard}">ACTIONS</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${theme.borderCard}`}>
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={(isDisbursementOrPurchase ? 27 : 25) + (isCollectionsOrPaymentsBook ? 2 : 0)} className="p-8 text-center text-zinc-400">
+                  <td colSpan={isDisbursementOrPurchase ? 27 : 25} className="p-8 text-center text-zinc-400">
                     No records found in this register. Encode new transactions via &quot;Other Transactions&quot; ➔ &quot;Sales / Purchase Transaction&quot;.
                   </td>
                 </tr>
               ) : (
                 filteredRecords.map((r, idx) => {
                   const isCancelled = r.is_cancelled;
-                  const totalDueVal = Number(r.total_amount_due || r.amount) || 0;
-                  const withheldVal = Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0;
-                  const netCashTarget = Math.max(0, Math.round((totalDueVal - withheldVal) * 100) / 100);
-                  const cashReceivedOrPaid = isDisbursementOrPurchase
-                    ? (r.amount_paid !== undefined ? Number(r.amount_paid) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0))
-                    : (r.amount_collected !== undefined ? Number(r.amount_collected) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0));
-                  const pendingBalanceVal = r.pending_balance !== undefined
-                    ? Number(r.pending_balance)
-                    : (r.status === 'Paid' || r.status === 'Cash' ? 0 : Math.max(0, Math.round((netCashTarget - cashReceivedOrPaid) * 100) / 100));
-
                   return (
                     <tr 
                       key={r.id} 
@@ -675,9 +647,9 @@ export default function UniformBookTab({
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
                             VOID / CANCELLED
                           </span>
-                        ) : r.status === 'Paid' || r.status === 'Cash' || (r.type_of_transaction === 'CASH' && !r.status) ? (
+                        ) : r.status === 'Cash' || r.status === 'Paid' || r.type_of_transaction === 'CASH' ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            PAID
+                            {r.status || 'CASH / PAID'}
                           </span>
                         ) : r.status === 'Partial' ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
@@ -781,16 +753,6 @@ export default function UniformBookTab({
                       <td className="p-3 text-right font-mono font-extrabold text-amber-500">
                         ₱{(r.total_amount_due || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      {isCollectionsOrPaymentsBook && (
-                        <>
-                          <td className="p-3 text-right font-mono font-extrabold text-emerald-400">
-                            ₱{cashReceivedOrPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="p-3 text-right font-mono font-extrabold text-rose-400">
-                            ₱{pendingBalanceVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </td>
-                        </>
-                      )}
                       <td className="p-3 text-center sticky right-0 bg-zinc-950/80 backdrop-blur-xs border-l border-zinc-800">
                         <div className="flex items-center justify-center gap-1">
                           <button
@@ -832,7 +794,7 @@ export default function UniformBookTab({
             {filteredRecords.length > 0 && (
               <tfoot className="bg-zinc-100 dark:bg-zinc-900/90 font-mono font-bold text-xs border-t-2 border-zinc-300 dark:border-zinc-700">
                 <tr>
-                  <td colSpan={isDisbursementOrPurchase ? 16 : 14} className="p-3 text-right uppercase tracking-wider text-zinc-400 font-bold">
+                  <td colSpan={13} className="p-3 text-right uppercase tracking-wider text-zinc-400 font-bold">
                     SUMMARY TOTAL OF RECORDS:
                   </td>
                   <td className="p-3 text-right text-zinc-100 font-extrabold">
@@ -865,41 +827,6 @@ export default function UniformBookTab({
                   <td className="p-3 text-right text-amber-400 font-black text-sm">
                     ₱{summaryTotals.totalAmountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  {isCollectionsOrPaymentsBook && (
-                    <>
-                      <td className="p-3 text-right text-emerald-400 font-black text-sm">
-                        ₱{filteredRecords
-                          .filter(r => !r.is_cancelled)
-                          .reduce((sum, r) => {
-                            const totalDueVal = Number(r.total_amount_due || r.amount) || 0;
-                            const withheldVal = Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0;
-                            const netCashTarget = Math.max(0, Math.round((totalDueVal - withheldVal) * 100) / 100);
-                            const val = isDisbursementOrPurchase
-                              ? (r.amount_paid !== undefined ? Number(r.amount_paid) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0))
-                              : (r.amount_collected !== undefined ? Number(r.amount_collected) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0));
-                            return sum + val;
-                          }, 0)
-                          .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right text-rose-400 font-black text-sm">
-                        ₱{filteredRecords
-                          .filter(r => !r.is_cancelled)
-                          .reduce((sum, r) => {
-                            const totalDueVal = Number(r.total_amount_due || r.amount) || 0;
-                            const withheldVal = Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0;
-                            const netCashTarget = Math.max(0, Math.round((totalDueVal - withheldVal) * 100) / 100);
-                            const cashVal = isDisbursementOrPurchase
-                              ? (r.amount_paid !== undefined ? Number(r.amount_paid) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0))
-                              : (r.amount_collected !== undefined ? Number(r.amount_collected) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0));
-                            const pendVal = r.pending_balance !== undefined
-                              ? Number(r.pending_balance)
-                              : (r.status === 'Paid' || r.status === 'Cash' ? 0 : Math.max(0, Math.round((netCashTarget - cashVal) * 100) / 100));
-                            return sum + pendVal;
-                          }, 0)
-                          .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </>
-                  )}
                   <td className="p-3 sticky right-0 bg-zinc-100 dark:bg-zinc-900 border-l border-zinc-700"></td>
                 </tr>
               </tfoot>
