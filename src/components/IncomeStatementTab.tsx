@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { TrendingUp, FileText, CheckCircle2 } from 'lucide-react';
 import { Sale, Expense, PPEAsset, SpecialEntry, PayrollRecord, Company } from '../types';
+import { computeAccountingSummaries } from '../utils/accounting';
 
 interface IncomeStatementTabProps {
   sales: Sale[];
@@ -32,63 +33,25 @@ export default function IncomeStatementTab({
     const compSpecial = specialEntries.filter(s => !activeCompanyName || s.company_name === activeCompanyName);
     const compPayroll = payrollRecords.filter(p => !activeCompanyName || p.company_name === activeCompanyName);
 
-    // Gross Revenue (net of discounts)
-    let grossRevenue = compSales.reduce((sum, s) => sum + (Number(s.vatable_sales) || 0) + (Number(s.zero_rated) || 0) + (Number(s.vat_exempt) || 0), 0);
-
-    // Operating Expenses
-    let operatingExpenses = compExp.reduce((sum, e) => sum + (e.nonvat_or_vat === 'VAT' ? (Number(e.vatable_expense) || 0) : (Number(e.nonvat_expense_amount || e.expense_invoice_amount || e.amount) || 0)) + (Number(e.zero_rated) || 0) + (Number(e.vat_exempt) || 0), 0);
-
-    // Depreciation Expense from PPE
-    const depreciationExpense = compPpe.reduce((sum, p) => sum + (Number(p.accumulated_depreciation) || 0), 0);
-    operatingExpenses += depreciationExpense;
-
-    // Payroll Expense
-    const payrollExpense = compPayroll.reduce((sum, p) => sum + (Number(p.gross_pay) || 0), 0);
-    operatingExpenses += payrollExpense;
-
-    // Special journal entries adjustments (excluding tax expense #7010)
-    compSpecial.forEach(s => {
-      s.lines.forEach(l => {
-        const amt = Number(l.amount) || 0;
-        if (l.account_code.startsWith('4')) {
-          if (l.type === 'Credit') grossRevenue += amt;
-          else grossRevenue -= amt;
-        } else if ((l.account_code.startsWith('5') || l.account_code.startsWith('6')) && l.account_code !== '7010') {
-          if (l.type === 'Debit') operatingExpenses += amt;
-          else operatingExpenses -= amt;
-        }
-      });
+    const s = computeAccountingSummaries({
+      sales: compSales,
+      collections: [],
+      expenses: compExp,
+      payments: [],
+      ppeAssets: compPpe,
+      specialEntries: compSpecial,
+      payrollRecords: compPayroll,
+      companyName: activeCompanyName
     });
-
-    const netIncomeBeforeTax = grossRevenue - operatingExpenses;
-
-    // Provision for Income Tax Expense (Account #7010 or 20% estimated provision)
-    let provisionForTax = 0;
-    let hasManualTaxEntry = false;
-    compSpecial.forEach(s => {
-      s.lines.forEach(l => {
-        if (l.account_code === '7010') {
-          hasManualTaxEntry = true;
-          if (l.type === 'Debit') provisionForTax += Number(l.amount) || 0;
-          else provisionForTax -= Number(l.amount) || 0;
-        }
-      });
-    });
-
-    if (!hasManualTaxEntry && netIncomeBeforeTax > 0) {
-      provisionForTax = Math.round(netIncomeBeforeTax * 0.20 * 100) / 100;
-    }
-
-    const netIncomeAfterTax = netIncomeBeforeTax - provisionForTax;
 
     return {
-      grossRevenue,
-      operatingExpenses,
-      depreciationExpense,
-      payrollExpense,
-      netIncomeBeforeTax,
-      provisionForTax,
-      netIncomeAfterTax
+      grossRevenue: s.grossRevenue,
+      operatingExpenses: Math.round((s.totalOperatingExp + s.depreciationExpense + s.payrollExpense) * 100) / 100,
+      depreciationExpense: s.depreciationExpense,
+      payrollExpense: s.payrollExpense,
+      netIncomeBeforeTax: s.netIncomeBeforeTax,
+      provisionForTax: s.incomeTaxProvision,
+      netIncomeAfterTax: s.netIncome
     };
   }, [sales, expenses, ppeAssets, specialEntries, payrollRecords, activeCompanyName]);
 

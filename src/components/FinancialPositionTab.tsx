@@ -1,12 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { Landmark, CheckCircle, AlertTriangle, Layers, Search, Scale } from 'lucide-react';
 import { Sale, Collection, Expense, Payment, PPEAsset, SpecialEntry, PayrollRecord, AccountTitle, Company } from '../types';
+import { computeAccountingSummaries } from '../utils/accounting';
 
 interface FinancialPositionTabProps {
   sales: Sale[];
   collections: Collection[];
+  cashReceipts?: any[];
   expenses: Expense[];
   payments: Payment[];
+  cashDisbursements?: any[];
   ppeAssets: PPEAsset[];
   specialEntries?: SpecialEntry[];
   payrollRecords?: PayrollRecord[];
@@ -20,8 +23,10 @@ interface FinancialPositionTabProps {
 export default function FinancialPositionTab({
   sales = [],
   collections = [],
+  cashReceipts = [],
   expenses = [],
   payments = [],
+  cashDisbursements = [],
   ppeAssets = [],
   specialEntries = [],
   payrollRecords = [],
@@ -33,270 +38,56 @@ export default function FinancialPositionTab({
   const [showAuditPanel, setShowAuditPanel] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Compute Balance Sheet Items with Accounting Integrity
+  // Compute Balance Sheet Items with Accounting Integrity strictly synchronized with Master Journal
   const bs = useMemo(() => {
-    const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-
-    // 1. Calculate Customer Balances (Receivables vs Customer Credit Balances/Advances)
-    const uniqueCustTins = new Set<string>();
-    sales.forEach(s => uniqueCustTins.add(s.customer_tin));
-    collections.forEach(c => uniqueCustTins.add(c.customer_tin));
-
-    let ar = 0; // Accounts Receivable (Asset)
-    let customerAdvances = 0; // Customer Credit Balance (Liability)
-
-    uniqueCustTins.forEach(tin => {
-      const custSales = sales.filter(s => s.customer_tin === tin);
-      // Net of discount: the actual amount owed by the customer for these invoices
-      const custInvoiced = custSales.reduce((sum, s) => sum + Math.max(0, (Number(s.invoice_amount) || 0) - (Number(s.discounts) || 0)), 0);
-
-      let custCollected = 0;
-      custSales.forEach(s => {
-        const invNo = normalizeDocNo(s.invoice_number);
-        const colls = collections.filter(c => normalizeDocNo(c.invoice_number) === invNo);
-        if (colls.length > 0) {
-          custCollected += colls.reduce((sum, col) => sum + (Number(col.amount_collected) || 0) + (Number(col.amount_withheld_2307) || 0), 0) + (Number(s.down_payment) || 0);
-        } else {
-          if (s.sales_status === 'Paid') {
-            custCollected += Math.max(0, (Number(s.invoice_amount) || 0) - (Number(s.discounts) || 0));
-          } else if (s.sales_status === 'Partial') {
-            custCollected += (Number(s.down_payment) || 0);
-          }
-        }
-      });
-
-      // Orphan collections for customer
-      const custSaleInvoiceNos = new Set(custSales.map(s => normalizeDocNo(s.invoice_number)));
-      const orphanColls = collections.filter(c => c.customer_tin === tin && !custSaleInvoiceNos.has(normalizeDocNo(c.invoice_number)));
-      const orphanCollected = orphanColls.reduce((sum, col) => sum + (Number(col.amount_collected) || 0) + (Number(col.amount_withheld_2307) || 0), 0);
-
-      custCollected += orphanCollected;
-
-      const custNetBalance = custInvoiced - custCollected;
-      if (custNetBalance > 0) {
-        ar += custNetBalance;
-      } else if (custNetBalance < 0) {
-        customerAdvances += Math.abs(custNetBalance);
-      }
+    const s = computeAccountingSummaries({
+      sales,
+      collections,
+      cashReceipts,
+      expenses,
+      payments,
+      cashDisbursements,
+      ppeAssets,
+      specialEntries,
+      payrollRecords,
+      accountTitles,
+      companyName
     });
-
-    // 2. Calculate Supplier Balances (Payables vs Supplier Debit Balances/Advances)
-    const uniqueProvTins = new Set<string>();
-    expenses.forEach(e => uniqueProvTins.add(e.sp_tin));
-    payments.forEach(p => uniqueProvTins.add(p.sp_tin));
-
-    let ap = 0; // Accounts Payable (Liability)
-    let supplierAdvances = 0; // Supplier Debit Balance (Asset)
-
-    uniqueProvTins.forEach(tin => {
-      const provExpenses = expenses.filter(e => e.sp_tin === tin);
-      // Net of discount: the actual amount owed to the provider for these vouchers
-      const provInvoiced = provExpenses.reduce((sum, e) => sum + Math.max(0, (Number(e.expense_invoice_amount) || 0) - (Number(e.discounts) || 0)), 0);
-
-      let provPaid = 0;
-      provExpenses.forEach(e => {
-        const vNo = normalizeDocNo(e.voucher_number);
-        const pmts = payments.filter(p => normalizeDocNo(p.voucher_number) === vNo);
-        if (pmts.length > 0) {
-          provPaid += pmts.reduce((sum, p) => sum + (Number(p.amount_paid) || 0) + (Number(p.withholding_tax_2307) || 0), 0);
-        } else {
-          if (e.expense_status === 'Paid') {
-            provPaid += Math.max(0, (Number(e.expense_invoice_amount) || 0) - (Number(e.discounts) || 0));
-          }
-        }
-      });
-
-      // Orphan payments for supplier
-      const provVouchers = new Set(provExpenses.map(e => normalizeDocNo(e.voucher_number)));
-      const orphanPmts = payments.filter(p => p.sp_tin === tin && !provVouchers.has(normalizeDocNo(p.voucher_number)));
-      const orphanPaid = orphanPmts.reduce((sum, p) => sum + (Number(p.amount_paid) || 0) + (Number(p.withholding_tax_2307) || 0), 0);
-
-      provPaid += orphanPaid;
-
-      const provNetBalance = provInvoiced - provPaid;
-      if (provNetBalance > 0) {
-        ap += provNetBalance;
-      } else if (provNetBalance < 0) {
-        supplierAdvances += Math.abs(provNetBalance);
-      }
-    });
-
-    // Special entries cash & capital impact
-    // (This is also how a fresh company records its actual starting capital/cash -
-    // there is no hardcoded seed balance; everything must be entered as a real transaction.)
-    let specialCashImpact = 0;
-    let capitalStock = 0;
-    specialEntries.forEach(s => {
-      s.lines.forEach(l => {
-        const amt = Number(l.amount) || 0;
-        if (l.account_code === '1010' || l.account_title.toLowerCase().includes('cash')) {
-          if (l.type === 'Debit') specialCashImpact += amt;
-          else specialCashImpact -= amt;
-        }
-        if (l.account_code === '3010') {
-          if (l.type === 'Credit') capitalStock += amt;
-          else capitalStock -= amt;
-        }
-      });
-    });
-
-    // 3. Cash & Cash Equivalents
-    const cashFromColls = collections.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
-    const cashPaidDirectSales = sales.reduce((sum, s) => {
-      const invNo = normalizeDocNo(s.invoice_number);
-      const collsForSale = collections.filter(c => normalizeDocNo(c.invoice_number) === invNo);
-      if (collsForSale.length === 0) {
-        if (s.sales_status === 'Paid') {
-          return sum + Math.max(0, (Number(s.invoice_amount) || 0) - (Number(s.discounts) || 0)) - (Number(s.withholding_2307) || 0);
-        } else if (s.sales_status === 'Partial') {
-          return sum + (Number(s.down_payment) || 0);
-        }
-      } else {
-        return sum + (Number(s.down_payment) || 0);
-      }
-      return sum;
-    }, 0);
-
-    const cashPaidDirectExpenses = expenses.reduce((sum, e) => {
-      const vNo = normalizeDocNo(e.voucher_number);
-      const pmtsForExp = payments.filter(p => normalizeDocNo(p.voucher_number) === vNo);
-      if (pmtsForExp.length === 0 && e.expense_status === 'Paid') {
-        return sum + Math.max(0, (Number(e.expense_invoice_amount) || 0) - (Number(e.discounts) || 0)) - (Number(e.withholding_2307_2306) || 0);
-      }
-      return sum;
-    }, 0);
-
-    const cashPaymentsDisbursed = payments.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
-    const ppeCashPaid = ppeAssets.reduce((sum, a) => sum + (Number(a.acquisition_cost) || 0), 0);
-
-    // Net pay actually disbursed to employees (gross pay minus all statutory/other deductions)
-    const netPayDisbursed = payrollRecords.reduce((sum, p) => sum + (Number(p.net_pay) || 0), 0);
-    const payrollDeductionsPayable = payrollRecords.reduce((sum, p) =>
-      sum + (Number(p.sss_deduction) || 0) + (Number(p.philhealth_deduction) || 0) + (Number(p.pagibig_deduction) || 0) + (Number(p.withholding_tax) || 0) + (Number(p.other_deductions) || 0), 0);
-
-    const cash = cashFromColls + cashPaidDirectSales + specialCashImpact - cashPaidDirectExpenses - cashPaymentsDisbursed - ppeCashPaid - netPayDisbursed;
-
-    // 4. Other Assets
-    const inputVat = expenses.reduce((sum, e) => sum + (Number(e.vat_input_amount) || 0), 0);
-    // CWT asset: recognized either at invoicing (only for "Paid" sales that
-    // have no Collection entries logged against them) or at collection time
-    // (via the Collections module). Without the "no collections yet" check,
-    // a Paid sale that also has Collections recorded against it (e.g. an
-    // invoice marked Paid but still tracked via installment collections)
-    // would have its withholding_2307 counted here AND again via the
-    // matching Collection's own withheld amount below - double-counting it.
-    const cwt2307 = sales.filter(s => {
-      if (s.sales_status !== 'Paid') return false;
-      const invNo = normalizeDocNo(s.invoice_number);
-      return !collections.some(c => normalizeDocNo(c.invoice_number) === invNo);
-    }).reduce((sum, s) => sum + (Number(s.withholding_2307) || 0), 0)
-      + collections.reduce((sum, c) => sum + (Number(c.amount_withheld_2307) || 0), 0);
-
-    const totalCurrentAssets = cash + ar + supplierAdvances + inputVat + cwt2307;
-
-    // PPE Assets
-    const ppeCost = ppeAssets.reduce((sum, a) => sum + (Number(a.acquisition_cost) || 0), 0);
-    const accumDep = ppeAssets.reduce((sum, a) => sum + (Number(a.accumulated_depreciation) || 0), 0);
-    const netPPE = ppeCost - accumDep;
-
-    const totalAssets = totalCurrentAssets + netPPE;
-
-    // 5. Liabilities
-    const outputVat = sales.reduce((sum, s) => sum + (Number(s.output_vat) || 0), 0);
-    // EWT payable: same recognition rule as CWT above, mirrored for expenses/payments -
-    // only recognized here for "Paid" vouchers that have no Payment entries logged
-    // against them yet, to avoid double-counting against the matching Payment's own
-    // withheld amount.
-    const ewtPayable = expenses.filter(e => {
-      if (e.expense_status !== 'Paid') return false;
-      const vNo = normalizeDocNo(e.voucher_number);
-      return !payments.some(p => normalizeDocNo(p.voucher_number) === vNo);
-    }).reduce((sum, e) => sum + (Number(e.withholding_2307_2306) || 0), 0)
-      + payments.reduce((sum, p) => sum + (Number(p.withholding_tax_2307) || 0), 0);
-
-    // 6. Net Profit Calculation (Revenues - Expenses - Depreciation - Payroll + Special Entries Net)
-    const revenue = sales.reduce((sum, s) => sum + (Number(s.vatable_amount) || Number(s.vatable_sales) || 0) + (Number(s.vat_exempt_amount) || Number(s.vat_exempt) || 0) + (Number(s.zero_rated) || 0), 0);
-    const totalOperatingExp = expenses.reduce((sum, e) => sum + (e.nonvat_or_vat === 'VAT' ? (Number(e.vatable_expense_amount) || Number(e.vatable_expense) || 0) : (Number(e.nonvat_expense_amount) || Number(e.expense_invoice_amount) || Number(e.amount) || 0)) + (Number(e.zero_rated) || 0) + (Number(e.vat_exempt) || 0), 0);
-    const depreciationExpense = accumDep; // PPE Depreciation Expense
-    const payrollExpense = payrollRecords.reduce((sum, p) => sum + (Number(p.gross_pay) || 0), 0);
-
-    // Special Entries Net Profit impact (excluding tax provision #7010)
-    let specialRev = 0;
-    let specialExp = 0;
-    let provisionForTax = 0;
-    let hasManualTaxEntry = false;
-
-    specialEntries.forEach(s => {
-      s.lines.forEach(l => {
-        const amt = Number(l.amount) || 0;
-        if (l.account_code === '7010') {
-          hasManualTaxEntry = true;
-          if (l.type === 'Debit') provisionForTax += amt;
-          else provisionForTax -= amt;
-        } else if (l.account_code.startsWith('4')) {
-          if (l.type === 'Credit') specialRev += amt;
-          else specialRev -= amt;
-        } else if (l.account_code.startsWith('5') || l.account_code.startsWith('6') || l.account_code.startsWith('7')) {
-          if (l.type === 'Debit') specialExp += amt;
-          else specialExp -= amt;
-        }
-      });
-    });
-
-    const netIncomeBeforeTax = (revenue + specialRev) - (totalOperatingExp + depreciationExpense + payrollExpense + specialExp);
-    
-    if (!hasManualTaxEntry && netIncomeBeforeTax > 0) {
-      provisionForTax = Math.round(netIncomeBeforeTax * 0.20 * 100) / 100;
-    }
-
-    const netIncome = netIncomeBeforeTax - provisionForTax;
-    const incomeTaxProvision = provisionForTax;
-    const incomeTaxPayable = provisionForTax;
-    const totalLiabilities = ap + customerAdvances + outputVat + ewtPayable + payrollDeductionsPayable + incomeTaxPayable;
-
-    const retainedEarnings = netIncome;
-    const totalEquity = capitalStock + retainedEarnings;
-    const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
-
-    // Diagnostic only - should be ~0 if every module posts consistent double entries.
-    // Not folded into Equity: a real discrepancy should be visible and investigated,
-    // never silently plugged into the books.
-    const unrealizedGainLoss = totalAssets - totalLiabilitiesAndEquity;
 
     return {
-      cash,
-      ar,
-      supplierAdvances,
-      inputVat,
-      cwt2307,
-      totalCurrentAssets,
-      ppeCost,
-      accumDep,
-      netPPE,
-      totalAssets,
-      ap,
-      customerAdvances,
-      outputVat,
-      ewtPayable,
-      payrollDeductionsPayable,
-      totalLiabilities,
-      revenue,
-      totalOperatingExp,
-      depreciationExpense,
-      payrollExpense,
-      specialRev,
-      specialExp,
-      netIncomeBeforeTax,
-      incomeTaxProvision,
-      netIncome,
-      capitalStock,
-      retainedEarnings,
-      unrealizedGainLoss,
-      totalEquity,
-      totalLiabilitiesAndEquity,
-      isBalanced: Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01
+      cash: s.cash,
+      ar: s.ar,
+      supplierAdvances: s.supplierAdvances,
+      inputVat: s.inputVat,
+      cwt2307: s.cwt2307,
+      totalCurrentAssets: s.totalCurrentAssets,
+      ppeCost: s.ppeCost,
+      accumDep: s.accumDep,
+      netPPE: s.netPPE,
+      totalAssets: s.totalAssets,
+      ap: s.ap,
+      customerAdvances: s.customerAdvances,
+      outputVat: s.outputVat,
+      ewtPayable: s.ewtPayable,
+      payrollDeductionsPayable: s.payrollDeductionsPayable,
+      totalLiabilities: s.totalLiabilities,
+      revenue: s.grossRevenue,
+      totalOperatingExp: s.totalOperatingExp,
+      depreciationExpense: s.depreciationExpense,
+      payrollExpense: s.payrollExpense,
+      specialRev: s.specialRev,
+      specialExp: s.specialExp,
+      netIncomeBeforeTax: s.netIncomeBeforeTax,
+      incomeTaxProvision: s.incomeTaxProvision,
+      netIncome: s.netIncome,
+      capitalStock: s.capitalStock,
+      retainedEarnings: s.retainedEarnings,
+      unrealizedGainLoss: s.unrealizedGainLoss,
+      totalEquity: s.totalEquity,
+      totalLiabilitiesAndEquity: s.totalLiabilitiesAndEquity,
+      isBalanced: s.isBalanced
     };
-  }, [sales, collections, expenses, payments, ppeAssets, specialEntries, payrollRecords]);
+  }, [sales, collections, cashReceipts, expenses, payments, cashDisbursements, ppeAssets, specialEntries, payrollRecords, accountTitles, companyName]);
 
   // Account Titles Auto-Arrangement Calculation for Audit Panel
   const arrangedAccounts = useMemo(() => {

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { ShieldCheck, Info } from 'lucide-react';
 import { Sale, Expense, PPEAsset, PayrollRecord, SpecialEntry, Company } from '../types';
+import { computeAccountingSummaries } from '../utils/accounting';
 
 interface ChangesInEquityTabProps {
   sales: Sale[];
@@ -24,44 +25,25 @@ export default function ChangesInEquityTab({
   const companyName = activeCompany?.company_name || 'No Active Company';
 
   const eq = useMemo(() => {
-    const revenue = sales.reduce((sum, s) => sum + (Number(s.vatable_amount) || 0) + (Number(s.vat_exempt_amount) || 0), 0);
-    const totalExp = expenses.reduce((sum, e) => sum + (e.nonvat_or_vat === 'VAT' ? (Number(e.vatable_expense_amount) || 0) : (Number(e.nonvat_expense_amount) || 0)), 0);
-    const depreciationExpense = ppeAssets.reduce((sum, a) => sum + (Number(a.accumulated_depreciation) || 0), 0);
-    const payrollExpense = payrollRecords.reduce((sum, p) => sum + (Number(p.gross_pay) || 0), 0);
-
-    let specialRev = 0;
-    let specialExp = 0;
-    // Owner capital contributions (Cr 3010) and withdrawals/dividends (Dr 3010),
-    // recorded as real transactions via Special Entries - there is no hardcoded
-    // "beginning capital"; a fresh company starts at zero until this is entered.
-    let capitalContributions = 0;
-    let ownerDrawings = 0;
-
-    specialEntries.forEach(s => {
-      s.lines.forEach(l => {
-        const amt = Number(l.amount) || 0;
-        if (l.account_code.startsWith('4')) {
-          if (l.type === 'Credit') specialRev += amt;
-          else specialRev -= amt;
-        } else if (l.account_code.startsWith('5') || l.account_code.startsWith('6')) {
-          if (l.type === 'Debit') specialExp += amt;
-          else specialExp -= amt;
-        } else if (l.account_code === '3010') {
-          if (l.type === 'Credit') capitalContributions += amt;
-          else ownerDrawings += amt;
-        }
-      });
+    const s = computeAccountingSummaries({
+      sales,
+      collections: [],
+      expenses,
+      payments: [],
+      ppeAssets,
+      payrollRecords,
+      specialEntries,
+      companyName
     });
 
-    const netIncomeBeforeTax = (revenue + specialRev) - (totalExp + depreciationExpense + payrollExpense + specialExp);
-    const incomeTaxProvision = Math.max(0, netIncomeBeforeTax * 0.20);
-    const netIncome = netIncomeBeforeTax - incomeTaxProvision;
-
-    const beginningCapital = 0; // No hardcoded seed - real capital comes only from recorded contributions below
-    const endingEquity = beginningCapital + capitalContributions + netIncome - ownerDrawings;
+    const beginningCapital = 0;
+    const capitalContributions = s.capitalStock;
+    const ownerDrawings = s.ownerDrawings;
+    const netIncome = s.netIncome;
+    const endingEquity = s.totalEquity;
 
     return { beginningCapital, capitalContributions, netIncome, ownerDrawings, endingEquity };
-  }, [sales, expenses, ppeAssets, payrollRecords, specialEntries]);
+  }, [sales, expenses, ppeAssets, payrollRecords, specialEntries, companyName]);
 
   return (
     <div className="space-y-6">

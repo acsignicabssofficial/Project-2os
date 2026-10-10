@@ -1,12 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { Book, Search, Filter } from 'lucide-react';
 import { Sale, Collection, Expense, Payment, SpecialEntry, AccountTitle, Company, PPEAsset, PayrollRecord } from '../types';
+import { buildMasterJournalEntries } from '../utils/accounting';
 
 interface GeneralLedgerTabProps {
   sales: Sale[];
   collections: Collection[];
+  cashReceipts?: any[];
   expenses: Expense[];
   payments: Payment[];
+  cashDisbursements?: any[];
   specialEntries?: SpecialEntry[];
   accountTitles?: AccountTitle[];
   ppeAssets?: PPEAsset[];
@@ -21,8 +24,10 @@ interface GeneralLedgerTabProps {
 export default function GeneralLedgerTab({
   sales,
   collections,
+  cashReceipts = [],
   expenses,
   payments,
+  cashDisbursements = [],
   specialEntries = [],
   accountTitles = [],
   ppeAssets = [],
@@ -127,123 +132,30 @@ export default function GeneralLedgerTab({
       map[code].totalCredit += cr;
     };
 
-    // 1. Post Sales (SPECIAL LEDGER)
-    sales.forEach(s => {
-      const invAmt = Number(s.invoice_amount) || 0;
-      const w2307 = Number(s.withholding_2307) || 0;
-      const outVat = Number(s.output_vat) || 0;
-      const date = s.invoice_date || '';
-
-      if (s.sales_status === 'Paid') {
-        addPosting('1010', 'Cash and Cash Equivalents', date, s.invoice_number, `Paid Sale #${s.invoice_number} - ${s.customer_name}`, Math.max(0, invAmt - w2307), 0, 'SPECIAL');
-        if (w2307 > 0) addPosting('1040', 'Creditable Withholding Tax (2307)', date, s.invoice_number, `CWT Withheld #${s.invoice_number}`, w2307, 0, 'SPECIAL');
-      } else {
-        addPosting('1020', 'Accounts Receivable', date, s.invoice_number, `Uncollected Invoice #${s.invoice_number} - ${s.customer_name}`, invAmt, 0, 'SPECIAL');
-      }
-
-      addPosting('4010', 'Sales Revenue', date, s.invoice_number, `Sales Revenue #${s.invoice_number}`, 0, Math.max(0, invAmt - outVat), 'SPECIAL');
-      if (outVat > 0) addPosting('2020', 'Output VAT Payable', date, s.invoice_number, `Output VAT #${s.invoice_number}`, 0, outVat, 'SPECIAL');
+    // Master Double-Entry Postings strictly synchronized from Books of Accounts
+    const masterEntries = buildMasterJournalEntries({
+      sales,
+      collections,
+      cashReceipts,
+      expenses,
+      payments,
+      cashDisbursements,
+      specialEntries,
+      accountTitles: coaList,
+      ppeAssets,
+      payrollRecords,
+      companyName: activeCompany?.company_name || ''
     });
 
-    // 2. Post Collections (SPECIAL LEDGER)
-    collections.forEach(c => {
-      const date = c.collection_date || '';
-      const amt = Number(c.amount_collected) || 0;
-      const w2307 = Number(c.amount_withheld_2307 || (c as any).tax_withheld) || 0;
-      const discount = Number((c as any).discount || (c as any).discounts) || 0;
-      const custLabel = c.customer_name || (c as any).registered_name || 'Customer';
+    masterEntries.forEach(entry => {
+      const isSpecialType = ['Sales', 'Collection', 'Expense', 'Payment'].includes(entry.ref_type);
+      const bookType: 'GENERAL' | 'SPECIAL' = isSpecialType ? 'SPECIAL' : 'GENERAL';
 
-      addPosting('1010', 'Cash and Cash Equivalents', date, c.invoice_number, `Collection Receipt - ${custLabel}`, amt, 0, 'SPECIAL');
-      if (discount > 0) addPosting('4015', 'Sales Discounts', date, c.invoice_number, `Discount Allowed - ${custLabel}`, discount, 0, 'SPECIAL');
-      if (w2307 > 0) addPosting('1040', 'Creditable Withholding Tax (2307)', date, c.invoice_number, `2307 Received - ${custLabel}`, w2307, 0, 'SPECIAL');
-      addPosting('1020', 'Accounts Receivable', date, c.invoice_number, `AR Settlement - ${custLabel}`, 0, amt + discount + w2307, 'SPECIAL');
-    });
-
-    // 3. Post Expenses (SPECIAL LEDGER)
-    expenses.forEach(e => {
-      const expAmt = Number(e.expense_invoice_amount) || 0;
-      const w2307 = Number(e.withholding_2307_2306) || 0;
-      const inputVat = Number(e.vat_input_amount) || 0;
-      const date = e.expense_date || '';
-
-      const matched = coaList.find(a => a.title.toLowerCase() === e.expense_type.toLowerCase());
-      const expCode = matched ? matched.code : '6100';
-
-      addPosting(expCode, `Expense: ${e.expense_type}`, date, e.voucher_number, `Voucher #${e.voucher_number} - ${e.service_provider_name}`, Math.max(0, expAmt - inputVat), 0, 'SPECIAL');
-      if (inputVat > 0) addPosting('1030', 'Creditable Input VAT', date, e.voucher_number, `Input VAT #${e.voucher_number}`, inputVat, 0, 'SPECIAL');
-
-      if (e.expense_status === 'Paid') {
-        addPosting('1010', 'Cash and Cash Equivalents', date, e.voucher_number, `Paid Expense #${e.voucher_number}`, 0, Math.max(0, expAmt - w2307), 'SPECIAL');
-        if (w2307 > 0) addPosting('2030', 'Expanded Withholding Tax Payable', date, e.voucher_number, `EWT Payable #${e.voucher_number}`, 0, w2307, 'SPECIAL');
-      } else {
-        addPosting('2010', 'Accounts Payable', date, e.voucher_number, `AP Voucher #${e.voucher_number}`, 0, expAmt, 'SPECIAL');
-      }
-    });
-
-    // 4. Post Payments (SPECIAL LEDGER)
-    payments.forEach(p => {
-      const date = p.payment_date || '';
-      const amt = Number(p.amount_paid) || 0;
-      const w2307 = Number(p.withholding_tax_2307) || 0;
-
-      addPosting('2010', 'Accounts Payable', date, p.voucher_number, `AP Settlement - ${p.service_provider_name}`, amt + w2307, 0, 'SPECIAL');
-      addPosting('1010', 'Cash and Cash Equivalents', date, p.voucher_number, `Disbursement - ${p.service_provider_name}`, 0, amt, 'SPECIAL');
-      if (w2307 > 0) addPosting('2030', 'Expanded Withholding Tax Payable', date, p.voucher_number, `EWT Tax - ${p.service_provider_name}`, 0, w2307, 'SPECIAL');
-    });
-
-    // 5. Post PPE Depreciation (GENERAL LEDGER)
-    ppeAssets.forEach(p => {
-      const dep = Number(p.accumulated_depreciation) || 0;
-      if (dep > 0) {
-        const date = p.acquisition_date || new Date().toISOString().split('T')[0];
-        addPosting('6080', 'Depreciation Expense', date, p.asset_code, `PPE Depreciation - ${p.asset_name}`, dep, 0, 'GENERAL');
-        addPosting('1520', 'Accumulated Depreciation', date, p.asset_code, `PPE Accum. Dep. - ${p.asset_name}`, 0, dep, 'GENERAL');
-      }
-    });
-
-    // 6. Post Payroll (GENERAL LEDGER)
-    payrollRecords.forEach(pr => {
-      const gross = Number(pr.gross_pay) || 0;
-      const sssEE = Number(pr.sss_deduction) || 0;
-      const phicEE = Number(pr.philhealth_deduction) || 0;
-      const hdmfEE = Number(pr.pagibig_deduction) || 0;
-      const taxEE = Number(pr.withholding_tax) || 0;
-      const otherDed = Number(pr.other_deductions) || 0;
-      const netPay = Number(pr.net_pay) || (gross - sssEE - phicEE - hdmfEE - taxEE - otherDed);
-
-      const sssER = Math.round((Number(pr.basic_pay) || 0) * 0.095 * 100) / 100;
-      const phicER = phicEE;
-      const hdmfER = hdmfEE;
-      const date = new Date().toISOString().split('T')[0];
-
-      const empName = pr.full_name || pr.employee_name || pr.employee_id;
-      const empIdStr = String(pr.employee_id || '');
-
-      addPosting('6010', 'Salaries, Wages & Benefits', date, empIdStr, `Gross Salaries - ${empName}`, gross, 0, 'GENERAL');
-      if (sssER > 0) addPosting('6015', 'Employer SSS Contribution Expense', date, empIdStr, `ER SSS Share - ${empName}`, sssER, 0, 'GENERAL');
-      if (phicER > 0) addPosting('6016', 'Employer PhilHealth Contribution Expense', date, empIdStr, `ER PHIC Share - ${empName}`, phicER, 0, 'GENERAL');
-      if (hdmfER > 0) addPosting('6017', 'Employer Pag-IBIG Contribution Expense', date, empIdStr, `ER HDMF Share - ${empName}`, hdmfER, 0, 'GENERAL');
-
-      addPosting('1010', 'Cash and Cash Equivalents', date, empIdStr, `Net Payroll Paid - ${empName}`, 0, netPay, 'GENERAL');
-      if (sssEE + sssER > 0) addPosting('2041', 'SSS Premium Payable', date, empIdStr, `SSS Contributions (EE+ER) - ${empName}`, 0, sssEE + sssER, 'GENERAL');
-      if (phicEE + phicER > 0) addPosting('2042', 'PhilHealth Premium Payable', date, empIdStr, `PhilHealth Premiums (EE+ER) - ${empName}`, 0, phicEE + phicER, 'GENERAL');
-      if (hdmfEE + hdmfER > 0) addPosting('2043', 'Pag-IBIG Premium Payable', date, empIdStr, `Pag-IBIG Contributions (EE+ER) - ${empName}`, 0, hdmfEE + hdmfER, 'GENERAL');
-      if (taxEE > 0) addPosting('2035', 'Withholding Tax Payable - Compensation', date, empIdStr, `1601-C Tax Withheld - ${empName}`, 0, taxEE, 'GENERAL');
-      if (otherDed > 0) addPosting('2050', 'Other Employee Payables & Deductions', date, empIdStr, `Other Deductions - ${empName}`, 0, otherDed, 'GENERAL');
-    });
-
-    // 7. Post Special & General Entries
-    specialEntries.forEach(s => {
-      const isSpecialType = ['Sales', 'Collection', 'Expense', 'Payment', 'Cancellation', 'Sales Voucher', 'Collection Voucher', 'Expense Voucher', 'Payment Voucher'].includes(s.entry_type);
-      const entryBook: 'GENERAL' | 'SPECIAL' = isSpecialType ? 'SPECIAL' : 'GENERAL';
-
-      s.lines.forEach(l => {
-        const amt = Number(l.amount) || 0;
-        if (l.type === 'Debit') {
-          addPosting(l.account_code, l.account_title, s.entry_date, s.voucher_no, s.description, amt, 0, entryBook);
-        } else {
-          addPosting(l.account_code, l.account_title, s.entry_date, s.voucher_no, s.description, 0, amt, entryBook);
-        }
+      entry.debits.forEach(d => {
+        addPosting(d.account_code, d.account_title, entry.date, entry.ref_no || entry.entry_no, entry.description, Number(d.amount) || 0, 0, bookType);
+      });
+      entry.credits.forEach(c => {
+        addPosting(c.account_code, c.account_title, entry.date, entry.ref_no || entry.entry_no, entry.description, 0, Number(c.amount) || 0, bookType);
       });
     });
 
@@ -266,7 +178,7 @@ export default function GeneralLedgerTab({
     });
 
     return map;
-  }, [sales, collections, expenses, payments, specialEntries, ppeAssets, payrollRecords, coaList]);
+  }, [sales, collections, cashReceipts, expenses, payments, cashDisbursements, specialEntries, ppeAssets, payrollRecords, coaList, activeCompany, ledgerCategory]);
 
   // Accounts list for select dropdown & table view
   const displayAccounts = useMemo(() => {

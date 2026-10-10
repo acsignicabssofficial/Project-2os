@@ -74,12 +74,15 @@ import {
   ThemeMode
 } from '../types';
 import ActivitiesWorkflow from './ActivitiesWorkflow';
+import { computeAccountingSummaries } from '../utils/accounting';
 
 interface ExecutiveDashboardProps {
   sales: Sale[];
   collections: Collection[];
+  cashReceipts?: any[];
   expenses: Expense[];
   payments: Payment[];
+  cashDisbursements?: any[];
   companies: Company[];
   customers: Customer[];
   serviceProviders: ServiceProvider[];
@@ -87,6 +90,7 @@ interface ExecutiveDashboardProps {
   employees?: Employee[];
   ppeAssets?: PPEAsset[];
   specialEntries?: SpecialEntry[];
+  accountTitles?: any[];
   incomeTaxRecords?: IncomeTaxRecord[];
   activeCompany: Company | null;
   theme: any;
@@ -106,8 +110,10 @@ const DASH_MONTH_NAMES = [
 export default function ExecutiveDashboard({
   sales,
   collections,
+  cashReceipts = [],
   expenses,
   payments,
+  cashDisbursements = [],
   companies,
   customers,
   serviceProviders,
@@ -115,6 +121,7 @@ export default function ExecutiveDashboard({
   employees = [],
   ppeAssets = [],
   specialEntries = [],
+  accountTitles = [],
   incomeTaxRecords = [],
   activeCompany,
   theme,
@@ -251,105 +258,64 @@ export default function ExecutiveDashboard({
   const compPpe = useMemo(() => ppeAssets.filter(p => !compName || p.company_name === compName), [ppeAssets, compName]);
   const compTax = useMemo(() => incomeTaxRecords.filter(t => !compName || t.company_name === compName), [incomeTaxRecords, compName]);
 
+  // Master double-entry accounting summary strictly synchronized from books of accounts
+  const masterSummary = useMemo(() => {
+    return computeAccountingSummaries({
+      sales: compSales,
+      collections: compColls,
+      cashReceipts,
+      expenses: compExp,
+      payments: compPay,
+      cashDisbursements,
+      specialEntries,
+      accountTitles,
+      ppeAssets: compPpe,
+      payrollRecords: compPayroll,
+      companyName: compName
+    });
+  }, [compSales, compColls, cashReceipts, compExp, compPay, cashDisbursements, specialEntries, accountTitles, compPpe, compPayroll, compName]);
+
   // 1. Comprehensive Calculations across all accounting aspects
   const stats = useMemo(() => {
-    // Sales & AR
-    const grossSales = compSales.reduce((sum, s) => sum + (s.invoice_amount - (s.discounts || 0)), 0);
-    const outputVat = compSales.reduce((sum, s) => sum + s.output_vat, 0);
-    
-    // Collections & Cash In
-    const baseCashCollected = compSales.reduce((sum, s) => {
-      const collsForSale = compColls.filter(c => c.invoice_number.toLowerCase() === s.invoice_number.toLowerCase());
-      if (collsForSale.length > 0) {
-        return sum + collsForSale.reduce((a, b) => a + b.amount_collected, 0) + s.down_payment;
-      } else {
-        if (s.sales_status === 'Paid') {
-          return sum + s.invoice_amount - (s.discounts || 0);
-        } else if (s.sales_status === 'Partial') {
-          return sum + s.down_payment;
-        } else {
-          return sum;
-        }
-      }
-    }, 0);
-
-    const saleInvoiceNos = new Set(compSales.map(s => s.invoice_number.toLowerCase()));
-    const orphanColls = compColls.filter(c => !saleInvoiceNos.has(c.invoice_number.toLowerCase()));
-    const orphanCashCollected = orphanColls.reduce((sum, c) => sum + c.amount_collected, 0);
-    const cashCollected = baseCashCollected + orphanCashCollected;
-
-    const withholdingCollected = compColls.reduce((sum, c) => sum + c.amount_withheld_2307, 0);
-    const totalCollected = cashCollected + withholdingCollected;
+    // Sales & AR derived directly from master double-entry books
+    const grossSales = masterSummary.grossRevenue;
+    const outputVat = masterSummary.outputVat;
+    const cashCollected = masterSummary.cashInflowsFromCustomers;
+    const withholdingCollected = masterSummary.cwt2307;
+    const totalCollected = Math.round((cashCollected + withholdingCollected) * 100) / 100;
+    const outstandingAR = masterSummary.ar;
 
     // Overdue vs Not Due calculation
     const today = new Date();
-    let overdueAR = 0;
-    let notDueAR = 0;
+    let rawOverdueAR = 0;
+    let rawNotDueAR = 0;
 
     compSales.forEach(s => {
-      const invoiceAmt = s.invoice_amount - (s.discounts || 0);
-      const colMatches = compColls.filter(c => c.invoice_number.toLowerCase() === s.invoice_number.toLowerCase());
-      const paidAmt = colMatches.length > 0 
-        ? colMatches.reduce((a, b) => a + b.amount_collected + b.amount_withheld_2307, 0) + s.down_payment
-        : (s.sales_status === 'Paid' ? invoiceAmt : (s.sales_status === 'Partial' ? s.down_payment : 0));
-      
-      const balance = Math.max(0, invoiceAmt - paidAmt);
-      if (balance > 0) {
-        const invDate = new Date(s.invoice_date);
-        const daysPast = Math.floor((today.getTime() - invDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysPast > 30) {
-          overdueAR += balance;
-        } else {
-          notDueAR += balance;
-        }
+      const invDate = new Date(s.invoice_date || s.issue_date || (s as any).date);
+      const daysPast = !isNaN(invDate.getTime()) ? Math.floor((today.getTime() - invDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+      const amt = Number(s.invoice_amount || (s as any).total_amount_vat_inclusive || s.amount) || 0;
+      if (daysPast > 30) {
+        rawOverdueAR += amt;
+      } else {
+        rawNotDueAR += amt;
       }
     });
 
-    const outstandingAR = overdueAR + notDueAR;
+    const overdueAR = outstandingAR <= 0 ? 0 : (rawOverdueAR + rawNotDueAR > 0 ? Math.round((rawOverdueAR / (rawOverdueAR + rawNotDueAR)) * outstandingAR * 100) / 100 : 0);
+    const notDueAR = outstandingAR <= 0 ? 0 : Math.round((outstandingAR - overdueAR) * 100) / 100;
 
     // Invoices Paid Section
-    const paidLast30Days = cashCollected * 0.45;
-    const notDeposited = paidLast30Days * 0.56;
-    const deposited = paidLast30Days - notDeposited;
+    const paidLast30Days = cashCollected;
+    const deposited = masterSummary.cash;
+    const notDeposited = Math.max(0, Math.round((cashCollected - deposited) * 100) / 100);
 
     // Expenses & AP
-    const grossExpenses = compExp.reduce((sum, e) => sum + (e.expense_invoice_amount - (e.discounts || 0)), 0);
-    const inputVat = compExp.reduce((sum, e) => sum + e.vat_input_amount, 0);
-    
-    const baseCashPaid = compExp.reduce((sum, e) => {
-      const payMatches = compPay.filter(p => p.voucher_number.toLowerCase() === e.voucher_number.toLowerCase());
-      if (payMatches.length > 0) {
-        return sum + payMatches.reduce((a, b) => a + b.amount_paid, 0);
-      } else {
-        if (e.expense_status === 'Paid') {
-          return sum + e.expense_invoice_amount - (e.discounts || 0);
-        } else {
-          return sum;
-        }
-      }
-    }, 0);
-
-    const expenseVouchers = new Set(compExp.map(e => e.voucher_number.toLowerCase()));
-    const orphanPayments = compPay.filter(p => !expenseVouchers.has(p.voucher_number.toLowerCase()));
-    const orphanCashPaid = orphanPayments.reduce((sum, p) => sum + p.amount_paid, 0);
-    const cashPaid = baseCashPaid + orphanCashPaid;
-
-    const withholdingPaid = compPay.reduce((sum, p) => sum + p.withholding_tax_2307, 0);
-    const totalPaid = cashPaid + withholdingPaid;
-
-    const outstandingAP = compExp.reduce((sum, e) => {
-      const payMatches = compPay.filter(p => p.voucher_number.toLowerCase() === e.voucher_number.toLowerCase());
-      if (payMatches.length > 0) {
-        const paid = payMatches.reduce((a, b) => a + b.amount_paid + b.withholding_tax_2307, 0);
-        return sum + Math.max(0, e.expense_invoice_amount - (e.discounts || 0) - paid);
-      } else {
-        if (e.expense_status === 'Paid') {
-          return sum;
-        } else {
-          return sum + e.expense_invoice_amount - (e.discounts || 0);
-        }
-      }
-    }, 0);
+    const grossExpenses = masterSummary.totalOperatingExp;
+    const inputVat = masterSummary.inputVat;
+    const cashPaid = masterSummary.cashOutflowsToSuppliersAndExpenses;
+    const withholdingPaid = masterSummary.ewtPayable;
+    const totalPaid = Math.round((cashPaid + withholdingPaid) * 100) / 100;
+    const outstandingAP = masterSummary.ap;
 
     // Expense Categorization for Compact Donut Chart
     const categoryMap: Record<string, number> = {};
@@ -511,10 +477,11 @@ export default function ExecutiveDashboard({
       netIncomePnl,
       pnlIncomeDisplay,
       pnlExpenseDisplay,
+      cashOnHand: masterSummary.cash,
       salesCount: compSales.length,
       expensesCount: compExp.length
     };
-  }, [compSales, compColls, compExp, compPay, compPayroll, compEmps, compPpe, compTax, activeCompany, currentMonthIdx, currentYear, periodFilterMode]);
+  }, [compSales, compColls, compExp, compPay, compPayroll, compEmps, compPpe, compTax, activeCompany, currentMonthIdx, currentYear, periodFilterMode, masterSummary]);
 
   // Quarterly Line Trend Data for Card 3
   const quarterlySalesTrend = useMemo(() => {
@@ -1148,8 +1115,8 @@ export default function ExecutiveDashboard({
                       </span>
                     </div>
                     <div className="flex justify-between text-zinc-400">
-                      <span>Bank: <strong className={theme.textTitle}>{fmtMoney(Math.max(0, stats.cashCollected - stats.cashPaid))}</strong></span>
-                      <span>Ledger: {fmtMoney(Math.max(0, stats.cashCollected - stats.cashPaid))}</span>
+                      <span>Bank: <strong className={theme.textTitle}>{fmtMoney(stats.cashOnHand)}</strong></span>
+                      <span>Ledger: {fmtMoney(stats.cashOnHand)}</span>
                     </div>
                   </div>
 
