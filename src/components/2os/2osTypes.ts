@@ -409,76 +409,31 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
     icon: ShieldCheck,
     subTabs: [
       {
-        key: 'bir_2316',
-        label: 'Withholding Tax Compensation (BIR 1601-C & 2316)',
-        shortLabel: 'Withholding Tax\nCompensation',
+        key: 'withholding_tax',
+        label: 'Withholding Tax (Withholding Tax Compensation, Expanded Withholding Tax, Alphalist of Employees, QAP [attachment to 1601EQ])',
+        shortLabel: 'Withholding\nTax',
         icon: FileCheck,
-        cellRef: 'WTC!A1',
-        description: 'Withholding Tax Compensation: Computation of monthly compensation taxes (BIR Form 1601-C) and annual employee Certificate 2316.',
-        formula: '=BIR_1601C_2316(GrossCompensation, NonTaxableBenefits, TaxableCompensation, TaxWithheld)'
+        cellRef: 'WITHHOLDING_TAX!A1',
+        description: 'Withholding Tax: Contains tabs for Withholding Tax Compensation, Expanded Withholding Tax, Alphalist of Employees, and QAP [attachment to 1601EQ].',
+        formula: '=WITHHOLDING_TAX(WithholdingTaxCompensation, ExpandedWithholdingTax, AlphalistOfEmployees, QAP_1601EQ)'
       },
       {
-        key: 'cwt_providers',
-        label: 'Expanded Withholding Tax (BIR 1601-EQ & 2307)',
-        shortLabel: 'Expanded\nWithholding Tax',
-        icon: FileCheck2,
-        cellRef: 'EWT!A1',
-        description: 'Expanded Withholding Tax: EWT schedule on payments to vendors/lessors/professionals (Form 1601-EQ) and 2307 Certificates.',
-        formula: '=BIR_1601EQ_2307(PayeeTIN, ATCCode, TaxBase, TaxRate, WithheldAmount)'
-      },
-      {
-        key: 'tax_reports',
-        label: 'Business Tax (VAT 2550Q / Percentage Tax 2551Q)',
+        key: 'business_tax',
+        label: 'Business Tax (2551Q, Summary of Sales, Summary of Purchases)',
         shortLabel: 'Business\nTax',
         icon: ShieldCheck,
         cellRef: 'BUSINESS_TAX!A1',
-        description: 'Business Tax: Quarterly Value-Added Tax (BIR 2550Q) Output vs Input VAT computation or 1%/3% Percentage Tax (BIR 2551Q).',
-        formula: '=BUSINESS_TAX(OutputVAT, InputVAT, VATPayable, PercentageTax)'
+        description: 'Business Tax: Contains tabs for 2551Q, Summary of Sales, and Summary of Purchases.',
+        formula: '=BUSINESS_TAX(Form2551Q, SummaryOfSales, SummaryOfPurchases)'
       },
       {
         key: 'income_tax',
-        label: 'Income Tax Provision (BIR 1701Q / 1702Q / 1702-RT)',
+        label: 'Income Tax (1701 [for individuals], 1702RT [for non individuals], 1702EX [for exempted non individuals], SAWT [attachment to ITR])',
         shortLabel: 'Income\nTax',
         icon: Calculator,
         cellRef: 'INCOME_TAX!A1',
-        description: 'Income Tax: Corporate & Individual quarterly and annual income tax calculation, Regular Corporate Income Tax (20%/25%) vs MCIT (1%/2%).',
-        formula: '=INCOME_TAX(GrossTaxableIncome, AllowableDeductions, TaxableIncome, RCIT, MCIT, TaxDue)'
-      },
-      {
-        key: 'bir_slsp',
-        label: 'Summary List of Sales and Purchases (SLSP)',
-        shortLabel: 'SLSP',
-        icon: FileCode,
-        cellRef: 'SLSP!A1',
-        description: 'SLSP: BIR eSubmission compliant Summary List of Sales (SLS) and Summary List of Purchases (SLP) export modules.',
-        formula: '=BIR_SLSP(CustomerTIN, VendorTIN, GrossSales, GrossPurchases, OutputVAT, InputVAT)'
-      },
-      {
-        key: 'bir_sawt',
-        label: 'Summary Alphalist of Withholding Taxes (SAWT)',
-        shortLabel: 'SAWT',
-        icon: FileSpreadsheet,
-        cellRef: 'SAWT!A1',
-        description: 'SAWT: Quarterly Schedule of Withholding Agents of Income Payments under BIR Form 1702Q and 2550Q.',
-        formula: '=BIR_SAWT(WithholdingAgentTIN, ATC, IncomePayment, TaxWithheld)'
-      },
-      {
-        key: 'bir_qap',
-        label: 'Quarterly Alphabetical List of Payees (QAP)',
-        shortLabel: 'QAP',
-        icon: FileText,
-        cellRef: 'QAP!A1',
-        description: 'QAP: Alphabetical list of payees subjected to expanded withholding tax attached to quarterly BIR Form 1601-EQ.',
-        formula: '=BIR_QAP(PayeeTIN, PayeeName, ATC, NatureOfPayment, Amount, TaxWithheld)'
-      },
-      {
-        key: 'bir_alphalist',
-        label: 'Alphalist of Employees (Annual Schedule)',
-        shortLabel: 'Alphalist of\nEmployees',
-        icon: Users,
-        cellRef: 'ALPHALIST!A1',
-        description: 'Alphalist of Employees: Year-end alphabetical list of employees (Schedule 7.1, 7.3, 7.4) for BIR Form 1604-C submission.',
-        formula: '=BIR_ALPHALIST_EMPLOYEES(EmployeeTIN, Name, GrossPay, TaxWithheld, YearEndAdjustment)'
+        description: 'Income Tax: Contains tabs for 1701 [for individuals], 1702RT [for non individuals], 1702EX [for exempted non individuals], and SAWT [attachment to ITR].',
+        formula: '=INCOME_TAX(Form1701_Individual, Form1702RT_NonIndividual, Form1702EX_Exempt, SAWT_ITR)'
       }
     ]
   }
@@ -515,7 +470,7 @@ export function getCategoryForTab(tabKey: string): RibbonCategoryKey {
   if (['sales', 'expenses', 'collections', 'payments', 'general_journal', 'special_entries', 'general_ledger', 'special_ledger'].includes(tabKey)) return 'BOOKS OF ACCOUNTS';
   if (['payroll', 'ppe', 'inventory_list', 'bank_recon', 'contribution_tables'].includes(tabKey)) return 'OTHER TRANSACTIONS';
   if (['fs_balance_sheet', 'fs_income', 'fs_position', 'fs_equity', 'fs_cashflows', 'fs_notes'].includes(tabKey)) return 'FINANCIAL STATEMENTS';
-  if (['tax_reports', 'income_tax', 'cwt_customers', 'cwt_providers', 'bir_2316', 'bir_slsp', 'bir_qap', 'bir_sawt', 'bir_alphalist'].includes(tabKey)) return 'BIR COMPUTATIONS';
+  if (['withholding_tax', 'business_tax', 'tax_reports', 'income_tax', 'cwt_customers', 'cwt_providers', 'bir_2316', 'bir_slsp', 'bir_qap', 'bir_sawt', 'bir_alphalist'].includes(tabKey)) return 'BIR COMPUTATIONS';
 
   return 'HOME';
 }

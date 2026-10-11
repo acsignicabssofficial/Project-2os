@@ -263,6 +263,15 @@ export default function TwoOSRibbon({
 
   const isDark = themeMode === 'dark';
 
+  const hasEntityProfile = Boolean(
+    companies.length > 0 &&
+    activeCompany &&
+    activeCompany.company_name &&
+    activeCompany.company_name.trim().length > 0 &&
+    activeCompany.company_name !== 'Select Company...'
+  );
+  const REQUIRES_ENTITY_CATEGORIES: RibbonCategoryKey[] = ['HOME', 'FINANCIAL STATEMENTS', 'BIR COMPUTATIONS'];
+
   // Theming colors matching the uploaded reference header image
   const menuBarBg = isDark
     ? 'bg-[#060D1F] border-b border-[#14264F] text-cyan-200'
@@ -309,23 +318,23 @@ export default function TwoOSRibbon({
         {/* LEFT SIDE: MAIN CATEGORY TABS */}
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
           {RIBBON_CATEGORIES.map((cat) => {
-            const isCategoryActive = selectedCategory === cat.key;
-            const containsCurrentTab = cat.subTabs.some(st => st.key === activeTab);
-            const CatIcon = cat.icon || Layers;
+                  const isCategoryActive = selectedCategory === cat.key;
+                  const containsCurrentTab = cat.subTabs.some(st => st.key === activeTab);
+                  const CatIcon = cat.icon || Layers;
 
-            const tabClass = isCategoryActive ? menuTabActive : menuTabInactive;
+                  const tabClass = isCategoryActive ? menuTabActive : menuTabInactive;
 
-            return (
-              <button
-                key={cat.key}
-                onClick={() => {
-                  setSelectedCategory(cat.key);
-                  setIsToolsCollapsed(false);
-                  if (setIsSettingsCategoryOpen) setIsSettingsCategoryOpen(false);
-                  if (!cat.subTabs.some(st => st.key === activeTab)) {
-                    onSelectTab(cat.subTabs[0].key);
-                  }
-                }}
+                  return (
+                    <button
+                      key={cat.key}
+                      onClick={() => {
+                        setSelectedCategory(cat.key);
+                        setIsToolsCollapsed(false);
+                        if (setIsSettingsCategoryOpen) setIsSettingsCategoryOpen(false);
+                        if (!cat.subTabs.some(st => st.key === activeTab)) {
+                          onSelectTab(cat.subTabs[0].key);
+                        }
+                      }}
                 className={`px-3.5 py-1.5 text-xs tracking-tight transition-all duration-150 relative whitespace-nowrap cursor-pointer flex items-center gap-1.5 rounded-t-lg ${tabClass}`}
               >
                 <CatIcon className={`w-3.5 h-3.5 ${isCategoryActive ? (isDark ? 'text-cyan-300' : 'text-slate-900') : 'opacity-70'}`} />
@@ -632,7 +641,9 @@ export default function TwoOSRibbon({
                   return (
                     <button
                       key={subTab.key}
-                      onClick={() => onSelectTab(subTab.key)}
+                      onClick={() => {
+                        onSelectTab(subTab.key);
+                      }}
                       className={`flex flex-col items-center justify-center px-3 py-2 rounded-xl transition-all cursor-pointer min-w-[68px] max-w-[130px] text-center h-[62px] ${toolStyle}`}
                       title={subTab.description}
                     >

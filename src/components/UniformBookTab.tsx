@@ -41,6 +41,7 @@ interface UniformBookTabProps {
   records: UniformBookRecord[];
   setRecords: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
   activeCompany: Company | null;
+  allowedCompanyNames?: string[];
   customers?: Customer[];
   contractors?: Contractor[];
   theme: any;
@@ -57,6 +58,7 @@ export default function UniformBookTab({
   records,
   setRecords,
   activeCompany,
+  allowedCompanyNames,
   customers = [],
   contractors = [],
   theme,
@@ -67,6 +69,18 @@ export default function UniformBookTab({
   onDeleteRecord
 }: UniformBookTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
+  const effectiveCompanyNames = useMemo(() => {
+    if (allowedCompanyNames && allowedCompanyNames.length > 0) {
+      return allowedCompanyNames;
+    }
+    return activeCompanyName ? [activeCompanyName] : [];
+  }, [allowedCompanyNames, activeCompanyName]);
+
+  const matchesActiveScope = (recCompName?: string) => {
+    if (effectiveCompanyNames.length === 0) return true;
+    if (!recCompName) return true;
+    return effectiveCompanyNames.includes(recCompName);
+  };
   const labels = getBookDisplayLabel(bookType);
   const isDisbursementOrPurchase = bookType === 'cash_disbursement' || bookType === 'subsidiary_purchases' || bookType === 'payments' || bookType === 'payments_book';
   const isCollectionsOrPaymentsBook = bookType === 'collections' || bookType === 'collections_book' || bookType === 'payments' || bookType === 'payments_book';
@@ -208,7 +222,7 @@ export default function UniformBookTab({
   const filteredRecords = useMemo(() => {
     const q = (searchTerm || globalSearch).toLowerCase().trim();
     const list = records.filter(r => {
-      if (activeCompanyName && r.company_name && r.company_name !== activeCompanyName) {
+      if (!matchesActiveScope(r.company_name)) {
         return false;
       }
       // Cash Receipts & Cash Disbursements strictly list fully paid transactions only
@@ -246,12 +260,12 @@ export default function UniformBookTab({
     }
 
     return list;
-  }, [records, activeCompanyName, bookType, searchTerm, globalSearch, filterVat, filterType]);
+  }, [records, effectiveCompanyNames, bookType, searchTerm, globalSearch, filterVat, filterType]);
 
   // Missing Invoice Sequence Audit for Subsidiary Sales (checks from Invoice 1 up to max invoice number)
   const invoiceSequenceAudit = useMemo(() => {
     if (bookType !== 'subsidiary_sales') return null;
-    const companyRecords = records.filter(r => !activeCompanyName || !r.company_name || r.company_name === activeCompanyName);
+    const companyRecords = records.filter(r => matchesActiveScope(r.company_name));
     const seqNumbers = companyRecords
       .map(r => extractInvoiceSeq(r.invoice_number))
       .filter((n): n is number => n !== null && n > 0 && n < 100000);

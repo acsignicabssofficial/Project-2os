@@ -100,11 +100,15 @@ export default function TwoOSTopBar({
     ? 'bg-[#091228] border-[#1c356f] shadow-2xl text-cyan-100'
     : 'bg-white border-sky-200 shadow-xl text-slate-900';
 
-  const branchLabel = activeBranchCode === 'ALL'
-    ? 'CONSOLIDATED (ALL BRANCHES)'
-    : activeBranchCode === '00000'
-    ? 'HEAD OFFICE / MAIN (00000)'
-    : `BRANCH CODE ${activeBranchCode}`;
+  const formatBranchBadgeLabel = (code: string): string => {
+    if (code === 'ALL') return 'CONSOLIDATED (ALL BRANCHES)';
+    const clean = (code || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    if (clean === '00000') return 'HEAD OFFICE - MAIN (00000)';
+    const num = parseInt(clean, 10);
+    return `BRANCH ${isNaN(num) ? clean : num} (${clean})`;
+  };
+
+  const branchLabel = formatBranchBadgeLabel(activeBranchCode);
 
   const periodDisplayText = `${selectedPrefix} ${MONTH_NAMES[selectedMonthIdx].toUpperCase()} ${selectedYear}`;
 

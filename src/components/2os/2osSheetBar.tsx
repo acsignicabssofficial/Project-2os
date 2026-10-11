@@ -23,6 +23,8 @@ interface TwoOSSheetBarProps {
   setZoomLevel: (zoom: number) => void;
   recordCount?: number;
   activeCompany: Company | null;
+  companies?: Company[];
+  onSelectCompany?: (company: Company) => void;
   activeBranchCode: string; // 'ALL' (Consolidated), '00000' (Main/Head Office), or branch_code
   onSelectBranch: (branchCode: string) => void;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
@@ -36,6 +38,8 @@ export default function TwoOSSheetBar({
   setZoomLevel,
   recordCount,
   activeCompany,
+  companies = [],
+  onSelectCompany,
   activeBranchCode,
   onSelectBranch,
   triggerAlert,
@@ -75,47 +79,113 @@ export default function TwoOSSheetBar({
     ? 'bg-zinc-950 text-white border-t border-violet-950'
     : 'bg-[#040914] text-cyan-300 border-t border-[#0F1E3D] font-mono';
 
-  // Build the list of branch sheet tabs for the active company
-  // Options: 
-  // 1. Consolidated (Combined All Branches & Main)
-  // 2. Head Office / Main (00000)
-  // 3. Registered Branches (Branch 1, Branch 2, etc.)
-  const companyBranches: CompanyBranch[] = (activeCompany?.branches && activeCompany.branches.length > 0)
-    ? activeCompany.branches
+  // Extract 9-digit TIN base and 5-digit branch code
+  const extractBaseTin9 = (c: Company | null | undefined): string => {
+    if (!c) return '';
+    return (c.company_tin || '').replace(/\D/g, '').slice(0, 9);
+  };
+
+  const extractBranch5 = (c: Company | null | undefined): string => {
+    if (!c) return '00000';
+    if (c.tin_branch_code && c.tin_branch_code.trim()) {
+      return c.tin_branch_code.replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    }
+    const raw = (c.company_tin || '').replace(/\D/g, '');
+    if (raw.length > 9) {
+      return raw.slice(9, 14).padStart(5, '0').slice(0, 5);
+    }
+    return '00000';
+  };
+
+  // Find all registered Company entities sharing the active company's 9-digit TIN
+  const activeBaseTin = extractBaseTin9(activeCompany);
+  const sameTinCompanies = activeBaseTin
+    ? companies.filter(c => extractBaseTin9(c) === activeBaseTin)
+    : (activeCompany ? [activeCompany] : []);
+
+  const mainCompany = sameTinCompanies.find(c => extractBranch5(c) === '00000') || activeCompany;
+  const branchCompanies = sameTinCompanies
+    .filter(c => extractBranch5(c) !== '00000')
+    .sort((a, b) => {
+      const numA = parseInt(extractBranch5(a), 10) || 0;
+      const numB = parseInt(extractBranch5(b), 10) || 0;
+      return numA - numB;
+    });
+
+  const hasMultipleEntitiesOrBranches = branchCompanies.length > 0;
+
+  // Rule:
+  // - If only Main (00000) exists and no branches exist: show ONLY "Head Office - Main" (no Consolidated-Aggregated).
+  // - Once at least one branch (e.g. 00001) exists under the same TIN: show "Consolidated", "Head Office" (for 00000), and "Branch 1" (for 00001), "Branch 9" (for 00009), etc.
+  const sheetTabs: Array<{
+    code: string;
+    label: string;
+    shortLabel: string;
+    icon: any;
+    description: string;
+    badge: string;
+    targetCompany?: Company | null;
+  }> = !activeCompany
+    ? [
+        {
+          code: '00000',
+          label: 'Head Office - Main (00000)',
+          shortLabel: 'Head Office',
+          icon: Building2,
+          description: 'Head Office - Main (00000)',
+          badge: 'Main'
+        }
+      ]
+    : !hasMultipleEntitiesOrBranches
+    ? [
+        {
+          code: '00000',
+          label: `Head Office - Main (${mainCompany?.company_name || '00000'})`,
+          shortLabel: 'Head Office',
+          icon: Building2,
+          description: `${mainCompany?.company_name || 'Head Office'} - Main (00000)`,
+          badge: 'Main',
+          targetCompany: mainCompany
+        }
+      ]
     : [
-        { id: 'main', branch_name: 'Head Office (Main)', branch_code: '00000', address: '', is_head_office: true }
+        {
+          code: 'ALL',
+          label: 'Consolidated (Head Office & All Branches)',
+          shortLabel: 'Consolidated',
+          icon: Layers,
+          description: 'Consolidated books combining Head Office and all Branches under this TIN',
+          badge: 'Consolidated',
+          targetCompany: activeCompany
+        },
+        ...(mainCompany
+          ? [
+              {
+                code: '00000',
+                label: `Head Office (${mainCompany.company_name} - 00000)`,
+                shortLabel: 'Head Office',
+                icon: Building2,
+                description: `Head Office / Main (${mainCompany.company_name} • Code 00000)`,
+                badge: 'Main',
+                targetCompany: mainCompany
+              }
+            ]
+          : []),
+        ...branchCompanies.map((brComp) => {
+          const bCode = extractBranch5(brComp);
+          const bNum = parseInt(bCode, 10);
+          const branchTitle = `Branch ${isNaN(bNum) ? bCode : bNum}`;
+          return {
+            code: bCode,
+            label: `${branchTitle} (${brComp.company_name} - ${bCode})`,
+            shortLabel: branchTitle,
+            icon: GitBranch,
+            description: `${branchTitle} • ${brComp.company_name} (TIN Branch Code ${bCode})`,
+            badge: bCode,
+            targetCompany: brComp
+          };
+        })
       ];
-
-  // Head office code
-  const headOfficeBranch = companyBranches.find(b => b.is_head_office || b.branch_code === '00000') || companyBranches[0];
-  const otherBranches = companyBranches.filter(b => b !== headOfficeBranch);
-
-  const sheetTabs = [
-    {
-      code: 'ALL',
-      label: 'Consolidated (All Branches)',
-      shortLabel: 'Consolidated',
-      icon: Layers,
-      description: 'View consolidated books and reports aggregated across all branches and head office',
-      badge: 'Aggregated'
-    },
-    {
-      code: headOfficeBranch ? headOfficeBranch.branch_code : '00000',
-      label: headOfficeBranch ? `${headOfficeBranch.branch_name} (${headOfficeBranch.branch_code})` : 'Main / Head Office (00000)',
-      shortLabel: headOfficeBranch ? headOfficeBranch.branch_name.replace(/\(Main\)/i, '').trim() || 'Main' : 'Main',
-      icon: Building2,
-      description: `Head Office / Main Books (${headOfficeBranch?.rdo_code ? `RDO ${headOfficeBranch.rdo_code}` : 'Code 00000'})`,
-      badge: 'Main'
-    },
-    ...otherBranches.map((br, idx) => ({
-      code: br.branch_code,
-      label: `${br.branch_name} (${br.branch_code})`,
-      shortLabel: br.branch_name || `Branch ${idx + 1}`,
-      icon: GitBranch,
-      description: `${br.branch_name} - TIN Branch Code ${br.branch_code} ${br.rdo_code ? `• RDO ${br.rdo_code}` : ''}`,
-      badge: `Br. ${br.branch_code}`
-    }))
-  ];
 
   return (
     <footer className={`sticky bottom-0 z-30 select-none text-xs shadow-lg transition-colors duration-200 ${sheetBarBg}`}>
@@ -179,6 +249,9 @@ export default function TwoOSSheetBar({
                 <button
                   key={tab.code}
                   onClick={() => {
+                    if (tab.code !== 'ALL' && tab.targetCompany && onSelectCompany) {
+                      onSelectCompany(tab.targetCompany);
+                    }
                     onSelectBranch(tab.code);
                     triggerAlert(`Switched books view to: ${tab.label}`, 'info');
                   }}

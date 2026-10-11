@@ -339,17 +339,13 @@ export default function BankReconTab({
             <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
               Depository Bank & Account
             </label>
-            <select
+            <input
+              type="text"
               value={selectedBank}
               onChange={(e) => setSelectedBank(e.target.value)}
+              placeholder="Enter Bank Name & Account No."
               className={`w-full px-3 py-2 text-xs rounded-xl border font-medium ${theme.borderInput} ${theme.bgInput} ${theme.textMain} focus:outline-none`}
-            >
-              <option value="BDO Unibank - CA #0012-3456-7890">BDO Unibank - CA #0012-3456-7890</option>
-              <option value="BPI - Checking #1920-8831-22">BPI - Checking #1920-8831-22</option>
-              <option value="Metrobank - CA #554-123-9988">Metrobank - CA #554-123-9988</option>
-              <option value="UnionBank - Business Account #1098-7744-12">UnionBank - Business Account #1098-7744-12</option>
-              <option value="Security Bank - Corporate #0034-9912-44">Security Bank - Corporate #0034-9912-44</option>
-            </select>
+            />
           </div>
 
           <div>

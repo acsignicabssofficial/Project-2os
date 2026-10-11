@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Building2, Landmark, Check, Info, Pencil, Trash2, Plus, X, Search, CheckCircle2, ShieldCheck, Mail, Phone, Calendar, MapPin, FolderTree, Folder, AlertTriangle } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Building2, Landmark, Check, Info, Pencil, Trash2, Plus, X, Search, CheckCircle2, ShieldCheck, Mail, Phone, Calendar, MapPin, FolderTree, Folder, AlertTriangle, ChevronRight, ChevronDown, GitBranch } from 'lucide-react';
 import { Company } from '../types';
 
 interface CompaniesTabProps {
@@ -7,6 +7,8 @@ interface CompaniesTabProps {
   setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
   activeCompany: Company | null;
   setActiveCompany: (c: Company | null) => void;
+  activeBranchCode?: string;
+  onSelectBranch?: (code: string) => void;
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
@@ -17,6 +19,8 @@ export default function CompaniesTab({
   setCompanies,
   activeCompany,
   setActiveCompany,
+  activeBranchCode = '00000',
+  onSelectBranch,
   theme,
   triggerAlert,
   globalSearch = ''
@@ -26,12 +30,15 @@ export default function CompaniesTab({
   const [selectedDirectoryCompany, setSelectedDirectoryCompany] = useState<Company | null>(null);
   const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
   const [localSearch, setLocalSearch] = useState('');
+  const [expandedMainTins, setExpandedMainTins] = useState<Record<string, boolean>>({});
 
   // 2 Clean Sub-tabs: 'company' (Profile / Information) and 'bir' (BIR 2303 Tax Obligations)
   const [formSubTab, setFormSubTab] = useState<'company' | 'bir'>('company');
 
   // Fields strictly aligned with Table Company
   const [companyName, setCompanyName] = useState('');
+  const [tradeName, setTradeName] = useState('');
+  const [sameTradeName, setSameTradeName] = useState(false);
   const [entityType, setEntityType] = useState('CORPORATION');
   const [companyTin, setCompanyTin] = useState('');
   const [tinBranchCode, setTinBranchCode] = useState('00000');
@@ -55,6 +62,30 @@ export default function CompaniesTab({
 
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
 
+  // Extract 9-digit TIN base and 5-digit branch code
+  const extractBaseTin9 = (c: Company): string => {
+    const raw = (c.company_tin || '').replace(/\D/g, '');
+    return raw.slice(0, 9);
+  };
+
+  const extractBranch5 = (c: Company): string => {
+    if (c.tin_branch_code && c.tin_branch_code.trim()) {
+      return c.tin_branch_code.replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    }
+    const raw = (c.company_tin || '').replace(/\D/g, '');
+    if (raw.length > 9) {
+      return raw.slice(9, 14).padStart(5, '0').slice(0, 5);
+    }
+    return '00000';
+  };
+
+  const formatBranchRoleLabel = (branchCode: string): string => {
+    const clean = (branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    if (clean === '00000') return 'Head Office - Main';
+    const num = parseInt(clean, 10);
+    return `Branch ${isNaN(num) ? clean : num}`;
+  };
+
   // Mask TIN (first 9 digits)
   const handleTinChange = (val: string) => {
     const digits = val.replace(/\D/g, '').slice(0, 9);
@@ -74,6 +105,8 @@ export default function CompaniesTab({
     setEditingCompanyId(null);
     setFormSubTab('company');
     setCompanyName('');
+    setTradeName('');
+    setSameTradeName(false);
     setEntityType('CORPORATION');
     setCompanyTin('');
     setTinBranchCode('00000');
@@ -103,19 +136,47 @@ export default function CompaniesTab({
     e.preventDefault();
 
     const finalCompName = companyName.trim();
+    const finalTradeName = (sameTradeName ? finalCompName : tradeName.trim());
+    const cleanTinDigits = companyTin.replace(/\D/g, '');
+    const rawBranchDigits = tinBranchCode.replace(/\D/g, '');
+    const cleanBranch = rawBranchDigits ? rawBranchDigits.padStart(5, '0').slice(0, 5) : '';
+
     if (!finalCompName) {
-      triggerAlert('Please enter a valid Company / Business Name.', 'error');
+      triggerAlert('Company Name is required.', 'error');
+      return;
+    }
+    if (!finalTradeName) {
+      triggerAlert('Trade Name is required (or check "Same with Company Name").', 'error');
+      return;
+    }
+    if (!entityType) {
+      triggerAlert('Entity Type is required.', 'error');
+      return;
+    }
+    if (cleanTinDigits.length !== 9) {
+      triggerAlert('Company TIN (9 Digits) is required.', 'error');
+      return;
+    }
+    if (!cleanBranch) {
+      triggerAlert('Branch Code is required (e.g. 00000 for Main, 00001 for Branch 1).', 'error');
+      return;
+    }
+    if (!incorporationDate) {
+      triggerAlert('Birthday / Incorporation Date is required.', 'error');
+      return;
+    }
+    if (!rdo.trim()) {
+      triggerAlert('RDO Code / District is required.', 'error');
       return;
     }
 
-    const cleanTinDigits = companyTin.replace(/\D/g, '');
-    const cleanBranch = tinBranchCode.trim() || '00000';
-    const formattedFullTin = cleanTinDigits ? `${companyTin}-${cleanBranch}` : '000-000-000-00000';
+    const formattedTin9 = `${cleanTinDigits.slice(0, 3)}-${cleanTinDigits.slice(3, 6)}-${cleanTinDigits.slice(6, 9)}`;
+    const formattedFullTin = `${formattedTin9}-${cleanBranch}`;
 
     const savedCompany: Company = {
       id: editingCompanyId !== null ? editingCompanyId : Date.now(),
       company_name: finalCompName,
-      trade_name: finalCompName,
+      trade_name: finalTradeName,
       entity_type: entityType,
       company_tin: formattedFullTin,
       tin_branch_code: cleanBranch,
@@ -157,25 +218,28 @@ export default function CompaniesTab({
         console.error("Entity directory error:", err);
       });
 
+    // Automatically expand this TIN group in the Directory table if it has branches
+    setExpandedMainTins(prev => ({ ...prev, [cleanTinDigits]: true }));
+
     if (editingCompanyId !== null) {
       setCompanies(prev => prev.map(c => {
         if (c.id === editingCompanyId) {
           if (activeCompany && activeCompany.id === editingCompanyId) {
             setActiveCompany(savedCompany);
+            if (onSelectBranch) onSelectBranch(cleanBranch);
           }
           return savedCompany;
         }
         return c;
       }));
-      triggerAlert(`Company profile "${finalCompName}" updated! Entity directory synced under "entity directory/${finalCompName}".`, 'success');
+      triggerAlert(`Entity profile "${finalCompName}" (${formatBranchRoleLabel(cleanBranch)}) updated!`, 'success');
       resetForm();
       setIsModalOpen(false);
     } else {
       setCompanies(prev => [...prev, savedCompany]);
-      if (!activeCompany) {
-        setActiveCompany(savedCompany);
-      }
-      triggerAlert(`Company profile "${finalCompName}" registered! Entity directory created under "entity directory/${finalCompName}".`, 'success');
+      setActiveCompany(savedCompany);
+      if (onSelectBranch) onSelectBranch(cleanBranch);
+      triggerAlert(`Entity profile "${finalCompName}" (${formatBranchRoleLabel(cleanBranch)}) registered!`, 'success');
       resetForm();
       setIsModalOpen(false);
     }
@@ -191,7 +255,11 @@ export default function CompaniesTab({
     const remaining = companies.filter(c => c.id !== id);
     setCompanies(remaining);
     if (activeCompany && activeCompany.id === id) {
-      setActiveCompany(remaining.length > 0 ? remaining[0] : null);
+      const nextComp = remaining.length > 0 ? remaining[0] : null;
+      setActiveCompany(nextComp);
+      if (nextComp && onSelectBranch) {
+        onSelectBranch(extractBranch5(nextComp));
+      }
     }
     if (selectedDirectoryCompany && selectedDirectoryCompany.id === id) {
       setSelectedDirectoryCompany(null);
@@ -203,7 +271,11 @@ export default function CompaniesTab({
   const handleEditClick = (c: Company) => {
     setEditingCompanyId(c.id);
     setFormSubTab('company');
-    setCompanyName(c.company_name || c.trade_name || '');
+    const cName = c.company_name || '';
+    const tName = c.trade_name || cName;
+    setCompanyName(cName);
+    setTradeName(tName);
+    setSameTradeName(Boolean(cName && tName && cName === tName));
     setEntityType(c.entity_type || 'CORPORATION');
     
     const tinStr = (c.company_tin || '');
@@ -242,11 +314,57 @@ export default function CompaniesTab({
     if (!q) return true;
     return (
       (c.company_name && c.company_name.toLowerCase().includes(q)) ||
+      (c.trade_name && c.trade_name.toLowerCase().includes(q)) ||
       (c.company_tin && c.company_tin.toLowerCase().includes(q)) ||
       (c.entity_type && c.entity_type.toLowerCase().includes(q)) ||
       (c.rdo && c.rdo.toLowerCase().includes(q))
     );
   });
+
+  // Group entities by 9-digit TIN so Main (00000) is the parent row with a collapse/expand arrow for its branches (00001, 00009, etc.)
+  const groupedEntityHierarchy = useMemo(() => {
+    const groupsMap = new Map<string, { main: Company | null; branches: Company[]; tinKey: string }>();
+
+    filteredCompanies.forEach(c => {
+      const baseTin = extractBaseTin9(c) || `id_${c.id}`;
+      const branchCode = extractBranch5(c);
+      if (!groupsMap.has(baseTin)) {
+        groupsMap.set(baseTin, { main: null, branches: [], tinKey: baseTin });
+      }
+      const grp = groupsMap.get(baseTin)!;
+      if (branchCode === '00000' && !grp.main) {
+        grp.main = c;
+      } else {
+        grp.branches.push(c);
+      }
+    });
+
+    // Sort branches numerically by branch code (00001 -> Branch 1, 00009 -> Branch 9, etc.)
+    const result: Array<{ parent: Company; children: Company[]; tinKey: string }> = [];
+    groupsMap.forEach((grp) => {
+      const sortedBranches = [...grp.branches].sort((a, b) => {
+        const numA = parseInt(extractBranch5(a), 10) || 0;
+        const numB = parseInt(extractBranch5(b), 10) || 0;
+        return numA - numB;
+      });
+      if (grp.main) {
+        result.push({
+          parent: grp.main,
+          children: sortedBranches,
+          tinKey: grp.tinKey
+        });
+      } else if (sortedBranches.length > 0) {
+        // Fallback if a branch exists before a 00000 main is created
+        result.push({
+          parent: sortedBranches[0],
+          children: sortedBranches.slice(1),
+          tinKey: grp.tinKey
+        });
+      }
+    });
+
+    return result;
+  }, [filteredCompanies]);
 
   return (
     <div className="flex flex-col gap-6 w-full">
@@ -303,17 +421,17 @@ export default function CompaniesTab({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className={`bg-zinc-500/5 ${theme.textMuted} uppercase font-bold tracking-wider border-b ${theme.borderCard}`}>
-                <th className="p-3.5">Company TIN</th>
+                <th className="p-3.5">Company TIN & Role</th>
                 <th className="p-3.5">Company Name</th>
+                <th className="p-3.5">Trade Name</th>
                 <th className="p-3.5">Entity Type</th>
-                <th className="p-3.5">Company Address</th>
-                <th className="p-3.5">Email & Contact</th>
+                <th className="p-3.5">RDO Code</th>
                 <th className="p-3.5">Birthday / Incorp Date</th>
                 <th className="p-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${theme.borderCard}`}>
-              {filteredCompanies.length === 0 ? (
+              {groupedEntityHierarchy.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-12 text-center text-zinc-500">
                     <Building2 className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -322,92 +440,147 @@ export default function CompaniesTab({
                   </td>
                 </tr>
               ) : (
-                filteredCompanies.map((c) => {
-                  const isActive = activeCompany?.id === c.id;
-                  return (
-                    <tr key={c.id} className={`hover:bg-zinc-800/30 transition-colors ${isActive ? 'bg-pink-500/5' : ''}`}>
-                      <td className="p-3.5 font-mono font-bold text-cyan-400">
-                        {c.company_tin}
-                      </td>
-                      <td className="p-3.5 font-medium">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-bold text-sm ${theme.textTitle}`}>{c.company_name}</span>
-                          {isActive && (
-                            <span className="bg-pink-500/15 text-pink-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-pink-500/20 uppercase tracking-wider flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 inline" /> Active Workspace
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-3.5">
-                        <span className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-bold text-[11px]">
-                          {c.entity_type || 'CORPORATION'}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-zinc-300 max-w-xs truncate" title={c.company_address}>
-                        {c.company_address || '—'}
-                      </td>
-                      <td className="p-3.5">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-zinc-300 font-mono text-[11px]">{c.company_email || '—'}</span>
-                          <span className="text-zinc-500 font-mono text-[10px]">{c.company_contact || '—'}</span>
-                        </div>
-                      </td>
-                      <td className="p-3.5 font-mono text-zinc-400">
-                        {c.birthday_or_incorporation_date || '—'}
-                      </td>
-                      <td className="p-3.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {!isActive && (
+                groupedEntityHierarchy.map(({ parent, children, tinKey }) => {
+                  const hasBranches = children.length > 0;
+                  const isExpanded = expandedMainTins[tinKey] ?? true;
+
+                  const renderRow = (c: Company, isChildBranch: boolean) => {
+                    const branchCode = extractBranch5(c);
+                    const roleLabel = formatBranchRoleLabel(branchCode);
+                    const isMainEntity = branchCode === '00000';
+                    const isActive = activeCompany?.id === c.id;
+
+                    return (
+                      <tr
+                        key={c.id}
+                        className={`hover:bg-zinc-500/10 transition-colors ${
+                          isActive ? 'bg-pink-500/5' : isChildBranch ? 'bg-cyan-500/[0.03]' : ''
+                        }`}
+                      >
+                        <td className="p-3.5 font-mono font-bold">
+                          <div className={`flex items-center gap-2 ${isChildBranch ? 'pl-6' : ''}`}>
+                            {!isChildBranch && hasBranches ? (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedMainTins(prev => ({ ...prev, [tinKey]: !isExpanded }))}
+                                className="p-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 text-cyan-500 hover:bg-cyan-500/20 transition cursor-pointer flex items-center justify-center"
+                                title={isExpanded ? 'Collapse Branches' : `Expand ${children.length} Branch(es)`}
+                              >
+                                {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </button>
+                            ) : isChildBranch ? (
+                              <GitBranch className="w-3.5 h-3.5 text-cyan-500 flex-shrink-0" />
+                            ) : (
+                              <span className="w-5 inline-block" />
+                            )}
+                            <div className="flex flex-col">
+                              <span className="text-cyan-600 dark:text-cyan-400">{c.company_tin}</span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-sans font-bold uppercase ${
+                                  isMainEntity
+                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                    : 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30'
+                                }`}>
+                                  {roleLabel}
+                                </span>
+                                {!isChildBranch && hasBranches && (
+                                  <span className="text-[10px] font-sans font-bold text-cyan-600 dark:text-cyan-400">
+                                    ({children.length} {children.length === 1 ? 'Branch' : 'Branches'})
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3.5 font-medium">
+                          <div className="flex items-center gap-2">
+                            <span className={`font-bold text-sm ${theme.textTitle}`}>{c.company_name}</span>
+                            {isActive && (
+                              <span className="bg-pink-500/15 text-pink-500 dark:text-pink-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-pink-500/20 uppercase tracking-wider flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 inline" /> Active
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3.5 font-medium">
+                          <span className={`text-xs font-semibold ${theme.textMain}`}>
+                            {c.trade_name || c.company_name || '—'}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          <span className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-bold text-[11px]">
+                            {c.entity_type || 'CORPORATION'}
+                          </span>
+                        </td>
+                        <td className="p-3.5 font-mono font-bold text-xs">
+                          {c.rdo || c.rdo_code || '—'}
+                        </td>
+                        <td className="p-3.5 font-mono text-zinc-500 dark:text-zinc-400">
+                          {c.birthday_or_incorporation_date || '—'}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {!isActive && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveCompany(c);
+                                  if (onSelectBranch) {
+                                    onSelectBranch(branchCode);
+                                  }
+                                  triggerAlert(`Switched active workspace to "${c.company_name}" (${roleLabel}).`, 'info');
+                                }}
+                                className="px-2.5 py-1 text-xs rounded-lg border border-pink-500/20 bg-pink-500/10 text-pink-500 dark:text-pink-400 hover:bg-pink-500/20 transition cursor-pointer font-bold"
+                              >
+                                Select
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
-                                setActiveCompany(c);
-                                triggerAlert(`Switched active workspace to "${c.company_name}".`, 'info');
+                                setSelectedDirectoryCompany(c);
+                                fetch('/api/create-entity-directory', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    company_name: c.company_name,
+                                    branch_code: c.tin_branch_code || '00000',
+                                    year: c.birthday_or_incorporation_date ? c.birthday_or_incorporation_date.slice(0, 4) : 2026
+                                  })
+                                }).catch(() => {});
                               }}
-                              className="px-2.5 py-1 text-xs rounded-lg border border-pink-500/20 bg-pink-500/10 text-pink-400 hover:bg-pink-500/20 transition cursor-pointer font-bold"
+                              className="p-1.5 rounded-lg border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 transition cursor-pointer"
+                              title="View / Sync Entity Directory Folder Structure"
                             >
-                              Select
+                              <FolderTree className="w-3.5 h-3.5" />
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedDirectoryCompany(c);
-                              fetch('/api/create-entity-directory', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  company_name: c.company_name,
-                                  branch_code: c.tin_branch_code || '00000',
-                                  year: c.birthday_or_incorporation_date ? c.birthday_or_incorporation_date.slice(0, 4) : 2026
-                                })
-                              }).catch(() => {});
-                            }}
-                            className="p-1.5 rounded-lg border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 transition cursor-pointer"
-                            title="View / Sync Entity Directory Folder Structure"
-                          >
-                            <FolderTree className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleEditClick(c)}
-                            className="p-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition cursor-pointer"
-                            title="Edit Entity Profile"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteCompany(c)}
-                            className="p-1.5 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
-                            title="Delete Entity Profile"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                            <button
+                              type="button"
+                              onClick={() => handleEditClick(c)}
+                              className="p-1.5 rounded-lg border border-zinc-400/40 dark:border-zinc-700 hover:bg-zinc-500/10 text-slate-700 dark:text-zinc-300 transition cursor-pointer"
+                              title="Edit Entity Profile"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCompany(c)}
+                              className="p-1.5 rounded-lg border border-rose-500/20 text-rose-500 dark:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                              title="Delete Entity Profile"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  };
+
+                  return (
+                    <React.Fragment key={tinKey}>
+                      {renderRow(parent, false)}
+                      {hasBranches && isExpanded && children.map(branch => renderRow(branch, true))}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -436,7 +609,7 @@ export default function CompaniesTab({
                     {editingCompanyId !== null ? "Update Company Profile" : "Register Company Profile / Entity"}
                   </h3>
                   <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                    Fill in complete legal entity details and BIR Form 2303 registration requirements.
+                    Branch code <span className="font-mono font-bold text-emerald-500">00000</span> = Main (Head Office). Any non-00000 branch code (<span className="font-mono font-bold text-sky-500">00001</span> = Branch 1, <span className="font-mono font-bold text-sky-500">00009</span> = Branch 9) is a Branch under the same TIN.
                   </p>
                 </div>
               </div>
@@ -498,20 +671,61 @@ export default function CompaniesTab({
                       <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Name *</label>
                       <input
                         type="text"
-                        placeholder="e.g. Acme Philippines Holdings Inc."
+                        placeholder="e.g. ABC Corporation"
                         value={companyName}
-                        onChange={(e) => setCompanyName(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCompanyName(val);
+                          if (sameTradeName) {
+                            setTradeName(val);
+                          }
+                        }}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
                         required
                       />
                     </div>
 
                     <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className={`block text-xs font-bold ${theme.textMuted}`}>Trade Name *</label>
+                        <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-pink-500 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={sameTradeName}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setSameTradeName(checked);
+                              if (checked) {
+                                setTradeName(companyName);
+                              }
+                            }}
+                            className="w-3.5 h-3.5 rounded accent-pink-600 cursor-pointer"
+                          />
+                          <span>Same with Company Name</span>
+                        </label>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="e.g. ABC Store / Brand Name"
+                        value={sameTradeName ? companyName : tradeName}
+                        onChange={(e) => {
+                          setSameTradeName(false);
+                          setTradeName(e.target.value);
+                        }}
+                        className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
                       <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Entity Type *</label>
                       <select
                         value={entityType}
                         onChange={(e) => setEntityType(e.target.value)}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium cursor-pointer ${theme.borderInput} ${theme.textMain}`}
+                        required
                       >
                         <option value="SOLE PROPRIETORSHIP" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Sole Proprietorship</option>
                         <option value="PARTNERSHIP" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Partnership</option>
@@ -521,14 +735,12 @@ export default function CompaniesTab({
                         <option value="NON-PROFIT / FOUNDATION" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Non-Profit / Foundation</option>
                       </select>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company TIN (9 Digits) *</label>
                       <input
                         type="text"
-                        placeholder="123-456-789"
+                        placeholder="111-111-111"
                         value={companyTin}
                         onChange={(e) => handleTinChange(e.target.value)}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
@@ -537,42 +749,66 @@ export default function CompaniesTab({
                     </div>
 
                     <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Branch Code (5 Digits)</label>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className={`block text-xs font-bold ${theme.textMuted}`}>Branch Code (5 Digits) *</label>
+                        <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                          (tinBranchCode.replace(/\D/g, '').padStart(5, '0') === '00000')
+                            ? 'bg-emerald-500/15 text-emerald-500'
+                            : 'bg-sky-500/15 text-sky-500'
+                        }`}>
+                          {formatBranchRoleLabel(tinBranchCode)}
+                        </span>
+                      </div>
                       <input
                         type="text"
                         placeholder="00000"
                         value={tinBranchCode}
                         onChange={(e) => handleBranchCodeChange(e.target.value)}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
+                        required
                       />
                     </div>
+                  </div>
 
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Birthday / Incorporation Date</label>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Birthday / Incorporation Date *</label>
                       <input
                         type="date"
                         value={incorporationDate}
                         onChange={(e) => setIncorporationDate(e.target.value)}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>RDO Code / District *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 044 - Taguig"
+                        value={rdo}
+                        onChange={(e) => setRdo(e.target.value)}
+                        className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
+                        required
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Address *</label>
+                    <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Address (Optional)</label>
                     <input
                       type="text"
                       placeholder="e.g. 15F Tower 1, Ayala Avenue, Makati City, Metro Manila"
                       value={companyAddress}
                       onChange={(e) => setCompanyAddress(e.target.value)}
                       className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
-                      required
                     />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Email</label>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Email (Optional)</label>
                       <input
                         type="email"
                         placeholder="accounting@company.com"
@@ -583,7 +819,7 @@ export default function CompaniesTab({
                     </div>
 
                     <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Contact</label>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Contact (Optional)</label>
                       <input
                         type="text"
                         placeholder="0917-123-4567"
@@ -594,26 +830,15 @@ export default function CompaniesTab({
                     </div>
 
                     <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>RDO Code / District</label>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Line of Business (Optional)</label>
                       <input
                         type="text"
-                        placeholder="e.g. 044 - Taguig"
-                        value={rdo}
-                        onChange={(e) => setRdo(e.target.value)}
+                        placeholder="e.g. General Wholesale & IT Consulting"
+                        value={lineOfBusiness}
+                        onChange={(e) => setLineOfBusiness(e.target.value)}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
                       />
                     </div>
-                  </div>
-
-                  <div>
-                    <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Line of Business (PSIC / Nature)</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. General Wholesale & IT Consulting Services"
-                      value={lineOfBusiness}
-                      onChange={(e) => setLineOfBusiness(e.target.value)}
-                      className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
-                    />
                   </div>
                 </div>
               )}

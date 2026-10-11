@@ -1109,44 +1109,10 @@ export default function ExecutiveDashboard({
                   </button>
                 </div>
 
-                <div className="space-y-2 font-mono text-[10.5px]">
-                  <div className="p-1.5 rounded-lg border border-black/5 dark:border-white/5 space-y-0.5">
-                    <div className="flex items-center justify-between font-sans">
-                      <span className={`font-bold flex items-center gap-1 ${theme.textTitle}`}>
-                        <Landmark className="w-3 h-3 text-blue-500" />
-                        BDO Commercial
-                      </span>
-                      <span 
-                        onClick={() => triggerAlert("No pending reconciliation items", "info")}
-                        className="text-[9.5px] text-zinc-400 font-mono"
-                      >
-                        {stats.cashCollected > 0 ? '1 linked' : '0 review'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-zinc-400">
-                      <span>Bank: <strong className={theme.textTitle}>{fmtMoney(stats.cashOnHand)}</strong></span>
-                      <span>Ledger: {fmtMoney(stats.cashOnHand)}</span>
-                    </div>
-                  </div>
-
-                  <div className="p-1.5 rounded-lg border border-black/5 dark:border-white/5 space-y-0.5">
-                    <div className="flex items-center justify-between font-sans">
-                      <span className={`font-bold flex items-center gap-1 ${theme.textTitle}`}>
-                        <Coins className="w-3 h-3 text-rose-500" />
-                        BPI Payroll
-                      </span>
-                      <span 
-                        onClick={() => triggerAlert("No pending payroll card items", "info")}
-                        className="text-[9.5px] text-zinc-400 font-mono"
-                      >
-                        0 review
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-zinc-400">
-                      <span>Bank: <strong className={theme.textTitle}>{fmtMoney(0)}</strong></span>
-                      <span>Ledger: {fmtMoney(0)}</span>
-                    </div>
-                  </div>
+                <div className="py-6 flex flex-col items-center justify-center text-center border border-dashed border-black/10 dark:border-white/10 rounded-lg">
+                  <Landmark className="w-5 h-5 text-zinc-400 mb-1.5 opacity-60" />
+                  <span className={`text-[11px] font-semibold ${theme.textTitle}`}>No Bank Accounts Linked</span>
+                  <span className="text-[9.5px] text-zinc-400 mt-0.5">Add a bank account to track balances</span>
                 </div>
               </div>
 
@@ -1550,26 +1516,8 @@ export default function ExecutiveDashboard({
                 Link active bank accounts to enable automated transaction synchronization and electronic reconciliation against Official Receipts and Check Vouchers.
               </p>
 
-              <div className="space-y-2 font-mono">
-                <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-xs">BDO Commercial Operating</div>
-                    <div className="text-[10px] text-zinc-400">Acct: •••• 9821 • Synced</div>
-                  </div>
-                  <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">
-                    Active
-                  </span>
-                </div>
-
-                <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-xs">BPI Corporate Payroll</div>
-                    <div className="text-[10px] text-zinc-400">Acct: •••• 4410 • Synced</div>
-                  </div>
-                  <span className="text-[10px] font-bold text-cyan-500 bg-cyan-500/10 px-2 py-0.5 rounded">
-                    Active
-                  </span>
-                </div>
+              <div className="py-6 text-center border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-400 text-xs">
+                No bank accounts configured yet.
               </div>
             </div>
 

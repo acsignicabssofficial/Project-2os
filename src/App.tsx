@@ -12,6 +12,7 @@ import {
   Upload, 
   CheckCircle2, 
   AlertTriangle, 
+  AlertCircle,
   X, 
   Search, 
   ChevronLeft, 
@@ -457,7 +458,7 @@ function mapPaymentToUniform(p: any): UniformBookRecord {
 export default function App() {
   const [companies, setCompanies] = useState<Company[]>(INITIAL_COMPANIES);
   const [activeCompany, setActiveCompany] = useState<Company | null>(INITIAL_COMPANIES[0] || null);
-  const [activeBranchCode, setActiveBranchCode] = useState<string>('ALL');
+  const [activeBranchCode, setActiveBranchCode] = useState<string>('00000');
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [contractors, setContractors] = useState<Contractor[]>(INITIAL_CONTRACTORS);
 
@@ -1082,9 +1083,34 @@ export default function App() {
     | 'dashboard' | 'account_titles' | 'tax_calendar' | 'activities' | 'activity_lists' | 'about_app' | 'system_specs' | 'about' // Group 3
     | 'tax_reports' | 'income_tax' | 'ppe' | 'payroll' | 'contribution_tables' | 'cwt_customers' | 'cwt_providers' | 'special_entries' // Group 4
     | 'fs_balance_sheet' | 'fs_position' | 'fs_position_pfrs' | 'fs_income' | 'fs_equity' | 'fs_cashflows' | 'fs_notes' // Group 5
-    | 'bir_2316' | 'bir_slsp' | 'bir_qap' | 'bir_sawt' // Group 6
-    | 'reports' // Group 7
+    | 'bir_2316' | 'bir_slsp' | 'bir_qap' | 'bir_sawt' | 'bir_alphalist' // Group 6
+    | 'reports' | 'reports_turnovers' | 'reports_horizontal' | 'reports_vertical' | 'reports_ratios' // Group 7
+    | 'bank_recon' | 'inventory_services' | 'inventory_list'
   >('dashboard');
+
+  // Automatically scroll to the top of the page whenever switching tools/tabs or sheet branches
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [activeTab, activeBranchCode]);
+
+  const hasEntityProfile = Boolean(
+    companies.length > 0 &&
+    activeCompany &&
+    activeCompany.company_name &&
+    activeCompany.company_name.trim().length > 0 &&
+    activeCompany.company_name !== 'Select Company...'
+  );
+
+  const entityRequiredTabs = [
+    // Home Tools
+    'dashboard', 'reports', 'reports_turnovers', 'reports_horizontal', 'reports_vertical', 'reports_ratios', 'account_titles', 'tax_calendar', 'activities', 'activity_lists',
+    // Financial Statements Tools
+    'fs_balance_sheet', 'fs_income', 'fs_position', 'fs_position_pfrs', 'fs_equity', 'fs_cashflows', 'fs_notes',
+    // BIR Computations Tools
+    'bir_2316', 'cwt_providers', 'tax_reports', 'income_tax', 'bir_slsp', 'bir_sawt', 'bir_qap', 'bir_alphalist', 'cwt_customers'
+  ];
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
 
@@ -1140,20 +1166,73 @@ export default function App() {
 
   const activeTheme = themeConfigs[theme] || themeConfigs.neon_light;
 
-  // Filter Data by Selected Company
+  // Helper to extract 9-digit TIN base and 5-digit branch code from a Company profile
+  const extractCompanyBaseTin9 = (c: Company | null | undefined): string => {
+    if (!c) return '';
+    return (c.company_tin || '').replace(/\D/g, '').slice(0, 9);
+  };
+
+  const extractCompanyBranch5 = (c: Company | null | undefined): string => {
+    if (!c) return '00000';
+    if (c.tin_branch_code && c.tin_branch_code.trim()) {
+      return c.tin_branch_code.replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    }
+    const raw = (c.company_tin || '').replace(/\D/g, '');
+    if (raw.length > 9) {
+      return raw.slice(9, 14).padStart(5, '0').slice(0, 5);
+    }
+    return '00000';
+  };
+
+  // All registered companies sharing the same 9-digit TIN as activeCompany (Head Office + all Branches)
+  const activeBaseTin9 = extractCompanyBaseTin9(activeCompany);
+  const sameTinGroupCompanies = activeBaseTin9
+    ? companies.filter(c => extractCompanyBaseTin9(c) === activeBaseTin9)
+    : (activeCompany ? [activeCompany] : []);
+
+  const hasBranchesInTinGroup = sameTinGroupCompanies.some(c => extractCompanyBranch5(c) !== '00000');
+
+  // If there are NO branches (only 00000 Main exists), force activeBranchCode to '00000' (Head Office - Main only, no Consolidated)
+  useEffect(() => {
+    if (!activeCompany) return;
+    const compBranch = extractCompanyBranch5(activeCompany);
+    if (!hasBranchesInTinGroup && activeBranchCode === 'ALL') {
+      setActiveBranchCode(compBranch || '00000');
+    }
+  }, [activeCompany, hasBranchesInTinGroup, activeBranchCode]);
+
+  // Determine which company_name(s) belong to the currently selected sheet tab:
+  // - If activeBranchCode === 'ALL' (Consolidated): include Head Office (00000) AND all Branches (00001, etc.) under the same TIN!
+  // - If activeBranchCode is '00000' or '00001', etc.: include ONLY the specific entity with that branch code!
+  const scopedCompanyNames: string[] = (() => {
+    if (!activeCompany) return [];
+    if (activeBranchCode === 'ALL' && hasBranchesInTinGroup) {
+      return sameTinGroupCompanies.map(c => c.company_name).filter(Boolean);
+    }
+    const targetComp = sameTinGroupCompanies.find(c => extractCompanyBranch5(c) === activeBranchCode) || activeCompany;
+    return targetComp?.company_name ? [targetComp.company_name] : [];
+  })();
+
+  const matchesActiveSheetScope = (recCompanyName?: string): boolean => {
+    if (scopedCompanyNames.length === 0) return true;
+    if (!recCompanyName) return true;
+    return scopedCompanyNames.includes(recCompanyName);
+  };
+
+  // Filter Data by Selected Sheet Scope (Head Office only, Specific Branch only, or Consolidated across Main + Branches)
   const activeCompanyName = activeCompany?.company_name || '';
 
-  const companySales = sales.filter(s => !activeCompanyName || s.company_name === activeCompanyName);
-  const companyCollections = collections.filter(c => !activeCompanyName || c.company_name === activeCompanyName);
-  const companyCashReceipts = cashReceipts.filter(r => !activeCompanyName || r.company_name === activeCompanyName);
-  const companyExpenses = expenses.filter(e => !activeCompanyName || e.company_name === activeCompanyName);
-  const companyPayments = payments.filter(p => !activeCompanyName || p.company_name === activeCompanyName);
-  const companyCashDisbursements = cashDisbursements.filter(d => !activeCompanyName || d.company_name === activeCompanyName);
-  const companySpecialEntries = specialEntries.filter(s => !activeCompanyName || s.company_name === activeCompanyName);
-  const companyIncomeTaxRecords = incomeTaxRecords.filter(r => !activeCompanyName || r.company_name === activeCompanyName);
-  const companyPpeAssets = ppeAssets.filter(a => !activeCompanyName || a.company_name === activeCompanyName);
-  const companyPayrollRecords = payrollRecords.filter(r => !activeCompanyName || r.company_name === activeCompanyName);
-  const companyEmployees = employees.filter(e => !activeCompanyName || e.company_name === activeCompanyName);
+  const companySales = sales.filter(s => matchesActiveSheetScope(s.company_name));
+  const companyCollections = collections.filter(c => matchesActiveSheetScope(c.company_name));
+  const companyCashReceipts = cashReceipts.filter(r => matchesActiveSheetScope(r.company_name));
+  const companyExpenses = expenses.filter(e => matchesActiveSheetScope(e.company_name));
+  const companyPayments = payments.filter(p => matchesActiveSheetScope(p.company_name));
+  const companyCashDisbursements = cashDisbursements.filter(d => matchesActiveSheetScope(d.company_name));
+  const companySpecialEntries = specialEntries.filter(s => matchesActiveSheetScope(s.company_name));
+  const companyIncomeTaxRecords = incomeTaxRecords.filter(r => matchesActiveSheetScope(r.company_name));
+  const companyPpeAssets = ppeAssets.filter(a => matchesActiveSheetScope(a.company_name));
+  const companyPayrollRecords = payrollRecords.filter(r => matchesActiveSheetScope(r.company_name));
+  const companyEmployees = employees.filter(e => matchesActiveSheetScope(e.company_name));
 
   // Currency & Statistical Formatting Helpers for Operational Views
   const fmtMoney = (val: number) => {
@@ -1488,7 +1567,9 @@ export default function App() {
           companies={companies}
           onSelectCompany={(c) => {
             setActiveCompany(c);
-            triggerAlert(`Active Company switched to: ${c.company_name}`, 'success');
+            const bCode = extractCompanyBranch5(c);
+            setActiveBranchCode(bCode);
+            triggerAlert(`Active Company switched to: ${c.company_name} (${bCode === '00000' ? 'Head Office - Main' : `Branch ${parseInt(bCode, 10) || bCode}`})`, 'success');
           }}
           activeBranchCode={activeBranchCode}
           selectedMonthIdx={selectedMonthIdx}
@@ -1523,12 +1604,17 @@ export default function App() {
           onSelectTab={(k) => {
             setIsSettingsCategoryOpen(false);
             setActiveTab(k as any);
+            window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
           }}
           activeCompany={activeCompany}
           companies={companies}
           onSelectCompany={(c) => {
             setActiveCompany(c);
-            triggerAlert(`Active Company switched to: ${c.company_name}`, 'success');
+            const bCode = extractCompanyBranch5(c);
+            setActiveBranchCode(bCode);
+            triggerAlert(`Active Company switched to: ${c.company_name} (${bCode === '00000' ? 'Head Office - Main' : `Branch ${parseInt(bCode, 10) || bCode}`})`, 'success');
           }}
           onExportActiveSheet={handleOpenExportModal}
           onExportAllSheets={handleOpenExportModal}
@@ -1581,6 +1667,22 @@ export default function App() {
               transition={{ duration: 0.12 }}
               className="w-full"
             >
+              {!hasEntityProfile && entityRequiredTabs.includes(activeTab) ? (
+                <div className={`p-8 md:p-12 rounded-2xl border ${activeTheme.borderCard} ${activeTheme.bgCard} text-center space-y-4 max-w-2xl mx-auto my-8 shadow-sm`}>
+                  <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/20">
+                    <AlertCircle className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h3 className={`text-lg font-bold ${activeTheme.textTitle}`}>
+                      Entity Profile Required Before Entering Transactions
+                    </h3>
+                    <p className={`text-xs ${activeTheme.textMuted} mt-1.5 max-w-md mx-auto leading-relaxed`}>
+                      Bago ka makapag-enter ng transactions, kailangan mo munang mag-setup ng entity profile kasi saan mapupunta ang transaction kung wala naman itong designated entity.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <>
               {activeTab === 'dashboard' && (
                 <ExecutiveDashboard 
                   sales={companySales}
@@ -1615,6 +1717,7 @@ export default function App() {
                   records={subsidiarySales}
                   setRecords={handleUpdateSubsidiarySales}
                   activeCompany={activeCompany}
+                  allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
                   theme={activeTheme}
@@ -1631,6 +1734,7 @@ export default function App() {
                   records={cashReceipts}
                   setRecords={handleUpdateCashReceipts}
                   activeCompany={activeCompany}
+                  allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
                   theme={activeTheme}
@@ -1647,6 +1751,7 @@ export default function App() {
                   records={collectionsRecords}
                   setRecords={handleUpdateCollectionsRecords}
                   activeCompany={activeCompany}
+                  allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
                   theme={activeTheme}
@@ -1663,6 +1768,7 @@ export default function App() {
                   records={subsidiaryPurchases}
                   setRecords={handleUpdateSubsidiaryPurchases}
                   activeCompany={activeCompany}
+                  allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
                   theme={activeTheme}
@@ -1680,6 +1786,7 @@ export default function App() {
                   records={cashDisbursements}
                   setRecords={handleUpdateCashDisbursements}
                   activeCompany={activeCompany}
+                  allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
                   theme={activeTheme}
@@ -1697,6 +1804,7 @@ export default function App() {
                   records={paymentsRecords}
                   setRecords={handleUpdatePaymentsRecords}
                   activeCompany={activeCompany}
+                  allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
                   theme={activeTheme}
@@ -1832,6 +1940,8 @@ export default function App() {
                   setCompanies={setCompanies}
                   activeCompany={activeCompany!}
                   setActiveCompany={setActiveCompany}
+                  activeBranchCode={activeBranchCode}
+                  onSelectBranch={(code) => setActiveBranchCode(code)}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
@@ -1942,22 +2052,6 @@ export default function App() {
                 />
               )}
 
-              {(activeTab === 'tax_reports' || activeTab === 'income_tax') && (
-                <TaxReportsTab 
-                  sales={companySales}
-                  expenses={companyExpenses}
-                  ppeAssets={companyPpeAssets}
-                  specialEntries={companySpecialEntries}
-                  incomeTaxRecords={companyIncomeTaxRecords}
-                  setIncomeTaxRecords={setIncomeTaxRecords}
-                  setSpecialEntries={setSpecialEntries}
-                  activeCompany={activeCompany}
-                  accountTitles={accountTitles}
-                  theme={activeTheme}
-                  triggerAlert={triggerAlert}
-                />
-              )}
-
               {activeTab === 'tax_calendar' && (
                 <TaxCalendarTab 
                   activeCompany={activeCompany}
@@ -1973,24 +2067,6 @@ export default function App() {
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
-                />
-              )}
-
-              {activeTab === 'cwt_customers' && (
-                <CWTFromCustomersTab 
-                  sales={companySales}
-                  collections={companyCollections}
-                  activeCompany={activeCompany}
-                  theme={activeTheme}
-                />
-              )}
-
-              {activeTab === 'cwt_providers' && (
-                <CWTForProvidersTab 
-                  expenses={companyExpenses}
-                  payments={companyPayments}
-                  activeCompany={activeCompany}
-                  theme={activeTheme}
                 />
               )}
 
@@ -2069,45 +2145,8 @@ export default function App() {
                 />
               )}
 
-              {(activeTab === 'bir_2316' || activeTab === 'bir_alphalist') && (
-                <BIR2316Tab 
-                  employees={companyEmployees}
-                  payrollRecords={companyPayrollRecords}
-                  activeCompany={activeCompany}
-                  theme={activeTheme}
-                  triggerAlert={triggerAlert}
-                />
-              )}
-
-              {activeTab === 'bir_slsp' && (
-                <SLSPTab 
-                  sales={companySales}
-                  expenses={companyExpenses}
-                  activeCompany={activeCompany}
-                  theme={activeTheme}
-                  triggerAlert={triggerAlert}
-                />
-              )}
-
-              {activeTab === 'bir_qap' && (
-                <QAPTab 
-                  expenses={companyExpenses}
-                  payments={companyPayments}
-                  serviceProviders={contractors as any}
-                  activeCompany={activeCompany}
-                  theme={activeTheme}
-                  triggerAlert={triggerAlert}
-                />
-              )}
-
-              {activeTab === 'bir_sawt' && (
-                <SAWTTab 
-                  sales={companySales}
-                  collections={companyCollections}
-                  activeCompany={activeCompany}
-                  theme={activeTheme}
-                  triggerAlert={triggerAlert}
-                />
+              {['bir_2316', 'cwt_providers', 'tax_reports', 'income_tax', 'bir_slsp', 'bir_sawt', 'bir_qap', 'bir_alphalist', 'cwt_customers'].includes(activeTab) && (
+                <div className={`min-h-[60vh] w-full rounded-2xl border ${activeTheme.borderCard} ${activeTheme.bgCard} p-6 shadow-xs`} />
               )}
 
               {(activeTab === 'reports' || activeTab === 'reports_turnovers' || activeTab === 'reports_horizontal' || activeTab === 'reports_vertical' || activeTab === 'reports_ratios') && (
@@ -2160,6 +2199,8 @@ export default function App() {
                   theme={activeTheme}
                 />
               )}
+                </>
+              )}
 
             </motion.div>
           </AnimatePresence>
@@ -2175,6 +2216,8 @@ export default function App() {
         setZoomLevel={setZoomLevel}
         recordCount={getActiveTabRecordCount()}
         activeCompany={activeCompany}
+        companies={companies}
+        onSelectCompany={(c) => setActiveCompany(c)}
         activeBranchCode={activeBranchCode}
         onSelectBranch={(code) => setActiveBranchCode(code)}
         triggerAlert={triggerAlert}
