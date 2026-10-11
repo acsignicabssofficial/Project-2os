@@ -520,6 +520,340 @@ export default function App() {
       return next;
     });
   };
+
+  // Normalize invoice / voucher numbers for reliable cross-book matching
+  const normalizeDocNo = (num?: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+  // =========================================================================
+  // CASCADING DELETE & REVERSAL ENGINE across Books of Accounts, Journal & Ledger
+  // =========================================================================
+  const handleCascadingDeleteFromBook = (bookType: string, record: UniformBookRecord) => {
+    const recComp = record.company_name || activeCompany?.company_name || '';
+    const invNorm = normalizeDocNo(record.invoice_number);
+    const vchNorm = normalizeDocNo(record.voucher_number || record.invoice_number);
+
+    if (bookType === 'subsidiary_sales') {
+      // 1. Delete from Subsidiary Sales -> also cascade delete all linked Cash Receipts, Collections Book, and Special Entries
+      handleUpdateSubsidiarySales(prev => prev.filter(s => s.id !== record.id));
+      if (invNorm) {
+        handleUpdateCashReceipts(prev => prev.filter(cr => !(cr.company_name === recComp && normalizeDocNo(cr.invoice_number) === invNorm)));
+        handleUpdateCollectionsRecords(prev => prev.filter(col => !(col.company_name === recComp && normalizeDocNo(col.invoice_number) === invNorm)));
+        setSpecialEntries(prev => prev.filter(se => {
+          if (se.company_name && se.company_name !== recComp) return true;
+          const desc = (se.description || '').toLowerCase();
+          return !desc.includes(record.invoice_number.toLowerCase());
+        }));
+      }
+      triggerAlert(`Deleted Sales Invoice #${record.invoice_number}. All related Cash Receipts, Collections Book, Journal, and Ledger postings have been removed.`, 'info');
+      return;
+    }
+
+    if (bookType === 'collections' || bookType === 'collections_book') {
+      // 2. Delete a Collection from Collections Book -> Remove this collection, remove from Cash Receipts, and recalculate Subsidiary Sales status (Paid -> Partial or On Account)
+      const remainingCollsAll = collectionsRecords.filter(c => c.id !== record.id);
+      handleUpdateCollectionsRecords(() => remainingCollsAll);
+
+      if (invNorm) {
+        // Remove corresponding Cash Receipt for this invoice or voucher
+        handleUpdateCashReceipts(prev => prev.filter(cr => !(cr.company_name === recComp && normalizeDocNo(cr.invoice_number) === invNorm)));
+
+        // Evaluate remaining active collections for this same invoice
+        const remainingForInvoice = remainingCollsAll.filter(c =>
+          !c.is_cancelled &&
+          c.company_name === recComp &&
+          normalizeDocNo(c.invoice_number) === invNorm &&
+          (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0
+        );
+
+        const totalRemainingCollected = remainingForInvoice.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+
+        // Update Subsidiary Sales status and type_of_transaction
+        handleUpdateSubsidiarySales(prev => prev.map(s => {
+          if (s.company_name === recComp && normalizeDocNo(s.invoice_number) === invNorm) {
+            const totalDue = Number(s.total_amount_due || s.amount) || 0;
+            const wtax = Number(s.tax_withheld || s.withholding_2307) || 0;
+            const netTarget = Math.max(0, Math.round((totalDue - wtax) * 100) / 100);
+            const isStillPaid = totalRemainingCollected >= netTarget - 0.05 && netTarget > 0;
+            const nextStatus: 'Paid' | 'Partial' | 'On Account' = isStillPaid
+              ? 'Paid'
+              : totalRemainingCollected > 0
+              ? 'Partial'
+              : 'On Account';
+            const nextPending = Math.max(0, Math.round((netTarget - totalRemainingCollected) * 100) / 100);
+
+            return {
+              ...s,
+              status: nextStatus,
+              sales_status: nextStatus,
+              type_of_transaction: isStillPaid ? s.type_of_transaction : 'ON ACCOUNT',
+              amount_collected: totalRemainingCollected,
+              down_payment: totalRemainingCollected > 0 ? totalRemainingCollected : 0,
+              pending_balance: nextPending
+            };
+          }
+          return s;
+        }));
+
+        // Also update remaining sibling collections' status and running pending balance
+        if (remainingForInvoice.length === 0) {
+          // Find the parent sale to create an "On Account" tracking row in Collections Book so it remains visible for collection
+          const parentSale = subsidiarySales.find(s => s.company_name === recComp && normalizeDocNo(s.invoice_number) === invNorm);
+          if (parentSale) {
+            const totalDue = Number(parentSale.total_amount_due || parentSale.amount) || 0;
+            const onAccountPlaceholder: UniformBookRecord = {
+              ...parentSale,
+              id: Date.now(),
+              type_of_transaction: 'ON ACCOUNT',
+              particulars: `Receivable Tracking for Invoice #${parentSale.invoice_number} (Reverted to On Account)`,
+              amount_collected: 0,
+              pending_balance: totalDue,
+              status: 'On Account'
+            };
+            handleUpdateCollectionsRecords(prev => [onAccountPlaceholder, ...prev.filter(c => !(c.company_name === recComp && normalizeDocNo(c.invoice_number) === invNorm))]);
+          }
+          triggerAlert(`Deleted Collection for Invoice #${record.invoice_number}. Sale in Subsidiary Sales is now reverted to ON ACCOUNT.`, 'info');
+        } else {
+          handleUpdateCollectionsRecords(prev => prev.map(c => {
+            if (c.company_name === recComp && normalizeDocNo(c.invoice_number) === invNorm) {
+              return { ...c, status: 'Partial' };
+            }
+            return c;
+          }));
+          triggerAlert(`Deleted Collection for Invoice #${record.invoice_number}. Sale in Subsidiary Sales is now PARTIALLY PAID (Collected: ₱${totalRemainingCollected.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`, 'info');
+        }
+      } else {
+        triggerAlert('Collection record deleted.', 'info');
+      }
+      return;
+    }
+
+    if (bookType === 'cash_receipt' || bookType === 'cash_receipts') {
+      // 3. Delete from Cash Receipts -> Remove from Cash Receipts, remove matching collection(s), and revert Subsidiary Sales from Paid to On Account / Partial
+      handleUpdateCashReceipts(prev => prev.filter(cr => cr.id !== record.id));
+
+      if (invNorm) {
+        // If this Cash Receipt came from a specific voucher_number collection or full cash sale
+        const vchMatch = normalizeDocNo(record.voucher_number);
+        const remainingCollsAll = collectionsRecords.filter(c => {
+          if (c.company_name !== recComp || normalizeDocNo(c.invoice_number) !== invNorm) return true;
+          if (vchMatch && normalizeDocNo(c.voucher_number) === vchMatch) return false;
+          // If it was a direct ON CASH sale, remove its full collection record
+          if (!record.settled_via_collections) return false;
+          return true;
+        });
+
+        const activeRemainingForInv = remainingCollsAll.filter(c =>
+          !c.is_cancelled &&
+          c.company_name === recComp &&
+          normalizeDocNo(c.invoice_number) === invNorm &&
+          (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0
+        );
+        const totalRemainingCollected = activeRemainingForInv.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+
+        handleUpdateSubsidiarySales(prev => prev.map(s => {
+          if (s.company_name === recComp && normalizeDocNo(s.invoice_number) === invNorm) {
+            const totalDue = Number(s.total_amount_due || s.amount) || 0;
+            const wtax = Number(s.tax_withheld || s.withholding_2307) || 0;
+            const netTarget = Math.max(0, Math.round((totalDue - wtax) * 100) / 100);
+            const nextStatus: 'Paid' | 'Partial' | 'On Account' = totalRemainingCollected > 0 ? 'Partial' : 'On Account';
+            const nextPending = Math.max(0, Math.round((netTarget - totalRemainingCollected) * 100) / 100);
+            return {
+              ...s,
+              status: nextStatus,
+              sales_status: nextStatus,
+              type_of_transaction: 'ON ACCOUNT',
+              amount_collected: totalRemainingCollected,
+              down_payment: totalRemainingCollected,
+              pending_balance: nextPending
+            };
+          }
+          return s;
+        }));
+
+        if (activeRemainingForInv.length === 0) {
+          const parentSale = subsidiarySales.find(s => s.company_name === recComp && normalizeDocNo(s.invoice_number) === invNorm);
+          if (parentSale) {
+            const totalDue = Number(parentSale.total_amount_due || parentSale.amount) || 0;
+            const onAccountPlaceholder: UniformBookRecord = {
+              ...parentSale,
+              id: Date.now(),
+              type_of_transaction: 'ON ACCOUNT',
+              particulars: `Receivable Tracking for Invoice #${parentSale.invoice_number} (Reverted from Cash Receipt deletion)`,
+              amount_collected: 0,
+              pending_balance: totalDue,
+              status: 'On Account'
+            };
+            handleUpdateCollectionsRecords(() => [onAccountPlaceholder, ...remainingCollsAll.filter(c => !(c.company_name === recComp && normalizeDocNo(c.invoice_number) === invNorm))]);
+          } else {
+            handleUpdateCollectionsRecords(() => remainingCollsAll);
+          }
+          triggerAlert(`Deleted Cash Receipt for Invoice #${record.invoice_number}. Subsidiary Sales transaction reverted from Paid to ON ACCOUNT.`, 'info');
+        } else {
+          handleUpdateCollectionsRecords(() => remainingCollsAll.map(c => {
+            if (c.company_name === recComp && normalizeDocNo(c.invoice_number) === invNorm) {
+              return { ...c, status: 'Partial' };
+            }
+            return c;
+          }));
+          triggerAlert(`Deleted Cash Receipt for Invoice #${record.invoice_number}. Subsidiary Sales transaction reverted to PARTIALLY PAID.`, 'info');
+        }
+      }
+      return;
+    }
+
+    if (bookType === 'subsidiary_purchases') {
+      // 4. Delete from Subsidiary Purchases -> cascade delete all linked Cash Disbursements, Payments Book, and Special Entries
+      handleUpdateSubsidiaryPurchases(prev => prev.filter(p => p.id !== record.id));
+      if (vchNorm || invNorm) {
+        const matchTarget = (r: UniformBookRecord) => {
+          if (r.company_name !== recComp) return false;
+          const rInv = normalizeDocNo(r.invoice_number);
+          const rVch = normalizeDocNo(r.voucher_number);
+          return (invNorm && (rInv === invNorm || rVch === invNorm)) || (vchNorm && (rVch === vchNorm || rInv === vchNorm));
+        };
+        handleUpdateCashDisbursements(prev => prev.filter(cd => !matchTarget(cd)));
+        handleUpdatePaymentsRecords(prev => prev.filter(pay => !matchTarget(pay)));
+      }
+      triggerAlert(`Deleted Purchase Voucher #${record.voucher_number || record.invoice_number}. All related Cash Disbursements, Payments Book, Journal, and Ledger postings have been removed.`, 'info');
+      return;
+    }
+
+    if (bookType === 'payments' || bookType === 'payments_book') {
+      // 5. Delete from Payments Book -> Remove payment, remove Cash Disbursement, and revert Subsidiary Purchases to On Account or Partial
+      const remainingPaysAll = paymentsRecords.filter(p => p.id !== record.id);
+      handleUpdatePaymentsRecords(() => remainingPaysAll);
+
+      const matchPurchase = (r: UniformBookRecord) => {
+        if (r.company_name !== recComp) return false;
+        const rInv = normalizeDocNo(r.invoice_number);
+        const rVch = normalizeDocNo(r.voucher_number);
+        return (invNorm && (rInv === invNorm || rVch === invNorm)) || (vchNorm && (rVch === vchNorm || rInv === vchNorm));
+      };
+
+      handleUpdateCashDisbursements(prev => prev.filter(cd => !matchPurchase(cd)));
+
+      const remainingForVoucher = remainingPaysAll.filter(p =>
+        !p.is_cancelled &&
+        matchPurchase(p) &&
+        (p.amount_paid !== undefined ? Number(p.amount_paid) : 0) > 0
+      );
+      const totalRemainingPaid = remainingForVoucher.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+
+      handleUpdateSubsidiaryPurchases(prev => prev.map(pur => {
+        if (matchPurchase(pur)) {
+          const totalDue = Number(pur.total_amount_due || pur.amount) || 0;
+          const wtax = Number(pur.tax_withheld || pur.withholding_2307_2306) || 0;
+          const netTarget = Math.max(0, Math.round((totalDue - wtax) * 100) / 100);
+          const isStillPaid = totalRemainingPaid >= netTarget - 0.05 && netTarget > 0;
+          const nextStatus: 'Paid' | 'Partial' | 'On Account' = isStillPaid
+            ? 'Paid'
+            : totalRemainingPaid > 0
+            ? 'Partial'
+            : 'On Account';
+          const nextPending = Math.max(0, Math.round((netTarget - totalRemainingPaid) * 100) / 100);
+          return {
+            ...pur,
+            status: nextStatus,
+            expense_status: nextStatus,
+            type_of_transaction: isStillPaid ? pur.type_of_transaction : 'ON ACCOUNT',
+            amount_paid: totalRemainingPaid,
+            pending_balance: nextPending
+          };
+        }
+        return pur;
+      }));
+
+      if (remainingForVoucher.length === 0) {
+        const parentPurchase = subsidiaryPurchases.find(pur => matchPurchase(pur));
+        if (parentPurchase) {
+          const totalDue = Number(parentPurchase.total_amount_due || parentPurchase.amount) || 0;
+          const onAccountPlaceholder: UniformBookRecord = {
+            ...parentPurchase,
+            id: Date.now(),
+            type_of_transaction: 'ON ACCOUNT',
+            particulars: `Payable Tracking for Voucher #${parentPurchase.voucher_number || parentPurchase.invoice_number} (Reverted to On Account)`,
+            amount_paid: 0,
+            pending_balance: totalDue,
+            status: 'On Account'
+          };
+          handleUpdatePaymentsRecords(prev => [onAccountPlaceholder, ...prev.filter(p => !matchPurchase(p))]);
+        }
+        triggerAlert(`Deleted Payment for Voucher #${record.voucher_number || record.invoice_number}. Purchase in Subsidiary Purchases is now reverted to ON ACCOUNT.`, 'info');
+      } else {
+        handleUpdatePaymentsRecords(prev => prev.map(p => matchPurchase(p) ? { ...p, status: 'Partial' } : p));
+        triggerAlert(`Deleted Payment for Voucher #${record.voucher_number || record.invoice_number}. Purchase in Subsidiary Purchases is now PARTIALLY PAID.`, 'info');
+      }
+      return;
+    }
+
+    if (bookType === 'cash_disbursement' || bookType === 'cash_disbursements') {
+      // 6. Delete from Cash Disbursements -> Remove from Cash Disbursements, remove matching payment, and revert Subsidiary Purchases to On Account / Partial
+      handleUpdateCashDisbursements(prev => prev.filter(cd => cd.id !== record.id));
+
+      const matchPurchase = (r: UniformBookRecord) => {
+        if (r.company_name !== recComp) return false;
+        const rInv = normalizeDocNo(r.invoice_number);
+        const rVch = normalizeDocNo(r.voucher_number);
+        return (invNorm && (rInv === invNorm || rVch === invNorm)) || (vchNorm && (rVch === vchNorm || rInv === vchNorm));
+      };
+
+      const remainingPaysAll = paymentsRecords.filter(p => {
+        if (!matchPurchase(p)) return true;
+        if (!record.settled_via_collections) return false;
+        return true;
+      });
+
+      const activeRemainingForVoucher = remainingPaysAll.filter(p =>
+        !p.is_cancelled &&
+        matchPurchase(p) &&
+        (p.amount_paid !== undefined ? Number(p.amount_paid) : 0) > 0
+      );
+      const totalRemainingPaid = activeRemainingForVoucher.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+
+      handleUpdateSubsidiaryPurchases(prev => prev.map(pur => {
+        if (matchPurchase(pur)) {
+          const totalDue = Number(pur.total_amount_due || pur.amount) || 0;
+          const wtax = Number(pur.tax_withheld || pur.withholding_2307_2306) || 0;
+          const netTarget = Math.max(0, Math.round((totalDue - wtax) * 100) / 100);
+          const nextStatus: 'Paid' | 'Partial' | 'On Account' = totalRemainingPaid > 0 ? 'Partial' : 'On Account';
+          const nextPending = Math.max(0, Math.round((netTarget - totalRemainingPaid) * 100) / 100);
+          return {
+            ...pur,
+            status: nextStatus,
+            expense_status: nextStatus,
+            type_of_transaction: 'ON ACCOUNT',
+            amount_paid: totalRemainingPaid,
+            pending_balance: nextPending
+          };
+        }
+        return pur;
+      }));
+
+      if (activeRemainingForVoucher.length === 0) {
+        const parentPurchase = subsidiaryPurchases.find(pur => matchPurchase(pur));
+        if (parentPurchase) {
+          const totalDue = Number(parentPurchase.total_amount_due || parentPurchase.amount) || 0;
+          const onAccountPlaceholder: UniformBookRecord = {
+            ...parentPurchase,
+            id: Date.now(),
+            type_of_transaction: 'ON ACCOUNT',
+            particulars: `Payable Tracking for Voucher #${parentPurchase.voucher_number || parentPurchase.invoice_number} (Reverted from Cash Disbursement deletion)`,
+            amount_paid: 0,
+            pending_balance: totalDue,
+            status: 'On Account'
+          };
+          handleUpdatePaymentsRecords(() => [onAccountPlaceholder, ...remainingPaysAll.filter(p => !matchPurchase(p))]);
+        } else {
+          handleUpdatePaymentsRecords(() => remainingPaysAll);
+        }
+        triggerAlert(`Deleted Cash Disbursement for Voucher #${record.voucher_number || record.invoice_number}. Subsidiary Purchases transaction reverted from Paid to ON ACCOUNT.`, 'info');
+      } else {
+        handleUpdatePaymentsRecords(() => remainingPaysAll.map(p => matchPurchase(p) ? { ...p, status: 'Partial' } : p));
+        triggerAlert(`Deleted Cash Disbursement for Voucher #${record.voucher_number || record.invoice_number}. Subsidiary Purchases transaction reverted to PARTIALLY PAID.`, 'info');
+      }
+      return;
+    }
+  };
   const [accountTitles, setAccountTitles] = useState<AccountTitle[]>(INITIAL_ACCOUNT_TITLES);
   const [ppeAssets, setPpeAssets] = useState<PPEAsset[]>(INITIAL_PPE);
   const [specialEntries, setSpecialEntries] = useState<SpecialEntry[]>(INITIAL_SPECIAL_ENTRIES);
@@ -538,6 +872,8 @@ export default function App() {
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [showNewEntryPromptModal, setShowNewEntryPromptModal] = useState(false);
+  const [isSettingsCategoryOpen, setIsSettingsCategoryOpen] = useState(false);
   const [importDefaultType, setImportDefaultType] = useState<ImportableDataType>('sales');
 
   // Load backend data (with localStorage fallback for static hosting like GitHub Pages)
@@ -1164,11 +1500,17 @@ export default function App() {
           onSave={handleManualSave}
           onExportAll={handleOpenExportModal}
           onExportActiveSheet={handleOpenExportModal}
+          onOpenImportModal={() => handleOpenImportModal()}
+          onOpenExportModal={handleOpenExportModal}
+          onOpenNewEntryModal={() => {
+            setActiveTab('companies');
+          }}
           onOpenInfinityFreeModal={() => setIsInfinityFreeModalOpen(true)}
           onOpenAuditTrail={() => setIsAuditModalOpen(true)}
           onOpenSettings={() => {
-            setActiveTab('system_specs');
+            setIsSettingsCategoryOpen(prev => !prev);
           }}
+          isSettingsOpen={isSettingsCategoryOpen}
           activeTab={activeTab}
           triggerAlert={triggerAlert}
           theme={activeTheme}
@@ -1178,7 +1520,10 @@ export default function App() {
 
         <TwoOSRibbon 
           activeTab={activeTab}
-          onSelectTab={(k) => setActiveTab(k as any)}
+          onSelectTab={(k) => {
+            setIsSettingsCategoryOpen(false);
+            setActiveTab(k as any);
+          }}
           activeCompany={activeCompany}
           companies={companies}
           onSelectCompany={(c) => {
@@ -1189,6 +1534,10 @@ export default function App() {
           onExportAllSheets={handleOpenExportModal}
           onOpenImportModal={handleOpenImportModal}
           onOpenExportModal={handleOpenExportModal}
+          showPromptModal={showNewEntryPromptModal}
+          setShowPromptModal={setShowNewEntryPromptModal}
+          isSettingsCategoryOpen={isSettingsCategoryOpen}
+          setIsSettingsCategoryOpen={setIsSettingsCategoryOpen}
           activeBranchCode={activeBranchCode}
           selectedMonthIdx={selectedMonthIdx}
           selectedYear={selectedYear}
@@ -1272,6 +1621,7 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setSales(list as any)}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
@@ -1287,6 +1637,7 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setCollections(list as any)}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
@@ -1302,6 +1653,7 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setCollections(list as any)}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
@@ -1318,6 +1670,7 @@ export default function App() {
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setExpenses(list as any)}
                   accountTitles={accountTitles}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
@@ -1334,6 +1687,7 @@ export default function App() {
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setPayments(list as any)}
                   accountTitles={accountTitles}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
@@ -1350,6 +1704,7 @@ export default function App() {
                   globalSearch={globalSearch}
                   onSyncLegacy={(list) => setPayments(list as any)}
                   accountTitles={accountTitles}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
@@ -1370,6 +1725,7 @@ export default function App() {
                   onNavigateToTab={(tab) => setActiveTab(tab as any)}
                   specialEntries={specialEntries}
                   setSpecialEntries={setSpecialEntries}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
@@ -1382,18 +1738,55 @@ export default function App() {
                   payments={paymentsRecords}
                   setPayments={handleUpdatePaymentsRecords}
                   contractors={contractors}
+                  setContractors={setContractors}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
                   onNavigateToTab={(tab) => setActiveTab(tab as any)}
                   accountTitles={accountTitles}
+                  setAccountTitles={setAccountTitles}
                   specialEntries={specialEntries}
                   setSpecialEntries={setSpecialEntries}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
               {activeTab === 'general_journal' && (
+                <div className="space-y-8">
+                  <GeneralJournalTab 
+                    sales={companySales}
+                    collections={companyCollections}
+                    cashReceipts={companyCashReceipts}
+                    expenses={companyExpenses}
+                    payments={companyPayments}
+                    cashDisbursements={companyCashDisbursements}
+                    ppeAssets={companyPpeAssets}
+                    payrollRecords={companyPayrollRecords}
+                    specialEntries={companySpecialEntries}
+                    accountTitles={accountTitles}
+                    activeCompany={activeCompany}
+                    theme={activeTheme}
+                    triggerAlert={triggerAlert}
+                    globalSearch={globalSearch}
+                    mode="GENERAL"
+                  />
+                  <SpecialEntriesTab 
+                    specialEntries={specialEntries}
+                    setSpecialEntries={setSpecialEntries}
+                    accountTitles={accountTitles}
+                    sales={companySales}
+                    expenses={companyExpenses}
+                    ppeAssets={companyPpeAssets}
+                    activeCompany={activeCompany}
+                    theme={activeTheme}
+                    triggerAlert={triggerAlert}
+                    globalSearch={globalSearch}
+                  />
+                </div>
+              )}
+
+              {activeTab === 'special_entries' && (
                 <GeneralJournalTab 
                   sales={companySales}
                   collections={companyCollections}
@@ -1409,6 +1802,7 @@ export default function App() {
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
+                  mode="SPECIAL"
                 />
               )}
 
@@ -1428,6 +1822,7 @@ export default function App() {
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
+                  mode={activeTab === 'special_ledger' ? 'SPECIAL' : 'GENERAL'}
                 />
               )}
 
@@ -1452,14 +1847,16 @@ export default function App() {
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
-                  sales={sales}
-                  collections={collections}
-                  setSales={setSales}
-                  setCollections={setCollections}
-                  expenses={expenses}
-                  payments={payments}
-                  setExpenses={setExpenses}
-                  setPayments={setPayments}
+                  sales={subsidiarySales as any}
+                  collections={collectionsRecords as any}
+                  setSales={handleUpdateSubsidiarySales as any}
+                  setCollections={handleUpdateCollectionsRecords as any}
+                  setCashReceipts={handleUpdateCashReceipts as any}
+                  expenses={subsidiaryPurchases as any}
+                  payments={paymentsRecords as any}
+                  setExpenses={handleUpdateSubsidiaryPurchases as any}
+                  setPayments={handleUpdatePaymentsRecords as any}
+                  setCashDisbursements={handleUpdateCashDisbursements as any}
                   accountTitles={accountTitles}
                   globalSearch={globalSearch}
                   initialSubTab={activeTab === 'providers' ? 'providers' : 'customers'}
@@ -1467,6 +1864,7 @@ export default function App() {
                   setSubsidiarySales={handleUpdateSubsidiarySales}
                   collectionsRecords={collectionsRecords}
                   setCollectionsRecords={handleUpdateCollectionsRecords}
+                  onDeleteRecord={handleCascadingDeleteFromBook}
                 />
               )}
 
@@ -1523,21 +1921,6 @@ export default function App() {
                   expenses={companyExpenses}
                   payments={companyPayments}
                   specialEntries={companySpecialEntries}
-                  activeCompany={activeCompany}
-                  theme={activeTheme}
-                  triggerAlert={triggerAlert}
-                  globalSearch={globalSearch}
-                />
-              )}
-
-              {activeTab === 'special_entries' && (
-                <SpecialEntriesTab 
-                  specialEntries={specialEntries}
-                  setSpecialEntries={setSpecialEntries}
-                  accountTitles={accountTitles}
-                  sales={companySales}
-                  expenses={companyExpenses}
-                  ppeAssets={companyPpeAssets}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
@@ -1621,12 +2004,15 @@ export default function App() {
                   cashDisbursements={companyCashDisbursements}
                   ppeAssets={companyPpeAssets}
                   specialEntries={companySpecialEntries}
+                  setSpecialEntries={setSpecialEntries}
                   payrollRecords={companyPayrollRecords}
                   incomeTaxRecords={companyIncomeTaxRecords}
                   accountTitles={accountTitles}
+                  setAccountTitles={setAccountTitles}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   mode={activeTab === 'fs_balance_sheet' ? 'balance_sheet' : 'financial_position'}
+                  triggerAlert={triggerAlert}
                 />
               )}
 

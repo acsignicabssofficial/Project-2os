@@ -18,6 +18,7 @@ interface GeneralLedgerTabProps {
   theme: any;
   triggerAlert?: any;
   globalSearch?: string;
+  mode?: 'GENERAL' | 'SPECIAL';
 }
 
 
@@ -33,10 +34,10 @@ export default function GeneralLedgerTab({
   ppeAssets = [],
   payrollRecords = [],
   activeCompany,
-  theme
+  theme,
+  mode = 'GENERAL'
 }: GeneralLedgerTabProps) {
   const [selectedAccount, setSelectedAccount] = useState<string>('ALL');
-  const [ledgerCategory, setLedgerCategory] = useState<'ALL' | 'GENERAL' | 'SPECIAL'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Requirement 5: Collapsible Account Titles in Ledger
@@ -133,8 +134,8 @@ export default function GeneralLedgerTab({
         };
       }
 
-      // Check ledgerCategory filter
-      if (ledgerCategory !== 'ALL' && bookType !== ledgerCategory) {
+      // Strictly post General Journal entries ONLY to General Ledger, and Special Journal entries ONLY to Special Ledger
+      if (bookType !== mode) {
         return;
       }
 
@@ -167,8 +168,10 @@ export default function GeneralLedgerTab({
     });
 
     masterEntries.forEach(entry => {
-      const isSpecialType = ['Sales', 'Collection', 'Expense', 'Payment'].includes(entry.ref_type);
-      const bookType: 'GENERAL' | 'SPECIAL' = isSpecialType ? 'SPECIAL' : 'GENERAL';
+      // Special Journal & Special Ledger = All transactions related to Sales & Purchases (Sales, Collections, Cash Receipts, Purchases/Expenses, Cash Disbursements, Payments)
+      // General Journal & General Ledger = Other transactions (Adjusting, Closing, Reversing, Payroll, PPE Acquisition, Depreciation, Tax Payment, etc.)
+      const isSalesOrPurchasesType = ['Sales', 'Collection', 'Expense', 'Payment'].includes(entry.ref_type);
+      const bookType: 'GENERAL' | 'SPECIAL' = isSalesOrPurchasesType ? 'SPECIAL' : 'GENERAL';
 
       entry.debits.forEach(d => {
         addPosting(d.account_code, d.account_title, entry.date, entry.ref_no || entry.entry_no, entry.description, Number(d.amount) || 0, 0, bookType);
@@ -185,7 +188,7 @@ export default function GeneralLedgerTab({
 
       let run = 0;
       item.postings.forEach(p => {
-        if (item.type === 'Asset' || item.type === 'Expense') {
+        if (item.type === 'Asset' || item.type === 'Expense' || item.type === 'Cost of Sales') {
           run += (p.debit - p.credit);
         } else {
           run += (p.credit - p.debit);
@@ -197,23 +200,30 @@ export default function GeneralLedgerTab({
     });
 
     return map;
-  }, [sales, collections, cashReceipts, expenses, payments, cashDisbursements, specialEntries, ppeAssets, payrollRecords, coaList, activeCompany, ledgerCategory]);
+  }, [sales, collections, cashReceipts, expenses, payments, cashDisbursements, specialEntries, ppeAssets, payrollRecords, coaList, activeCompany, mode]);
 
-  // Accounts list for select dropdown & table view
+  // Accounts that actually have posted transactions in this ledger
+  const activeAccountsWithTransactions = useMemo(() => {
+    return Object.keys(ledgerMap)
+      .filter(k => ledgerMap[k].postings.length > 0)
+      .map(k => ledgerMap[k]);
+  }, [ledgerMap]);
+
+  // Accounts list for select dropdown & table view (only show accounts with transactions)
   const displayAccounts = useMemo(() => {
-    let keys = Object.keys(ledgerMap);
+    let list = activeAccountsWithTransactions;
     if (selectedAccount !== 'ALL') {
-      keys = keys.filter(k => k === selectedAccount);
+      list = list.filter(a => a.code === selectedAccount);
     }
     const q = searchTerm.toLowerCase().trim();
     if (q) {
-      keys = keys.filter(k =>
-        k.toLowerCase().includes(q) ||
-        ledgerMap[k].title.toLowerCase().includes(q)
+      list = list.filter(a =>
+        a.code.toLowerCase().includes(q) ||
+        a.title.toLowerCase().includes(q)
       );
     }
-    return keys.map(k => ledgerMap[k]);
-  }, [ledgerMap, selectedAccount, searchTerm]);
+    return list;
+  }, [activeAccountsWithTransactions, selectedAccount, searchTerm]);
 
   return (
     <div className="space-y-6">
@@ -223,14 +233,18 @@ export default function GeneralLedgerTab({
           <div>
             <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
               <Book className="w-6 h-6 text-cyan-400" />
-              General Ledger (T-Accounts & Running Balances)
+              {mode === 'GENERAL'
+                ? 'General Ledger (Other Transactions, Adjusting Entries, Payroll, PPE — Posted from General Journal)'
+                : 'Special Ledger (All Sales & Purchases Transactions — Posted from Special Journal)'}
             </h2>
             <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Complete master record of all financial accounts (Assets, Liabilities, Equity, Revenue, and Expenses) showing cumulative debit and credit postings and real-time ending balances.
+              {mode === 'GENERAL'
+                ? 'General Ledger: T-Accounts and running balances posted exclusively from the General Journal (Adjusting Entries, Payroll, PPE Acquisition & Depreciation, Closing, Reversing, and Other Transactions).'
+                : 'Special Ledger: T-Accounts and running balances posted exclusively from the Special Journal (Subsidiary Sales, Cash Receipts, Collections, Subsidiary Purchases, Cash Disbursements, and Payments).'}
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="relative w-48 sm:w-64">
               <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-zinc-400" />
               <input
@@ -249,68 +263,33 @@ export default function GeneralLedgerTab({
                 onChange={(e) => setSelectedAccount(e.target.value)}
                 className={`text-xs px-3 py-1.5 rounded-lg border bg-transparent font-semibold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="ALL" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>All Account Cards ({coaList.length})</option>
-                {coaList.map(a => (
+                <option value="ALL" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>All Accounts with Transactions ({activeAccountsWithTransactions.length})</option>
+                {activeAccountsWithTransactions.map(a => (
                   <option key={a.code} value={a.code} className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
-                    [{a.code}] {a.title}
+                    [{a.code}] {a.title} ({a.postings.length})
                   </option>
                 ))}
               </select>
             </div>
-          </div>
-        </div>
 
-        {/* LEDGER CATEGORY TOGGLE TABS & EXPAND TOGGLE */}
-        <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setLedgerCategory('ALL')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-                ledgerCategory === 'ALL'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-              }`}
+              onClick={toggleExpandAllAccounts}
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition cursor-pointer"
             >
-              📖 All Account Ledgers
-            </button>
-            <button
-              type="button"
-              onClick={() => setLedgerCategory('GENERAL')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-                ledgerCategory === 'GENERAL'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-              }`}
-            >
-              📒 General Ledger (GJ)
-            </button>
-            <button
-              type="button"
-              onClick={() => setLedgerCategory('SPECIAL')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-                ledgerCategory === 'SPECIAL'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-              }`}
-            >
-              📗 Special Ledger (SL)
+              {displayAccounts.every(a => expandedAccounts[a.code]) ? '▲ Collapse All Accounts' : '▼ Expand All Accounts'}
             </button>
           </div>
-
-          <button
-            type="button"
-            onClick={toggleExpandAllAccounts}
-            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition cursor-pointer"
-          >
-            {displayAccounts.every(a => expandedAccounts[a.code]) ? '▲ Collapse All Accounts' : '▼ Expand All Accounts'}
-          </button>
         </div>
       </div>
 
       {/* T-ACCOUNT CARDS (Requirement 5: Shows list of account titles with sum Dr/Cr/Running Balance, collapsible on click) */}
       <div className="space-y-4">
-        {displayAccounts.map((acc) => {
+        {displayAccounts.length === 0 ? (
+          <div className={`p-8 border ${theme.borderCard} ${theme.bgCard} rounded-2xl text-center text-xs ${theme.textMuted}`}>
+            No accounts with posted transactions found for this ledger.
+          </div>
+        ) : displayAccounts.map((acc) => {
           const isExpanded = !!expandedAccounts[acc.code];
 
           return (

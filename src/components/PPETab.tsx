@@ -27,6 +27,10 @@ export default function PPETab({
   const [acqCost, setAcqCost] = useState('');
   const [lifeYears, setLifeYears] = useState('5');
   const [salvageVal, setSalvageVal] = useState('0');
+  const [measurementModel, setMeasurementModel] = useState<'Cost' | 'Revaluation'>('Cost');
+  const [revaluationSurplus, setRevaluationSurplus] = useState('0');
+  const [impairmentLoss, setImpairmentLoss] = useState('0');
+  const [isHeldForSale, setIsHeldForSale] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -37,6 +41,10 @@ export default function PPETab({
     setAssetName('');
     setAcqCost('');
     setSalvageVal('0');
+    setMeasurementModel('Cost');
+    setRevaluationSurplus('0');
+    setImpairmentLoss('0');
+    setIsHeldForSale(false);
     setIsModalOpen(false);
   };
 
@@ -58,8 +66,32 @@ export default function PPETab({
     const cost = parseFloat(acqCost) || 0;
     const life = parseFloat(lifeYears) || 5;
     const salvage = parseFloat(salvageVal) || 0;
-    const annualDep = Math.max(0, (cost - salvage) / life);
-    const monthlyDep = annualDep / 12;
+    const revSurplus = measurementModel === 'Revaluation' ? Math.max(0, parseFloat(revaluationSurplus) || 0) : 0;
+    const impLoss = Math.max(0, parseFloat(impairmentLoss) || 0);
+
+    // PAS 16.51 Guardrail: Salvage (residual) value cannot exceed acquisition cost
+    if (salvage >= cost && cost > 0) {
+      triggerAlert('PAS 16.54 Guardrail: Residual (Salvage) Value equals or exceeds Acquisition Cost. Depreciable amount is ₱0.00.', 'info');
+    }
+
+    const depreciableBase = Math.max(0, cost + revSurplus - salvage);
+    const annualDep = isHeldForSale ? 0 : Math.round((depreciableBase / life) * 100) / 100;
+    const monthlyDep = Math.round((annualDep / 12) * 100) / 100;
+
+    // PAS 16.55 Pro-Rata Time-Apportioned Accumulated Depreciation from acquisition_date to current reporting date
+    const acqD = new Date(acqDate || new Date().toISOString().split('T')[0]);
+    const nowD = new Date();
+    const monthsElapsed = Math.max(
+      1,
+      (nowD.getFullYear() - acqD.getFullYear()) * 12 + (nowD.getMonth() - acqD.getMonth()) + 1
+    );
+    const maxMonths = Math.round(life * 12);
+    const effectiveMonths = Math.min(monthsElapsed, maxMonths);
+    // PFRS 5.25: Cease depreciation while classified as Held for Sale
+    const computedAccumDep = isHeldForSale
+      ? 0
+      : Math.min(depreciableBase, Math.round(monthlyDep * effectiveMonths * 100) / 100);
+    const carryingBookValue = Math.max(0, Math.round((cost + revSurplus - computedAccumDep - impLoss) * 100) / 100);
 
     if (editingId !== null) {
       setPpeAssets(prev => prev.map(a => a.id === editingId ? {
@@ -73,10 +105,16 @@ export default function PPETab({
         salvage_value: salvage,
         annual_depreciation: annualDep,
         monthly_depreciation: monthlyDep,
-        accumulated_depreciation: annualDep, // Default 1 year accum for demo
-        book_value: cost - annualDep
+        accumulated_depreciation: computedAccumDep,
+        book_value: carryingBookValue,
+        net_book_value: carryingBookValue,
+        measurement_model: measurementModel,
+        revaluation_surplus: revSurplus,
+        impairment_loss: impLoss,
+        is_held_for_sale: isHeldForSale,
+        status: isHeldForSale ? 'Held for Sale' : 'Active'
       } : a));
-      triggerAlert(`Asset "${assetName}" updated successfully.`, 'success');
+      triggerAlert(`Asset "${assetName}" updated under PAS 16 (${effectiveMonths} mos pro-rata dep: ₱${computedAccumDep.toLocaleString()}).`, 'success');
       setEditingId(null);
     } else {
       const newAsset: PPEAsset = {
@@ -91,39 +129,50 @@ export default function PPETab({
         salvage_value: salvage,
         annual_depreciation: annualDep,
         monthly_depreciation: monthlyDep,
-        accumulated_depreciation: annualDep, // Default 1 year accum for demo
-        book_value: cost - annualDep,
-        net_book_value: cost - annualDep
+        accumulated_depreciation: computedAccumDep,
+        book_value: carryingBookValue,
+        net_book_value: carryingBookValue,
+        measurement_model: measurementModel,
+        revaluation_surplus: revSurplus,
+        impairment_loss: impLoss,
+        is_held_for_sale: isHeldForSale,
+        status: isHeldForSale ? 'Held for Sale' : 'Active'
       };
 
       setPpeAssets(prev => [...prev, newAsset]);
-      triggerAlert(`Asset "${assetName}" recorded. Annual Depreciation: ₱${annualDep.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'success');
+      triggerAlert(
+        isHeldForSale
+          ? `Asset "${assetName}" classified as Held for Sale (PFRS 5.25 — Depreciation Frozen).`
+          : `Asset "${assetName}" capitalized (PAS 16 Pro-Rata ${effectiveMonths} mos Accum. Dep.: ₱${computedAccumDep.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`,
+        'success'
+      );
     }
 
-    setAssetCode('');
-    setAssetName('');
-    setAcqCost('');
-    setSalvageVal('0');
-    setIsModalOpen(false);
+    handleCancelEdit();
   };
 
   const handleEdit = (asset: PPEAsset) => {
     setEditingId(asset.id);
-    setAssetCode(asset.asset_code);
+    setAssetCode(asset.asset_code || '');
     setAssetName(asset.asset_name);
-    setCategory(asset.category);
+    setCategory(asset.category || 'Office Equipment');
     setAcqDate(asset.acquisition_date);
     setAcqCost(asset.acquisition_cost.toString());
-    setLifeYears(asset.useful_life_years.toString());
-    setSalvageVal(asset.salvage_value.toString());
+    setLifeYears((asset.useful_life_years || 5).toString());
+    setSalvageVal((asset.salvage_value || 0).toString());
+    setMeasurementModel(asset.measurement_model || 'Cost');
+    setRevaluationSurplus((asset.revaluation_surplus || 0).toString());
+    setImpairmentLoss((asset.impairment_loss || 0).toString());
+    setIsHeldForSale(Boolean(asset.is_held_for_sale || asset.status === 'Held for Sale'));
     setIsModalOpen(true);
   };
 
   const handleDelete = (id: number, name: string) => {
-    if (window.confirm(`Are you sure you want to delete asset "${name}"?`)) {
-      setPpeAssets(prev => prev.filter(a => a.id !== id));
-      triggerAlert(`Asset "${name}" deleted.`, 'info');
+    setPpeAssets(prev => prev.filter(a => a.id !== id));
+    if (selectedScheduleAsset && selectedScheduleAsset.id === id) {
+      setSelectedScheduleAsset(null);
     }
+    triggerAlert(`Asset "${name}" deleted.`, 'info');
   };
 
   const filteredAssets = ppeAssets.filter(a => {
@@ -345,7 +394,7 @@ export default function PPETab({
               </div>
 
               <div className="sm:col-span-2">
-                <label className={`block text-[11px] font-medium mb-1 ${theme.textMuted}`}>Salvage Value (₱)</label>
+                <label className={`block text-[11px] font-medium mb-1 ${theme.textMuted}`}>Salvage / Residual Value (₱) — PAS 16.51</label>
                 <input
                   type="number"
                   placeholder="0"
@@ -353,6 +402,53 @@ export default function PPETab({
                   onChange={(e) => setSalvageVal(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-lg border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
                 />
+              </div>
+
+              <div>
+                <label className={`block text-[11px] font-medium mb-1 ${theme.textMuted}`}>Measurement Model (PAS 16.29)</label>
+                <select
+                  value={measurementModel}
+                  onChange={(e) => setMeasurementModel(e.target.value as 'Cost' | 'Revaluation')}
+                  className={`w-full px-3 py-2 text-xs rounded-lg border bg-transparent font-semibold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
+                >
+                  <option value="Cost" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Cost Model (PAS 16.30)</option>
+                  <option value="Revaluation" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Revaluation Model — OCI Surplus (PAS 16.31)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-[11px] font-medium mb-1 ${theme.textMuted}`}>Revaluation Surplus in OCI (₱) — PAS 16.39</label>
+                <input
+                  type="number"
+                  placeholder="0"
+                  disabled={measurementModel !== 'Revaluation'}
+                  value={revaluationSurplus}
+                  onChange={(e) => setRevaluationSurplus(e.target.value)}
+                  className={`w-full px-3 py-2 text-xs rounded-lg border bg-transparent font-mono disabled:opacity-40 ${theme.borderInput} ${theme.textMain}`}
+                />
+              </div>
+
+              <div>
+                <label className={`block text-[11px] font-medium mb-1 ${theme.textMuted}`}>Impairment Write-Down Loss (₱) — PAS 36</label>
+                <input
+                  type="number"
+                  placeholder="0"
+                  value={impairmentLoss}
+                  onChange={(e) => setImpairmentLoss(e.target.value)}
+                  className={`w-full px-3 py-2 text-xs rounded-lg border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
+                />
+              </div>
+
+              <div className="flex items-center pt-5">
+                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-amber-400">
+                  <input
+                    type="checkbox"
+                    checked={isHeldForSale}
+                    onChange={(e) => setIsHeldForSale(e.target.checked)}
+                    className="rounded border-amber-500/40"
+                  />
+                  <span>Classify as Non-Current Asset Held for Sale (PFRS 5.25 — Freezes Depreciation)</span>
+                </label>
               </div>
 
               <div className="sm:col-span-2 flex items-center justify-end gap-3 pt-3 border-t border-zinc-800/40 mt-2">

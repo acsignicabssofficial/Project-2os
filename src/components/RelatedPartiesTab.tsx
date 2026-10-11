@@ -17,10 +17,12 @@ interface RelatedPartiesTabProps {
   collections: Collection[];
   setSales: React.Dispatch<React.SetStateAction<Sale[]>>;
   setCollections: React.Dispatch<React.SetStateAction<Collection[]>>;
+  setCashReceipts?: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
   expenses?: Expense[];
   payments?: Payment[];
   setExpenses?: React.Dispatch<React.SetStateAction<Expense[]>>;
   setPayments?: React.Dispatch<React.SetStateAction<Payment[]>>;
+  setCashDisbursements?: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
   accountTitles?: AccountTitle[];
   globalSearch?: string;
   initialSubTab?: 'customers' | 'providers' | 'various';
@@ -28,6 +30,7 @@ interface RelatedPartiesTabProps {
   setSubsidiarySales?: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
   collectionsRecords?: UniformBookRecord[];
   setCollectionsRecords?: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
+  onDeleteRecord?: (bookType: string, record: UniformBookRecord) => void;
 }
 
 export default function RelatedPartiesTab({
@@ -42,17 +45,20 @@ export default function RelatedPartiesTab({
   collections,
   setSales,
   setCollections,
+  setCashReceipts,
   expenses = [],
   payments = [],
   setExpenses,
   setPayments,
+  setCashDisbursements,
   accountTitles = [],
   globalSearch,
   initialSubTab = 'customers',
   subsidiarySales = [],
   setSubsidiarySales,
   collectionsRecords = [],
-  setCollectionsRecords
+  setCollectionsRecords,
+  onDeleteRecord
 }: RelatedPartiesTabProps) {
   const [subTab, setSubTab] = useState<'customers' | 'providers' | 'various'>(initialSubTab);
 
@@ -140,6 +146,8 @@ export default function RelatedPartiesTab({
           collections={collections}
           setSales={setSales}
           setCollections={setCollections}
+          setCashReceipts={setCashReceipts as any}
+          onDeleteRecord={onDeleteRecord}
           globalSearch={globalSearch}
         />
       ) : subTab === 'various' ? (
@@ -154,6 +162,7 @@ export default function RelatedPartiesTab({
           theme={theme}
           triggerAlert={triggerAlert}
           globalSearch={globalSearch}
+          onDeleteRecord={onDeleteRecord}
         />
       ) : (
         <ProvidersTab
@@ -168,6 +177,7 @@ export default function RelatedPartiesTab({
           setExpenses={setExpenses}
           setPayments={setPayments}
           accountTitles={accountTitles}
+          onDeleteRecord={onDeleteRecord}
         />
       )}
     </div>

@@ -427,14 +427,12 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
   let sjCounter = 1;
   let gjCounter = 1;
 
-  const getSjNo = (dateStr?: string) => {
-    const yr = (dateStr ? dateStr.slice(0, 4) : '') || String(new Date().getFullYear());
-    return `SJ${yr}-${String(sjCounter++).padStart(4, '0')}`;
+  const getSjNo = () => {
+    return `GJ${sjCounter++}`;
   };
 
-  const getGjNo = (dateStr?: string) => {
-    const yr = (dateStr ? dateStr.slice(0, 4) : '') || String(new Date().getFullYear());
-    return `GJ${yr}-${String(gjCounter++).padStart(4, '0')}`;
+  const getGjNo = () => {
+    return `GJ${sjCounter++}`;
   };
 
   // Track invoices and vouchers already journalized by Cash Receipts / Cash Disbursements
@@ -443,7 +441,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
   const directCashDisbursementVouchers = new Set<string>();
 
   // Filter out any legacy auto-generated SJ-SLS / SJ-COL / SJ-PUR / SJ-DIS special entries to prevent double-counting
-  const manualSpecialEntries = specialEntries.filter(s => {
+  const manualSpecialEntries = [...specialEntries].filter(s => {
     const vNo = (s.voucher_no || s.entry_number || '').toUpperCase();
     const eType = (s.entry_type || '');
     if (
@@ -461,12 +459,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       return false;
     }
     return true;
-  });
+  }).sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+
+  // Sort sales & expenses chronologically (oldest first, by id / created_at) so Invoice #1 is always GJ1 and Invoice #2 is GJ2
+  const sortedSales = [...sales].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  const sortedExpenses = [...expenses].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
 
   // 1. SUBSIDIARY SALES -> Always generates Sales Recognition Journal Entry:
   // Dr Accounts Receivable (Gross VAT-inclusive)
   // Cr Vatable Sales, Cr Output VAT Payable (and Zero-Rated / VAT-Exempt)
-  sales.forEach(s => {
+  sortedSales.forEach(s => {
     if (s.is_cancelled || s.sales_status === 'Cancelled') return;
 
     const customerName = s.registered_name || s.customer_name || s.client_name || 'Customer';
@@ -536,8 +538,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
 
     entries.push({
       id: idCounter++,
+      _sortKey: Number(s.id) || 0,
       company_name: s.company_name || companyName,
-      entry_no: getSjNo(saleDate),
+      entry_no: '',
       date: saleDate,
       ref_type: 'Sales',
       ref_no: s.invoice_number,
@@ -546,7 +549,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         { account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
       ],
       credits: entry1Credits
-    });
+    } as any);
 
     // Check how this sale is paid/collected:
     const normInv = normalizeDocNo(s.invoice_number);
@@ -574,54 +577,35 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const isDirectFullCashSale = isSaleCashPaid && !isPartialOrInstallment;
 
     if (isDirectFullCashSale) {
-      // 5.3 Cash Receipts Book records the journal entries for direct full cash sales:
+      // 5.3 Cash Receipts Book records the compound journal entry for direct full cash sales:
+      // Journal entry: CASH (DEBIT) 22,767.86; CREDITABLE WITHHOLDING TAX (DEBIT) 2,232.14; A/R (CREDIT) 25,000
       const cashReceived = Math.max(0, Math.round((totalGrossSales - discounts - w2307) * 100) / 100);
-      const cashPlusDisc = Math.round((cashReceived + discounts) * 100) / 100;
-
-      // Journal Entry 1: Cash Collection (and Sales Discounts if any)
-      // Dr Cash (22,767.86), (Dr Sales Discounts), Cr Accounts Receivable (22,767.86)
-      if (cashPlusDisc > 0) {
-        const crDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-        if (cashReceived > 0) {
-          crDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashReceived });
-        }
-        if (discounts > 0) {
-          crDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discounts });
-        }
-
-        entries.push({
-          id: idCounter++,
-          company_name: s.company_name || companyName,
-          entry_no: getSjNo(saleDate),
-          date: saleDate,
-          ref_type: 'Collection',
-          ref_no: s.invoice_number,
-          description: `Cash Receipts Book: Journal entry 1 (cash collection for Invoice #${s.invoice_number}) - ${customerName}`,
-          debits: crDebits,
-          credits: [
-            { account_code: '1020', account_title: 'Accounts Receivable', amount: cashPlusDisc }
-          ]
-        });
+      const crDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
+      if (cashReceived > 0) {
+        crDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashReceived });
+      }
+      if (discounts > 0) {
+        crDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discounts });
+      }
+      if (w2307 > 0) {
+        crDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
       }
 
-      // Journal Entry 2 (to recognize full payment / 2307 CWT):
-      // Dr Creditable Withholding Tax (BIR 2307), Cr Accounts Receivable
-      if (w2307 > 0) {
+      if (crDebits.length > 0) {
         entries.push({
           id: idCounter++,
+          _sortKey: (Number(s.id) || 0) + 0.1,
           company_name: s.company_name || companyName,
-          entry_no: getSjNo(saleDate),
+          entry_no: '',
           date: saleDate,
           ref_type: 'Collection',
           ref_no: s.invoice_number,
-          description: `Cash Receipts Book: Journal entry 2 (to recognize full payment / CWT 2307 for Invoice #${s.invoice_number}) - ${customerName}`,
-          debits: [
-            { account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 }
-          ],
+          description: `Cash Receipts Book: Full Cash Collection for Invoice #${s.invoice_number} - ${customerName}`,
+          debits: crDebits,
           credits: [
-            { account_code: '1020', account_title: 'Accounts Receivable', amount: w2307 }
+            { account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
           ]
-        });
+        } as any);
       }
 
       if (normInv) {
@@ -658,7 +642,13 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     }
 
     const matchingSale = sales.find(s => !s.is_cancelled && normalizeDocNo(s.invoice_number) === normInv);
-    const sameInvColls = sortedCollections.filter(col => !col.is_cancelled && normalizeDocNo(col.invoice_number) === normInv);
+    const sameInvColls = sortedCollections.filter(col => {
+      if (col.is_cancelled || normalizeDocNo(col.invoice_number) !== normInv) return false;
+      const colCash = col.amount_collected !== undefined ? Number(col.amount_collected) : (Number(col.amount) || 0);
+      const colDisc = Number(col.discount ?? col.discounts) || 0;
+      const hasInst = Array.isArray(col.installments) && col.installments.length > 0;
+      return colCash > 0 || colDisc > 0 || hasInst;
+    });
 
     if (matchingSale) {
       const isSaleCashPaid =
@@ -682,7 +672,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const customerName = c.registered_name || c.customer_name || c.client_name || matchingSale?.registered_name || matchingSale?.customer_name || 'Customer';
     const colDate = c.date || c.collection_date || new Date().toISOString().split('T')[0];
 
-    // If this Collection Book record tracks installments (1st payment/down payment, 2nd payment, etc.)
+    // If this Collection Book record tracks installments (legacy array format)
     if (Array.isArray(c.installments) && c.installments.length > 0) {
       c.installments.forEach((inst: any, instIdx: number) => {
         const cashAmt = Number(inst.cash_amount) || 0;
@@ -703,8 +693,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
           }
           entries.push({
             id: idCounter++,
+            _sortKey: (Number(c.id) || 0) + (instIdx * 0.01) + 0.1,
             company_name: c.company_name || companyName,
-            entry_no: getSjNo(instDate),
+            entry_no: '',
             date: instDate,
             ref_type: 'Collection',
             ref_no: c.invoice_number,
@@ -713,15 +704,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
             credits: [
               { account_code: '1020', account_title: 'Accounts Receivable', amount: cashAndDisc }
             ]
-          });
+          } as any);
         }
 
         // Recognize CWT 2307 upon completion of full payment
         if (w2307Amt > 0 && (inst.is_final || c.status === 'Paid')) {
           entries.push({
             id: idCounter++,
+            _sortKey: (Number(c.id) || 0) + (instIdx * 0.01) + 0.15,
             company_name: c.company_name || companyName,
-            entry_no: getSjNo(instDate),
+            entry_no: '',
             date: instDate,
             ref_type: 'Collection',
             ref_no: c.invoice_number,
@@ -732,20 +724,28 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
             credits: [
               { account_code: '1020', account_title: 'Accounts Receivable', amount: w2307Amt }
             ]
-          });
+          } as any);
           if (normInv) cwtRecognizedForInvoice.add(normInv);
         }
       });
       return;
     }
 
-    // Fallback for multi-row or single-row collection records without installments array
+    // Per-payment row format (COLLECTION 1, COLLECTION 2, COLLECTION 3...)
+    const cashAmt = c.amount_collected !== undefined ? Number(c.amount_collected) : (Number(c.amount) || 0);
+    const discountAmt = Number(c.discount ?? c.discounts) || 0;
+    if (cashAmt <= 0 && discountAmt <= 0) {
+      return; // Skip 0-amount On Account tracking rows
+    }
+
     const pmtOrder = sameInvColls.findIndex(col => col.id === c.id) + 1 || (idx + 1);
     const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd collection' : `for #${pmtOrder} collection`;
 
-    const cashAmt = Number(c.amount_collected ?? c.amount) || 0;
-    const discountAmt = Number(c.discount ?? c.discounts) || 0;
-    const totalCollectedForInv = sameInvColls.reduce((s, col) => s + (Number(col.amount_collected ?? col.amount) || 0) + (Number(col.discount ?? col.discounts) || 0), 0);
+    const totalCollectedForInv = sameInvColls.reduce((s, col) => {
+      const colCash = col.amount_collected !== undefined ? Number(col.amount_collected) : (Number(col.amount) || 0);
+      const colDisc = Number(col.discount ?? col.discounts) || 0;
+      return s + colCash + colDisc;
+    }, 0);
     const invDue = Number(matchingSale?.total_amount_due ?? c.total_amount_due ?? matchingSale?.amount) || 0;
     const isInvoiceFullyPaid = c.status === 'Paid' || matchingSale?.status === 'Paid' || (invDue > 0 && totalCollectedForInv >= invDue - 0.05);
     const isLastPaymentRow = sameInvColls.length === 0 || sameInvColls[sameInvColls.length - 1].id === c.id;
@@ -763,8 +763,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       }
       entries.push({
         id: idCounter++,
+        _sortKey: (Number(c.id) || 0) + 0.1,
         company_name: c.company_name || companyName,
-        entry_no: getSjNo(colDate),
+        entry_no: '',
         date: colDate,
         ref_type: 'Collection',
         ref_no: c.invoice_number,
@@ -773,7 +774,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         credits: [
           { account_code: '1020', account_title: 'Accounts Receivable', amount: cashAndDisc }
         ]
-      });
+      } as any);
     }
 
     // 6.4 Journal Entry (to recognize full payment / CWT 2307):
@@ -782,8 +783,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     if (w2307Amt > 0 && isInvoiceFullyPaid && isLastPaymentRow && (!normInv || !cwtRecognizedForInvoice.has(normInv))) {
       entries.push({
         id: idCounter++,
+        _sortKey: (Number(c.id) || 0) + 0.2,
         company_name: c.company_name || companyName,
-        entry_no: getSjNo(colDate),
+        entry_no: '',
         date: colDate,
         ref_type: 'Collection',
         ref_no: c.invoice_number,
@@ -794,14 +796,14 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         credits: [
           { account_code: '1020', account_title: 'Accounts Receivable', amount: w2307Amt }
         ]
-      });
+      } as any);
       if (normInv) cwtRecognizedForInvoice.add(normInv);
     }
   });
 
   // 3. SUBSIDIARY PURCHASES / EXPENSES -> Always generates Expense Recognition Journal Entry:
   // Dr Expense (net of VAT), Dr Input VAT, Cr Accounts Payable (gross net of discount)
-  expenses.forEach(e => {
+  sortedExpenses.forEach(e => {
     if (e.is_cancelled || e.expense_status === 'Cancelled') return;
 
     const providerName = e.registered_name || e.service_provider_name || 'Vendor';
@@ -832,8 +834,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
 
     entries.push({
       id: idCounter++,
+      _sortKey: Number(e.id) || 0,
       company_name: e.company_name || companyName,
-      entry_no: getSjNo(expDate),
+      entry_no: '',
       date: expDate,
       ref_type: 'Expense',
       ref_no: vNo,
@@ -842,7 +845,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       credits: [
         { account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }
       ]
-    });
+    } as any);
 
     // Check if paid in full directly without separate payment records, or via direct cash purchase
     const normVoucher = normalizeDocNo(vNo);
@@ -873,8 +876,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       }
       entries.push({
         id: idCounter++,
+        _sortKey: (Number(e.id) || 0) + 0.1,
         company_name: e.company_name || companyName,
-        entry_no: getSjNo(expDate),
+        entry_no: '',
         date: expDate,
         ref_type: 'Payment',
         ref_no: vNo,
@@ -883,7 +887,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
           { account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }
         ],
         credits: cdCredits
-      });
+      } as any);
 
       if (normVoucher) {
         directCashDisbursementVouchers.add(normVoucher);
@@ -920,7 +924,12 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     }
 
     const matchingExp = expenses.find(e => !e.is_cancelled && (normalizeDocNo(e.voucher_number) === normVoucher || normalizeDocNo(e.invoice_number) === normVoucher));
-    const sameVoucherPmts = sortedPayments.filter(pm => !pm.is_cancelled && (normalizeDocNo(pm.voucher_number) === normVoucher || normalizeDocNo(pm.invoice_number) === normVoucher));
+    const sameVoucherPmts = sortedPayments.filter(pm => {
+      if (pm.is_cancelled || (normalizeDocNo(pm.voucher_number) !== normVoucher && normalizeDocNo(pm.invoice_number) !== normVoucher)) return false;
+      const pmCash = pm.amount_paid !== undefined ? Number(pm.amount_paid) : (Number(pm.amount) || 0);
+      const hasInst = Array.isArray(pm.installments) && pm.installments.length > 0;
+      return pmCash > 0 || hasInst;
+    });
 
     if (matchingExp) {
       const isExpCashPaid =
@@ -954,8 +963,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         if (cashPaid > 0) {
           entries.push({
             id: idCounter++,
+            _sortKey: (Number(p.id) || 0) + (instIdx * 0.01) + 0.1,
             company_name: p.company_name || companyName,
-            entry_no: getSjNo(instDate),
+            entry_no: '',
             date: instDate,
             ref_type: 'Payment',
             ref_no: vNo,
@@ -966,14 +976,15 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
             credits: [
               { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashPaid }
             ]
-          });
+          } as any);
         }
 
         if (w2307 > 0 && (inst.is_final || p.status === 'Paid')) {
           entries.push({
             id: idCounter++,
+            _sortKey: (Number(p.id) || 0) + (instIdx * 0.01) + 0.15,
             company_name: p.company_name || companyName,
-            entry_no: getSjNo(instDate),
+            entry_no: '',
             date: instDate,
             ref_type: 'Payment',
             ref_no: vNo,
@@ -984,18 +995,25 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
             credits: [
               { account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: w2307 }
             ]
-          });
+          } as any);
           if (normVoucher) ewtRecognizedForVoucher.add(normVoucher);
         }
       });
       return;
     }
 
+    const cashPaid = p.amount_paid !== undefined ? Number(p.amount_paid) : (Number(p.amount) || 0);
+    if (cashPaid <= 0) {
+      return; // Skip 0-amount On Account tracking rows
+    }
+
     const pmtOrder = sameVoucherPmts.findIndex(pm => pm.id === p.id) + 1 || (idx + 1);
     const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd payment' : `for #${pmtOrder} payment`;
 
-    const cashPaid = Number(p.amount_paid ?? p.amount) || 0;
-    const totalPaidForVoucher = sameVoucherPmts.reduce((s, pm) => s + (Number(pm.amount_paid ?? pm.amount) || 0), 0);
+    const totalPaidForVoucher = sameVoucherPmts.reduce((s, pm) => {
+      const pmCash = pm.amount_paid !== undefined ? Number(pm.amount_paid) : (Number(pm.amount) || 0);
+      return s + pmCash;
+    }, 0);
     const expDue = Number(matchingExp?.total_amount_due ?? p.total_amount_due ?? matchingExp?.amount) || 0;
     const isVoucherFullyPaid = p.status === 'Paid' || matchingExp?.status === 'Paid' || (expDue > 0 && totalPaidForVoucher >= expDue - 0.05);
     const isLastPmtRow = sameVoucherPmts.length === 0 || sameVoucherPmts[sameVoucherPmts.length - 1].id === p.id;
@@ -1003,8 +1021,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     if (cashPaid > 0) {
       entries.push({
         id: idCounter++,
+        _sortKey: (Number(p.id) || 0) + 0.1,
         company_name: p.company_name || companyName,
-        entry_no: getSjNo(payDate),
+        entry_no: '',
         date: payDate,
         ref_type: 'Payment',
         ref_no: vNo,
@@ -1015,15 +1034,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         credits: [
           { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashPaid }
         ]
-      });
+      } as any);
     }
 
     const w2307 = Number(p.withholding_tax_2307 ?? p.tax_withheld ?? matchingExp?.tax_withheld ?? matchingExp?.withholding_2307_2306) || 0;
     if (w2307 > 0 && isVoucherFullyPaid && isLastPmtRow && (!normVoucher || !ewtRecognizedForVoucher.has(normVoucher))) {
       entries.push({
         id: idCounter++,
+        _sortKey: (Number(p.id) || 0) + 0.2,
         company_name: p.company_name || companyName,
-        entry_no: getSjNo(payDate),
+        entry_no: '',
         date: payDate,
         ref_type: 'Payment',
         ref_no: vNo,
@@ -1034,54 +1054,107 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         credits: [
           { account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: w2307 }
         ]
-      });
+      } as any);
       if (normVoucher) ewtRecognizedForVoucher.add(normVoucher);
     }
   });
 
-  // 5. PPE Asset Acquisition & Depreciation Entries
-  ppeAssets.forEach(p => {
+  // 5. PPE Asset Acquisition, Pro-Rata Depreciation (PAS 16), Revaluation Surplus (PAS 16), Impairment (PAS 36) & Held-for-Sale Freeze (PFRS 5)
+  const sortedPpe = [...ppeAssets].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  sortedPpe.forEach(p => {
     const cost = Number(p.acquisition_cost) || 0;
     const dep = Number(p.accumulated_depreciation) || 0;
+    const revSurplus = Number(p.revaluation_surplus) || 0;
+    const impLoss = Number(p.impairment_loss) || 0;
+    const isHeldForSale = Boolean(p.is_held_for_sale || p.status === 'Held for Sale');
     const acqDate = p.acquisition_date || new Date().toISOString().split('T')[0];
+
     if (cost > 0) {
+      // PFRS 5.25: If classified as Held for Sale, classify under Current Asset 1090; otherwise Non-Current PPE 1510
+      const targetAssetCode = isHeldForSale ? '1090' : '1510';
+      const targetAssetTitle = isHeldForSale ? 'Non-Current Assets Held for Sale (PFRS 5)' : 'Property, Plant & Equipment';
       entries.push({
         id: idCounter++,
+        _sortKey: Number(p.id) || 0,
         company_name: p.company_name || companyName,
-        entry_no: getGjNo(acqDate),
+        entry_no: '',
         date: acqDate,
         ref_type: 'PPE Acquisition',
         ref_no: p.asset_code || String(p.id),
-        description: `Acquisition of Property, Plant & Equipment: ${p.asset_name} (${p.asset_code})`,
+        description: `Acquisition of ${isHeldForSale ? 'Asset Held for Sale (PFRS 5)' : 'Property, Plant & Equipment (PAS 16)'}: ${p.asset_name} (${p.asset_code})`,
         debits: [
-          { account_code: '1510', account_title: 'Property, Plant & Equipment', amount: cost }
+          { account_code: targetAssetCode, account_title: targetAssetTitle, amount: cost }
         ],
         credits: [
           { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cost }
         ]
-      });
+      } as any);
     }
-    if (dep > 0) {
+
+    // PFRS 5.25: Cease depreciation while asset is classified as Held for Sale; only record accumulated depreciation prior to HFS
+    if (dep > 0 && !isHeldForSale) {
       entries.push({
         id: idCounter++,
+        _sortKey: (Number(p.id) || 0) + 0.1,
         company_name: p.company_name || companyName,
-        entry_no: getGjNo(acqDate),
+        entry_no: '',
         date: acqDate,
         ref_type: 'Depreciation',
         ref_no: p.asset_code || String(p.id),
-        description: `Depreciation Expense for PPE Asset: ${p.asset_name} (${p.asset_code})`,
+        description: `PAS 16 Pro-Rata Depreciation Expense for PPE Asset: ${p.asset_name} (${p.asset_code})`,
         debits: [
           { account_code: '6080', account_title: 'Depreciation Expense', amount: dep }
         ],
         credits: [
           { account_code: '1520', account_title: 'Accumulated Depreciation', amount: dep }
         ]
-      });
+      } as any);
+    }
+
+    // PAS 16.39: Revaluation Model Surplus routed to Other Comprehensive Income (OCI #3040)
+    if (revSurplus > 0 && p.measurement_model === 'Revaluation') {
+      entries.push({
+        id: idCounter++,
+        _sortKey: (Number(p.id) || 0) + 0.15,
+        company_name: p.company_name || companyName,
+        entry_no: '',
+        date: acqDate,
+        ref_type: 'PAS 16 Revaluation',
+        ref_no: p.asset_code || String(p.id),
+        description: `PAS 16 Revaluation Increase to Fair Value (OCI): ${p.asset_name} (${p.asset_code})`,
+        debits: [
+          { account_code: '1510', account_title: 'Property, Plant & Equipment', amount: revSurplus }
+        ],
+        credits: [
+          { account_code: '3040', account_title: 'Revaluation Surplus (OCI - PAS 16)', amount: revSurplus }
+        ]
+      } as any);
+    }
+
+    // PAS 36.60: Impairment Loss recognition when Recoverable Amount < Carrying Amount
+    if (impLoss > 0) {
+      entries.push({
+        id: idCounter++,
+        _sortKey: (Number(p.id) || 0) + 0.2,
+        company_name: p.company_name || companyName,
+        entry_no: '',
+        date: acqDate,
+        ref_type: 'PAS 36 Impairment',
+        ref_no: p.asset_code || String(p.id),
+        description: `PAS 36 Impairment Write-Down on Asset: ${p.asset_name} (${p.asset_code})`,
+        debits: [
+          { account_code: '6085', account_title: 'Impairment Loss (PAS 36 / PFRS 9 ECL)', amount: impLoss }
+        ],
+        credits: [
+          { account_code: '1520', account_title: 'Accumulated Depreciation & Impairment', amount: impLoss }
+        ]
+      } as any);
     }
   });
 
   // 6. Payroll Entries
-  payrollRecords.forEach(pr => {
+  const sortedPayroll = [...payrollRecords].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  sortedPayroll.forEach(pr => {
     const gross = Number(pr.gross_pay) || 0;
     if (gross <= 0) return;
     const sssEE = Number(pr.sss_deduction) || 0;
@@ -1113,15 +1186,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
 
     entries.push({
       id: idCounter++,
+      _sortKey: Number(pr.id) || 0,
       company_name: pr.company_name || companyName,
-      entry_no: getGjNo(),
+      entry_no: '',
       date: new Date().toISOString().split('T')[0],
       ref_type: 'Payroll',
       ref_no: String(pr.employee_id || ''),
       description: `Payroll Processing for ${pr.full_name || pr.employee_name || pr.employee_id} (${pr.payroll_period || 'Current'})`,
       debits,
       credits
-    });
+    } as any);
   });
 
   // 7. Manual Special Entries (Adjusting, Closing, Reversing, Capital Contributions, Tax Provisions, etc.)
@@ -1135,46 +1209,76 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
 
     entries.push({
       id: idCounter++,
+      _sortKey: Number(s.id) || 0,
       company_name: s.company_name || companyName,
-      entry_no: getGjNo(s.entry_date),
+      entry_no: '',
       date: s.entry_date || new Date().toISOString().split('T')[0],
       ref_type: s.entry_type || 'Adjusting Entry',
       ref_no: s.voucher_no || s.entry_number || `SJ-${s.id}`,
       description: s.description ? (s.description.startsWith('[') ? s.description : `[${s.entry_type || 'Special'}] ${s.description}`) : `Special Entry #${s.voucher_no || s.id}`,
       debits,
       credits
-    });
+    } as any);
+  });
+
+  // Sort strictly chronologically by _sortKey so GJ1, GJ2, GJ3... never swap or change when new transactions are added
+  entries.sort((a: any, b: any) => (a._sortKey || 0) - (b._sortKey || 0));
+  entries.forEach((entry: any, idx) => {
+    entry.id = idx + 1;
+    entry.entry_no = `GJ${idx + 1}`;
+    delete entry._sortKey;
   });
 
   return entries;
 }
 
 export interface AccountingSummaryResult {
-  // Balance Sheet Assets
+  // Balance Sheet Assets (PAS 1 Current vs Non-Current & Contra-Assets)
   cash: number;
+  arGross: number;
+  allowanceForECL: number;
   ar: number;
   customerAdvances: number;
   inputVat: number;
   cwt2307: number;
   prepaidExpenses: number;
+  contractAssets: number;
+  assetsHeldForSale: number;
   supplierAdvances: number;
+  otherCurrentAssets: number;
   totalCurrentAssets: number;
   ppeCost: number;
   accumDep: number;
   netPPE: number;
+  rouAssetNet: number;
+  intangibleAssets: number;
+  deferredTaxAsset: number;
+  otherNonCurrentAssets: number;
+  totalNonCurrentAssets: number;
   totalAssets: number;
 
-  // Balance Sheet Liabilities
+  // Balance Sheet Liabilities (PAS 1 Current vs Non-Current)
   ap: number;
   outputVat: number;
   netVatPayable: number;
   ewtPayable: number;
   payrollDeductionsPayable: number;
   incomeTaxPayable: number;
+  contractLiabilities: number;
+  leaseLiabilityCurrent: number;
+  provisionsCurrent: number;
+  otherCurrentLiabilities: number;
+  totalCurrentLiabilities: number;
+  loansPayableNonCurrent: number;
+  leaseLiabilityNonCurrent: number;
+  deferredTaxLiability: number;
+  retirementBenefitObligation: number;
+  otherNonCurrentLiabilities: number;
+  totalNonCurrentLiabilities: number;
   otherLiabilities: number;
   totalLiabilities: number;
 
-  // Income Statement
+  // Income Statement & OCI (PAS 1 / PFRS 18)
   vatableSales: number;
   zeroRatedSales: number;
   vatExemptSales: number;
@@ -1182,14 +1286,24 @@ export interface AccountingSummaryResult {
   grossRevenue: number;
   totalOperatingExp: number;
   depreciationExpense: number;
+  impairmentExpense: number;
+  financeCosts: number;
   payrollExpense: number;
   specialRev: number;
   specialExp: number;
+  operatingProfit: number;
   netIncomeBeforeTax: number;
   incomeTaxProvision: number;
+  deferredTaxExpense: number;
   netIncome: number;
+  // Other Comprehensive Income (OCI)
+  revaluationSurplusOCI: number;
+  actuarialRemeasurementOCI: number;
+  fvociReserveOCI: number;
+  totalOCI: number;
+  totalComprehensiveIncome: number;
 
-  // Equity
+  // Equity (PAS 1)
   capitalStock: number;
   ownerDrawings: number;
   retainedEarnings: number;
@@ -1197,14 +1311,20 @@ export interface AccountingSummaryResult {
   totalLiabilitiesAndEquity: number;
   unrealizedGainLoss: number;
   isBalanced: boolean;
+  hasRetrospectiveRestatement: boolean;
 
-  // Cash Flow Metrics
+  // Cash Flow Metrics (PAS 7 Direct & Indirect Method)
   cashInflowsFromCustomers: number;
   cashOutflowsToSuppliersAndExpenses: number;
   cashOutflowsToPayroll: number;
   netOperatingCashFlow: number;
   netInvestingCashFlow: number;
   netFinancingCashFlow: number;
+  // PAS 7 Indirect Method Working Capital Adjustments
+  wcChangeInAR: number;
+  wcChangeInPrepaidsAndTaxAssets: number;
+  wcChangeInAPAndAccruals: number;
+  wcChangeInTaxAndStatutoryPayables: number;
 
   // Account Ledger Map
   accountMap: Record<string, {
@@ -1288,51 +1408,121 @@ export function computeAccountingSummaries(input: MasterJournalInput): Accountin
   const getDr = (code: string) => accountMap[code]?.debit || 0;
   const getCr = (code: string) => accountMap[code]?.credit || 0;
 
-  // 1. Assets
+  // 1. Assets (PAS 1 Current vs Non-Current & Contra-Assets)
   const cash = getNet('1010');
   const rawAr = getNet('1020');
-  const ar = rawAr > 0 ? rawAr : 0;
+  const arGross = rawAr > 0 ? rawAr : 0;
   const customerAdvances = rawAr < 0 ? Math.abs(rawAr) : 0;
+  // PFRS 9 Contra-Asset: Allowance for Expected Credit Losses (#1025)
+  const allowanceForECL = Math.max(0, getCr('1025') - getDr('1025'));
+  const ar = Math.max(0, Math.round((arGross - allowanceForECL) * 100) / 100);
+
   const inputVat = getNet('1030');
   const cwt2307 = getNet('1040');
   const prepaidExpenses = getNet('1050');
+  const contractAssets = getNet('1060');
+  const assetsHeldForSale = getNet('1090');
 
-  // Check if AP has a debit balance (supplier advances)
+  // Check if AP has a debit balance (supplier advances — PAS 1.32 No Offsetting)
   const rawAp = getNet('2010'); // Liability: Cr - Dr
   const ap = rawAp > 0 ? rawAp : 0;
   const supplierAdvances = rawAp < 0 ? Math.abs(rawAp) : 0;
 
+  // Non-Current Assets (15xx+)
   const ppeCost = getNet('1510');
-  // 1520 is contra-asset (Cr > Dr), so its credit minus debit is positive accumulated depreciation
   const accumDep = Math.max(0, getCr('1520') - getDr('1520'));
   const netPPE = Math.round((ppeCost - accumDep) * 100) / 100;
 
-  // Any other 1xxx accounts
+  const rouAssetCost = getNet('1530');
+  const rouAccumDep = Math.max(0, getCr('1535') - getDr('1535'));
+  const rouAssetNet = Math.round((rouAssetCost - rouAccumDep) * 100) / 100;
+  const intangibleAssets = getNet('1540');
+  // PAS 1.56: Deferred Tax Assets must ALWAYS be classified as Non-Current
+  const deferredTaxAsset = getNet('1550');
+
   let otherCurrentAssets = 0;
+  let otherNonCurrentAssets = 0;
+  const knownAssetCodes = ['1010', '1020', '1025', '1030', '1040', '1050', '1060', '1090', '1510', '1520', '1530', '1535', '1540', '1550'];
+
   Object.values(accountMap).forEach(acc => {
-    if (acc.code.startsWith('1') && !['1010', '1020', '1030', '1040', '1050', '1510', '1520'].includes(acc.code)) {
-      otherCurrentAssets += acc.netBalance;
+    if (acc.code.startsWith('1') && !knownAssetCodes.includes(acc.code)) {
+      const meta = accountTitles.find(a => a.code === acc.code);
+      const isNonCurrent =
+        acc.code.startsWith('15') ||
+        acc.code.startsWith('16') ||
+        acc.code.startsWith('17') ||
+        acc.code.startsWith('18') ||
+        acc.code.startsWith('19') ||
+        meta?.pfrs_classification === 'Non-Current Asset' ||
+        (meta?.category || '').toLowerCase().includes('non-current');
+      if (isNonCurrent) {
+        otherNonCurrentAssets += acc.netBalance;
+      } else {
+        otherCurrentAssets += acc.netBalance;
+      }
     }
   });
 
-  const totalCurrentAssets = Math.round((cash + ar + supplierAdvances + inputVat + cwt2307 + prepaidExpenses + otherCurrentAssets) * 100) / 100;
-  const totalAssets = Math.round((totalCurrentAssets + netPPE) * 100) / 100;
+  otherCurrentAssets = Math.round(otherCurrentAssets * 100) / 100;
+  otherNonCurrentAssets = Math.round(otherNonCurrentAssets * 100) / 100;
 
-  // 2. Liabilities
+  const totalCurrentAssets = Math.round(
+    (cash + ar + supplierAdvances + inputVat + cwt2307 + prepaidExpenses + contractAssets + assetsHeldForSale + otherCurrentAssets) * 100
+  ) / 100;
+  const totalNonCurrentAssets = Math.round(
+    (netPPE + rouAssetNet + intangibleAssets + deferredTaxAsset + otherNonCurrentAssets) * 100
+  ) / 100;
+  const totalAssets = Math.round((totalCurrentAssets + totalNonCurrentAssets) * 100) / 100;
+
+  // 2. Liabilities (PAS 1 Current vs Non-Current)
   const outputVat = getNet('2020');
   const netVatPayable = Math.max(0, Math.round((outputVat - inputVat) * 100) / 100);
   const ewtPayable = getNet('2030');
   const payrollDeductionsPayable = Math.round((getNet('2035') + getNet('2041') + getNet('2042') + getNet('2043') + getNet('2050')) * 100) / 100;
   const recordedIncomeTaxPayable = getNet('2040');
+  const contractLiabilities = getNet('2060');
+  const leaseLiabilityCurrent = getNet('2070');
+  const provisionsCurrent = getNet('2080');
 
-  let otherLiabilities = 0;
+  // Non-Current Liabilities (25xx+)
+  const loansPayableNonCurrent = getNet('2510');
+  const leaseLiabilityNonCurrent = getNet('2520');
+  // PAS 1.56: Deferred Tax Liabilities must ALWAYS be classified as Non-Current
+  const deferredTaxLiability = getNet('2530');
+  const retirementBenefitObligation = getNet('2540');
+
+  let otherCurrentLiabilities = 0;
+  let otherNonCurrentLiabilities = 0;
+  const knownLiabCodes = [
+    '2010', '2020', '2030', '2035', '2040', '2041', '2042', '2043', '2050',
+    '2060', '2070', '2080', '2510', '2520', '2530', '2540'
+  ];
+
   Object.values(accountMap).forEach(acc => {
-    if (acc.code.startsWith('2') && !['2010', '2020', '2030', '2035', '2040', '2041', '2042', '2043', '2050'].includes(acc.code)) {
-      otherLiabilities += acc.netBalance;
+    if (acc.code.startsWith('2') && !knownLiabCodes.includes(acc.code)) {
+      const meta = accountTitles.find(a => a.code === acc.code);
+      const isNonCurrent =
+        acc.code.startsWith('25') ||
+        acc.code.startsWith('26') ||
+        acc.code.startsWith('27') ||
+        acc.code.startsWith('28') ||
+        acc.code.startsWith('29') ||
+        meta?.pfrs_classification === 'Non-Current Liability' ||
+        (meta?.category || '').toLowerCase().includes('non-current') ||
+        acc.title.toLowerCase().includes('long-term') ||
+        acc.title.toLowerCase().includes('non-current');
+      if (isNonCurrent) {
+        otherNonCurrentLiabilities += acc.netBalance;
+      } else {
+        otherCurrentLiabilities += acc.netBalance;
+      }
     }
   });
 
-  // 3. Revenues & Expenses (Income Statement)
+  otherCurrentLiabilities = Math.round(otherCurrentLiabilities * 100) / 100;
+  otherNonCurrentLiabilities = Math.round(otherNonCurrentLiabilities * 100) / 100;
+
+  // 3. Revenues & Expenses (Income Statement — PAS 1 / PFRS 18)
   const vatableSales = getNet('4010');
   const zeroRatedSales = getNet('4020');
   const vatExemptSales = getNet('4030');
@@ -1349,37 +1539,67 @@ export function computeAccountingSummaries(input: MasterJournalInput): Accountin
   const grossRevenue = Math.round((vatableSales + zeroRatedSales + vatExemptSales + otherRev - salesDiscounts) * 100) / 100;
 
   const depreciationExpense = getNet('6080');
+  const impairmentExpense = getNet('6085');
+  const financeCosts = getNet('6090');
   const payrollExpense = Math.round((getNet('6010') + getNet('6015') + getNet('6016') + getNet('6017')) * 100) / 100;
 
   let totalOperatingExp = 0;
   Object.values(accountMap).forEach(acc => {
-    if ((acc.code.startsWith('5') || acc.code.startsWith('6')) && !['6010', '6015', '6016', '6017', '6080'].includes(acc.code)) {
+    if ((acc.code.startsWith('5') || acc.code.startsWith('6')) && !['6010', '6015', '6016', '6017', '6080', '6085', '6090'].includes(acc.code)) {
       totalOperatingExp += (acc.debit - acc.credit);
     }
   });
   totalOperatingExp = Math.round(totalOperatingExp * 100) / 100;
 
-  const netIncomeBeforeTax = Math.round((grossRevenue - totalOperatingExp - depreciationExpense - payrollExpense) * 100) / 100;
+  // PFRS 18 Operating Profit (before financing and income taxes)
+  const operatingProfit = Math.round((grossRevenue - totalOperatingExp - depreciationExpense - impairmentExpense - payrollExpense) * 100) / 100;
+  const netIncomeBeforeTax = Math.round((operatingProfit - financeCosts) * 100) / 100;
 
-  // Check if a manual tax provision entry (#7010) was posted
+  // Check if a manual tax provision entry (#7010) or deferred tax (#7020) was posted
   const recordedTaxExpense = getDr('7010') - getCr('7010');
-  const incomeTaxProvision = recordedTaxExpense > 0 ? Math.round(recordedTaxExpense * 100) / 100 : 0;
+  const deferredTaxExpense = Math.round((getDr('7020') - getCr('7020')) * 100) / 100;
+  const incomeTaxProvision = Math.round(((recordedTaxExpense > 0 ? recordedTaxExpense : 0) + deferredTaxExpense) * 100) / 100;
   const incomeTaxPayable = Math.round((recordedIncomeTaxPayable + (recordedTaxExpense > 0 && recordedIncomeTaxPayable === 0 ? recordedTaxExpense : 0)) * 100) / 100;
 
   const netIncome = Math.round((netIncomeBeforeTax - incomeTaxProvision) * 100) / 100;
 
-  const totalLiabilities = Math.round((ap + customerAdvances + outputVat + ewtPayable + payrollDeductionsPayable + incomeTaxPayable + otherLiabilities) * 100) / 100;
+  // Other Comprehensive Income (OCI — PAS 1.82A)
+  const revaluationSurplusOCI = getNet('3040');
+  const actuarialRemeasurementOCI = getNet('3050');
+  const fvociReserveOCI = getNet('3060');
+  let otherOCI = 0;
+  Object.values(accountMap).forEach(acc => {
+    const meta = accountTitles.find(a => a.code === acc.code);
+    if (acc.code.startsWith('3') && !['3010', '3020', '3030', '3040', '3050', '3060'].includes(acc.code) && meta?.pfrs_classification === 'OCI') {
+      otherOCI += acc.netBalance;
+    }
+  });
+  const totalOCI = Math.round((revaluationSurplusOCI + actuarialRemeasurementOCI + fvociReserveOCI + otherOCI) * 100) / 100;
+  const totalComprehensiveIncome = Math.round((netIncome + totalOCI) * 100) / 100;
 
-  // 4. Equity
+  const totalCurrentLiabilities = Math.round(
+    (ap + customerAdvances + outputVat + ewtPayable + payrollDeductionsPayable + incomeTaxPayable + contractLiabilities + leaseLiabilityCurrent + provisionsCurrent + otherCurrentLiabilities) * 100
+  ) / 100;
+  const totalNonCurrentLiabilities = Math.round(
+    (loansPayableNonCurrent + leaseLiabilityNonCurrent + deferredTaxLiability + retirementBenefitObligation + otherNonCurrentLiabilities) * 100
+  ) / 100;
+  const otherLiabilities = Math.round((contractLiabilities + leaseLiabilityCurrent + provisionsCurrent + otherCurrentLiabilities + totalNonCurrentLiabilities) * 100) / 100;
+  const totalLiabilities = Math.round((totalCurrentLiabilities + totalNonCurrentLiabilities) * 100) / 100;
+
+  // 4. Equity (PAS 1)
   const capitalContributions = getCr('3010');
   const ownerDrawings = getDr('3010') + (getDr('3030') - getCr('3030'));
   const capitalStock = Math.round((capitalContributions - ownerDrawings) * 100) / 100;
   const priorRetainedEarnings = getNet('3020');
   const retainedEarnings = Math.round((priorRetainedEarnings + netIncome) * 100) / 100;
 
-  const totalEquity = Math.round((capitalStock + retainedEarnings) * 100) / 100;
+  const totalEquity = Math.round((capitalStock + retainedEarnings + totalOCI) * 100) / 100;
   const totalLiabilitiesAndEquity = Math.round((totalLiabilities + totalEquity) * 100) / 100;
   const unrealizedGainLoss = Math.round((totalAssets - totalLiabilitiesAndEquity) * 100) / 100;
+
+  const hasRetrospectiveRestatement = (input.specialEntries || []).some(
+    se => se.accounting_treatment === 'Retrospective Restatement' || (se.entry_type || '').toLowerCase().includes('retrospective')
+  );
 
   // 5. Cash Flow Classification from Journal Entries affecting Cash (1010)
   let cashInflowsFromCustomers = 0;
@@ -1393,12 +1613,16 @@ export function computeAccountingSummaries(input: MasterJournalInput): Accountin
     const cashCr = je.credits.filter(c => c.account_code === '1010').reduce((s, c) => s + (Number(c.amount) || 0), 0);
     if (cashDr === 0 && cashCr === 0) return;
 
-    const hasEquity = je.debits.some(d => d.account_code.startsWith('3')) || je.credits.some(c => c.account_code.startsWith('3'));
-    const hasPPE = je.debits.some(d => d.account_code.startsWith('15')) || je.credits.some(c => c.account_code.startsWith('15'));
+    const hasEquityOrBorrowing =
+      je.debits.some(d => d.account_code.startsWith('3') || ['2070', '2510', '2520', '6090'].includes(d.account_code)) ||
+      je.credits.some(c => c.account_code.startsWith('3') || ['2070', '2510', '2520', '6090'].includes(c.account_code));
+    const hasPPEOrInvesting =
+      je.debits.some(d => d.account_code.startsWith('15') || d.account_code === '1090') ||
+      je.credits.some(c => c.account_code.startsWith('15') || c.account_code === '1090');
 
-    if (hasEquity) {
+    if (hasEquityOrBorrowing) {
       netFinancingCashFlow += (cashDr - cashCr);
-    } else if (hasPPE || je.ref_type === 'PPE Acquisition') {
+    } else if (hasPPEOrInvesting || je.ref_type === 'PPE Acquisition') {
       netInvestingCashFlow += (cashDr - cashCr);
     } else if (je.ref_type === 'Payroll') {
       cashOutflowsToPayroll += (cashCr - cashDr);
@@ -1410,18 +1634,34 @@ export function computeAccountingSummaries(input: MasterJournalInput): Accountin
 
   const netOperatingCashFlow = Math.round((cashInflowsFromCustomers - cashOutflowsToSuppliersAndExpenses - cashOutflowsToPayroll) * 100) / 100;
 
+  // PAS 7 Indirect Method Working Capital Adjustments
+  const wcChangeInAR = Math.round(-(arGross + contractAssets) * 100) / 100;
+  const wcChangeInPrepaidsAndTaxAssets = Math.round(-(inputVat + cwt2307 + prepaidExpenses + supplierAdvances + otherCurrentAssets) * 100) / 100;
+  const wcChangeInAPAndAccruals = Math.round((ap + customerAdvances + contractLiabilities + provisionsCurrent + otherCurrentLiabilities) * 100) / 100;
+  const wcChangeInTaxAndStatutoryPayables = Math.round((outputVat + ewtPayable + payrollDeductionsPayable + incomeTaxPayable) * 100) / 100;
+
   return {
     cash,
+    arGross,
+    allowanceForECL,
     ar,
     customerAdvances,
     inputVat,
     cwt2307,
     prepaidExpenses,
+    contractAssets,
+    assetsHeldForSale,
     supplierAdvances,
+    otherCurrentAssets,
     totalCurrentAssets,
     ppeCost,
     accumDep,
     netPPE,
+    rouAssetNet,
+    intangibleAssets,
+    deferredTaxAsset,
+    otherNonCurrentAssets,
+    totalNonCurrentAssets,
     totalAssets,
     ap,
     outputVat,
@@ -1429,6 +1669,17 @@ export function computeAccountingSummaries(input: MasterJournalInput): Accountin
     ewtPayable,
     payrollDeductionsPayable,
     incomeTaxPayable,
+    contractLiabilities,
+    leaseLiabilityCurrent,
+    provisionsCurrent,
+    otherCurrentLiabilities,
+    totalCurrentLiabilities,
+    loansPayableNonCurrent,
+    leaseLiabilityNonCurrent,
+    deferredTaxLiability,
+    retirementBenefitObligation,
+    otherNonCurrentLiabilities,
+    totalNonCurrentLiabilities,
     otherLiabilities,
     totalLiabilities,
     vatableSales,
@@ -1438,12 +1689,21 @@ export function computeAccountingSummaries(input: MasterJournalInput): Accountin
     grossRevenue,
     totalOperatingExp,
     depreciationExpense,
+    impairmentExpense,
+    financeCosts,
     payrollExpense,
     specialRev: otherRev,
     specialExp: 0,
+    operatingProfit,
     netIncomeBeforeTax,
     incomeTaxProvision,
+    deferredTaxExpense,
     netIncome,
+    revaluationSurplusOCI,
+    actuarialRemeasurementOCI,
+    fvociReserveOCI,
+    totalOCI,
+    totalComprehensiveIncome,
     capitalStock: capitalContributions,
     ownerDrawings,
     retainedEarnings,
@@ -1451,12 +1711,17 @@ export function computeAccountingSummaries(input: MasterJournalInput): Accountin
     totalLiabilitiesAndEquity,
     unrealizedGainLoss,
     isBalanced: Math.abs(unrealizedGainLoss) < 0.05,
+    hasRetrospectiveRestatement,
     cashInflowsFromCustomers: Math.round(cashInflowsFromCustomers * 100) / 100,
     cashOutflowsToSuppliersAndExpenses: Math.round(cashOutflowsToSuppliersAndExpenses * 100) / 100,
     cashOutflowsToPayroll: Math.round(cashOutflowsToPayroll * 100) / 100,
     netOperatingCashFlow,
     netInvestingCashFlow: Math.round(netInvestingCashFlow * 100) / 100,
     netFinancingCashFlow: Math.round(netFinancingCashFlow * 100) / 100,
+    wcChangeInAR,
+    wcChangeInPrepaidsAndTaxAssets,
+    wcChangeInAPAndAccruals,
+    wcChangeInTaxAndStatutoryPayables,
     accountMap,
     journalEntries
   };

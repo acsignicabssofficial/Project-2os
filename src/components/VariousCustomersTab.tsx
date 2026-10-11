@@ -4,6 +4,7 @@ import {
   Search, 
   ArrowRightLeft, 
   Pencil, 
+  Trash2,
   CheckCircle2, 
   AlertCircle, 
   UserPlus, 
@@ -27,6 +28,7 @@ interface VariousCustomersTabProps {
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
+  onDeleteRecord?: (bookType: string, record: UniformBookRecord) => void;
 }
 
 export default function VariousCustomersTab({
@@ -39,7 +41,8 @@ export default function VariousCustomersTab({
   activeCompany,
   theme,
   triggerAlert,
-  globalSearch = ''
+  globalSearch = '',
+  onDeleteRecord
 }: VariousCustomersTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const [searchTerm, setSearchTerm] = useState('');
@@ -187,7 +190,10 @@ export default function VariousCustomersTab({
         return;
       }
       targetCustName = (selected.registered_name || selected.customer_name || selected.trade_name || '').trim();
-      targetTin = selected.client_TIN || selected.customer_tin || '000-000-000-00000';
+      const rawSelTin = (selected.client_TIN || selected.customer_tin || '').replace(/\D/g, '').slice(0, 9);
+      const formattedSelTin = rawSelTin.length === 9 ? `${rawSelTin.slice(0, 3)}-${rawSelTin.slice(3, 6)}-${rawSelTin.slice(6, 9)}` : '000-000-000';
+      const selBranch = (selected.customer_branch_code || selected.tin_branch_code || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+      targetTin = `${formattedSelTin}-${selBranch}`;
       targetAddress = selected.address || selected.client_Address || selected.customer_address || '';
     } else {
       // New Customer Mode
@@ -197,7 +203,7 @@ export default function VariousCustomersTab({
       }
       const digits = newCustTin.replace(/\D/g, '');
       if (digits.length < 9) {
-        triggerAlert('Please enter a valid 9 to 14 digit TIN for this regular customer.', 'error');
+        triggerAlert('Please enter a valid 9-digit TIN for this regular customer.', 'error');
         return;
       }
 
@@ -215,7 +221,9 @@ export default function VariousCustomersTab({
       }
 
       targetCustName = newCustName.trim();
-      targetTin = newCustTin.trim();
+      const primary9 = `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 9)}`;
+      const branch5 = digits.length >= 14 ? digits.slice(9, 14) : '00000';
+      targetTin = `${primary9}-${branch5}`;
       targetAddress = newCustAddress.trim();
 
       // Add new customer to database
@@ -225,9 +233,11 @@ export default function VariousCustomersTab({
         registered_name: targetCustName,
         customer_name: targetCustName,
         trade_name: targetCustName,
-        client_TIN: targetTin,
-        customer_tin: targetTin,
-        tin_number: targetTin,
+        client_TIN: primary9,
+        customer_tin: primary9,
+        tin_number: primary9,
+        customer_branch_code: branch5,
+        tin_branch_code: branch5,
         client_Address: targetAddress,
         customer_address: targetAddress,
         address: targetAddress,
@@ -245,7 +255,9 @@ export default function VariousCustomersTab({
         return {
           ...s,
           registered_name: targetCustName,
+          customer_name: targetCustName,
           tin: targetTin,
+          customer_tin: targetTin,
           address: targetAddress || s.address,
           is_various: false
         };
@@ -258,8 +270,11 @@ export default function VariousCustomersTab({
         return {
           ...c,
           registered_name: targetCustName,
+          customer_name: targetCustName,
           tin: targetTin,
-          address: targetAddress || c.address
+          customer_tin: targetTin,
+          address: targetAddress || c.address,
+          is_various: false
         };
       }
       return c;
@@ -417,6 +432,21 @@ export default function VariousCustomersTab({
                           title="Reroute to Regular Customer in Database"
                         >
                           <ArrowRightLeft className="w-3 h-3" /> Reroute
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (onDeleteRecord) {
+                              onDeleteRecord('subsidiary_sales', rec);
+                            } else {
+                              setSubsidiarySales(prev => prev.filter(s => s.id !== rec.id));
+                              setCollections(prev => prev.filter(c => !(c.invoice_number && c.invoice_number.trim().toLowerCase() === rec.invoice_number.trim().toLowerCase())));
+                              triggerAlert(`Deleted sale transaction Invoice #${rec.invoice_number}.`, 'info');
+                            }
+                          }}
+                          className="px-2 py-1 text-[11px] font-semibold rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition cursor-pointer flex items-center gap-1"
+                          title="Delete sale transaction and all related collections, cash receipts, journal & ledger postings"
+                        >
+                          <Trash2 className="w-3 h-3" /> Delete
                         </button>
                       </div>
                     </td>

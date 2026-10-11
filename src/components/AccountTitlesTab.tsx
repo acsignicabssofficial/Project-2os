@@ -59,6 +59,12 @@ export default function AccountTitlesTab({
       return;
     }
 
+    // PAS 1.87 Guardrail: Strictly prohibit labeling any item as an "Extraordinary Item"
+    if (/extraordinary/i.test(title) || /extraordinary/i.test(category) || /extraordinary/i.test(description)) {
+      triggerAlert('PAS 1.87 Compliance Violation: Entities are strictly prohibited from presenting or labeling any items of income or expense as "Extraordinary Items" in the financial statements or notes.', 'error');
+      return;
+    }
+
     if (editingId !== null) {
       setAccountTitles(prev => prev.map(a => a.id === editingId ? {
         ...a,
@@ -105,10 +111,8 @@ export default function AccountTitlesTab({
   };
 
   const handleDelete = (id: number, accTitle: string) => {
-    if (window.confirm(`Are you sure you want to delete account title "${accTitle}"?`)) {
-      setAccountTitles(prev => prev.filter(a => a.id !== id));
-      triggerAlert(`Account title "${accTitle}" deleted.`, 'info');
-    }
+    setAccountTitles(prev => prev.filter(a => a.id !== id));
+    triggerAlert(`Account title "${accTitle}" deleted.`, 'info');
   };
 
   // Filter transactions by period

@@ -515,10 +515,8 @@ export default function PayrollTab({
   };
 
   const handleDelete = (id: number) => {
-    if (window.confirm('Delete this payroll record?')) {
-      setPayrollRecords(prev => prev.filter(p => p.id !== id));
-      triggerAlert('Payroll record removed.', 'info');
-    }
+    setPayrollRecords(prev => prev.filter(p => p.id !== id));
+    triggerAlert('Payroll record removed.', 'info');
   };
 
   const filteredPayroll = payrollRecords.filter(p => {

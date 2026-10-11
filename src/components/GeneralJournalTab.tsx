@@ -18,6 +18,7 @@ interface GeneralJournalTabProps {
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch: string;
+  mode?: 'GENERAL' | 'SPECIAL';
 }
 
 export default function GeneralJournalTab({
@@ -34,11 +35,11 @@ export default function GeneralJournalTab({
   activeCompany,
   theme,
   triggerAlert,
-  globalSearch
+  globalSearch,
+  mode = 'GENERAL'
 }: GeneralJournalTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('ALL');
-  const [filterCategory, setFilterCategory] = useState<'ALL' | 'GENERAL' | 'SPECIAL'>('ALL');
   const [filterAccount, setFilterAccount] = useState<string>('ALL');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -84,21 +85,30 @@ export default function GeneralJournalTab({
     });
   }, [sales, collections, cashReceipts, expenses, payments, cashDisbursements, specialEntries, accountTitles, ppeAssets, payrollRecords, activeCompany]);
 
-  // Merge base entries with edited overrides
+  // Merge base entries with edited overrides and filter strictly by mode ('GENERAL' vs 'SPECIAL')
+  // Special Journal = All transactions related to Sales & Purchases (Subsidiary Sales, Cash Receipts, Collections, Subsidiary Purchases, Cash Disbursements, Payments) -> posts to Special Ledger
+  // General Journal = Other transactions including Adjusting Entries, Payroll, PPE Acquisition/Depreciation, Closing, Reversing, Tax Payment, etc. -> posts to General Ledger
   const journalEntries = useMemo(() => {
-    return baseJournalEntries.map(e => editedEntries[e.entry_no] || e).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [baseJournalEntries, editedEntries]);
+    const modeFiltered = baseJournalEntries.filter(entry => {
+      const isSalesOrPurchasesEntry = ['Sales', 'Collection', 'Expense', 'Payment'].includes(entry.ref_type);
+      return mode === 'SPECIAL' ? isSalesOrPurchasesEntry : !isSalesOrPurchasesEntry;
+    });
+
+    const prefix = mode === 'GENERAL' ? 'GJ' : 'SJ';
+    return modeFiltered.map((e, idx) => {
+      const seqNo = `${prefix}${idx + 1}`;
+      const edited = editedEntries[seqNo] || editedEntries[e.entry_no];
+      if (edited) {
+        return { ...edited, entry_no: seqNo };
+      }
+      return { ...e, entry_no: seqNo };
+    });
+  }, [baseJournalEntries, editedEntries, mode]);
 
   // Filtered Entries
   const filteredEntries = useMemo(() => {
     const q = (searchTerm || globalSearch).toLowerCase().trim();
     return journalEntries.filter(entry => {
-      const isSpecial = ['Sales', 'Collection', 'Expense', 'Payment', 'Cancellation'].includes(entry.ref_type);
-      const isGeneral = !isSpecial;
-
-      if (filterCategory === 'GENERAL' && !isGeneral) return false;
-      if (filterCategory === 'SPECIAL' && !isSpecial) return false;
-
       const matchesType = filterType === 'ALL' || entry.ref_type.toLowerCase() === filterType.toLowerCase();
 
       const matchesAccount = filterAccount === 'ALL' ||
@@ -125,7 +135,7 @@ export default function GeneralJournalTab({
 
       return matchesType && matchesAccount && matchesSearch && matchesStart && matchesEnd && matchesBalance;
     });
-  }, [journalEntries, searchTerm, globalSearch, filterType, filterCategory, filterAccount, startDate, endDate, filterBalance]);
+  }, [journalEntries, searchTerm, globalSearch, filterType, filterAccount, startDate, endDate, filterBalance]);
 
   // Handle Editing Entry
   const handleStartEdit = (entry: JournalEntry) => {
@@ -140,7 +150,7 @@ export default function GeneralJournalTab({
     const totalCr = editingEntry.credits.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 
     if (Math.abs(totalDr - totalCr) >= 0.01) {
-      alert(`Transaction rejected: Journal entry is unbalanced! Total Debit (₱${totalDr.toLocaleString(undefined, { minimumFractionDigits: 2 })}) does not equal Total Credit (₱${totalCr.toLocaleString(undefined, { minimumFractionDigits: 2 })}). Difference: ₱${Math.abs(totalDr - totalCr).toLocaleString(undefined, { minimumFractionDigits: 2 })}.`);
+      triggerAlert(`Transaction rejected: Journal entry is unbalanced! Total Debit (₱${totalDr.toLocaleString(undefined, { minimumFractionDigits: 2 })}) does not equal Total Credit (₱${totalCr.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`, 'error');
       return;
     }
 
@@ -160,60 +170,29 @@ export default function GeneralJournalTab({
           <div>
             <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
               <BookOpen className="w-6 h-6 text-cyan-400" />
-              General Journal (Books of Original Entry)
+              {mode === 'GENERAL'
+                ? 'General Journal (Other Transactions, Adjusting Entries, Payroll, PPE — Posts to General Ledger Only)'
+                : 'Special Journal (All Sales & Purchases Transactions — Posts to Special Ledger Only)'}
             </h2>
             <p className={`text-xs ${theme.textMuted} mt-1`}>
-              General Journal: Chronological recording of all accounting transactions and double-entry debits and credits from Sales, Collections, Expenses, Payments, Payroll, and Special Entries.
+              {mode === 'GENERAL'
+                ? 'General Journal: Chronological double-entry recording of Adjusting Entries, Payroll, PPE Acquisition & Depreciation, Closing, Reversing, and Other Transactions — posting exclusively to the General Ledger.'
+                : 'Special Journal: Chronological double-entry recording of all Sales and Purchases transactions (Subsidiary Sales, Cash Receipts, Collections, Subsidiary Purchases, Cash Disbursements, and Payments) — posting exclusively to the Special Ledger.'}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-zinc-400">Total Posted Entries:</span>
+            <span className="text-xs font-semibold text-zinc-400">
+              {mode === 'GENERAL' ? 'General Journal Entries:' : 'Special Journal Entries:'}
+            </span>
             <span className="px-2.5 py-1 text-xs font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-lg">
               {filteredEntries.length} Entries
             </span>
           </div>
         </div>
 
-        {/* CATEGORY SELECTOR TABS */}
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setFilterCategory('ALL')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-              filterCategory === 'ALL'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-            }`}
-          >
-            📖 All Books & Entries ({journalEntries.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterCategory('GENERAL')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-              filterCategory === 'GENERAL'
-                ? 'bg-purple-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-            }`}
-          >
-            📒 General Journal (Tax, Payroll, Depreciation, Adjusting, Closing, Reversing)
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterCategory('SPECIAL')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition cursor-pointer ${
-              filterCategory === 'SPECIAL'
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-            }`}
-          >
-            📗 Special Journal (Sales, Collections, Expenses, Payments, Cancellations)
-          </button>
-        </div>
-
         {/* COMPREHENSIVE FILTERING CONTROLS */}
-        <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="mt-4 pt-4 border-t border-zinc-800/30 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
           {/* Filter Type */}
           <div>
             <label className={`block text-[11px] font-medium mb-1 ${theme.textMuted}`}>Specific Entry Type</label>
@@ -223,21 +202,24 @@ export default function GeneralJournalTab({
               className={`w-full text-xs px-2.5 py-1.5 rounded-lg border bg-transparent font-semibold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
             >
               <option value="ALL" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>All Types</option>
-              <optgroup label="General Journal Types">
-                <option value="Payroll" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Payroll Entries</option>
-                <option value="Tax Provision" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Tax Payment Entries</option>
-                <option value="Depreciation" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>PPE Depreciation</option>
-                <option value="Adjusting Entry" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Adjusting Entries</option>
-                <option value="Closing Entry" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Closing Entries</option>
-                <option value="Reversing Entry" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Reversing Entries</option>
-              </optgroup>
-              <optgroup label="Special Journal Types">
-                <option value="Sales" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Sales Invoices</option>
-                <option value="Collection" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Cash Collections</option>
-                <option value="Expense" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Expense Vouchers</option>
-                <option value="Payment" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Disbursements</option>
-                <option value="Cancellation" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Cancellations</option>
-              </optgroup>
+              {mode === 'SPECIAL' ? (
+                <>
+                  <option value="Sales" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Sales Invoices</option>
+                  <option value="Collection" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Cash Receipts & Collections</option>
+                  <option value="Expense" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Purchases & Expense Vouchers</option>
+                  <option value="Payment" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Cash Disbursements & Payments</option>
+                </>
+              ) : (
+                <>
+                  <option value="Adjusting Entry" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Adjusting Entries</option>
+                  <option value="Closing Entry" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Closing Entries</option>
+                  <option value="Reversing Entry" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Reversing Entries</option>
+                  <option value="Payroll" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Payroll Entries</option>
+                  <option value="PPE Acquisition" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>PPE Acquisition</option>
+                  <option value="Depreciation" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>PPE Depreciation</option>
+                  <option value="Tax Payment Entry" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Tax Payment Entries</option>
+                </>
+              )}
             </select>
           </div>
 

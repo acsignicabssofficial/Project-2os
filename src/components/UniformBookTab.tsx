@@ -49,6 +49,7 @@ interface UniformBookTabProps {
   // Callback when records change to sync back to legacy states if needed
   onSyncLegacy?: (updated: UniformBookRecord[]) => void;
   accountTitles?: AccountTitle[];
+  onDeleteRecord?: (bookType: UniformBookType, record: UniformBookRecord) => void;
 }
 
 export default function UniformBookTab({
@@ -62,7 +63,8 @@ export default function UniformBookTab({
   triggerAlert,
   globalSearch = '',
   onSyncLegacy,
-  accountTitles = []
+  accountTitles = [],
+  onDeleteRecord
 }: UniformBookTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const labels = getBookDisplayLabel(bookType);
@@ -121,6 +123,8 @@ export default function UniformBookTab({
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState<number | null>(null);
   const [previewRecord, setPreviewRecord] = useState<UniformBookRecord | null>(null);
+  const [collectionsDisplayMode, setCollectionsDisplayMode] = useState<'grouped' | 'flat'>('grouped');
+  const [expandedInvoices, setExpandedInvoices] = useState<Record<string, boolean>>({});
 
   // Import State
   const [importedPreview, setImportedPreview] = useState<UniformBookRecord[]>([]);
@@ -187,10 +191,23 @@ export default function UniformBookTab({
     });
   }, [formQty, formUnitPrice, formZeroRated, formVatExempt, formDiscount, formTaxWithheld, formVatOrNonVat]);
 
-  // Filtered records
+  // Helper to extract numeric invoice sequence (1, 2, 3...) for Subsidiary Sales sequence tracking
+  const extractInvoiceSeq = (invStr?: string): number | null => {
+    if (!invStr) return null;
+    const trimmed = invStr.trim();
+    if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+    // Avoid matching 4-digit years like 2026-0001 as 2026; take the trailing number
+    const trailingMatch = trimmed.match(/(\d+)\s*$/);
+    if (trailingMatch) return parseInt(trailingMatch[1], 10);
+    const anyMatch = trimmed.match(/(\d+)/);
+    if (anyMatch) return parseInt(anyMatch[1], 10);
+    return null;
+  };
+
+  // Filtered records (Sorted in strict ascending sequence for Subsidiary Sales so missing invoices are easy to spot)
   const filteredRecords = useMemo(() => {
     const q = (searchTerm || globalSearch).toLowerCase().trim();
-    return records.filter(r => {
+    const list = records.filter(r => {
       if (activeCompanyName && r.company_name && r.company_name !== activeCompanyName) {
         return false;
       }
@@ -216,7 +233,47 @@ export default function UniformBookTab({
         (r.particulars || '').toLowerCase().includes(q)
       );
     });
+
+    if (bookType === 'subsidiary_sales') {
+      return [...list].sort((a, b) => {
+        const seqA = extractInvoiceSeq(a.invoice_number);
+        const seqB = extractInvoiceSeq(b.invoice_number);
+        if (seqA !== null && seqB !== null && seqA !== seqB) {
+          return seqA - seqB;
+        }
+        return (Number(a.id) || 0) - (Number(b.id) || 0);
+      });
+    }
+
+    return list;
   }, [records, activeCompanyName, bookType, searchTerm, globalSearch, filterVat, filterType]);
+
+  // Missing Invoice Sequence Audit for Subsidiary Sales (checks from Invoice 1 up to max invoice number)
+  const invoiceSequenceAudit = useMemo(() => {
+    if (bookType !== 'subsidiary_sales') return null;
+    const companyRecords = records.filter(r => !activeCompanyName || !r.company_name || r.company_name === activeCompanyName);
+    const seqNumbers = companyRecords
+      .map(r => extractInvoiceSeq(r.invoice_number))
+      .filter((n): n is number => n !== null && n > 0 && n < 100000);
+
+    if (seqNumbers.length === 0) return { min: 0, max: 0, missing: [] as number[], totalTracked: 0 };
+    const uniqueSorted = Array.from(new Set(seqNumbers)).sort((a, b) => a - b);
+    const maxInv = uniqueSorted[uniqueSorted.length - 1];
+    const presentSet = new Set(uniqueSorted);
+    const missing: number[] = [];
+    // Check sequence starting from Invoice 1 up to maxInv
+    for (let i = 1; i <= maxInv; i++) {
+      if (!presentSet.has(i)) {
+        missing.push(i);
+      }
+    }
+    return {
+      min: 1,
+      max: maxInv,
+      missing,
+      totalTracked: uniqueSorted.length
+    };
+  }, [records, activeCompanyName, bookType]);
 
   // Totals of currently filtered records
   const summaryTotals = useMemo(() => {
@@ -343,7 +400,14 @@ export default function UniformBookTab({
 
   // Delete
   const handleDeleteRecord = (id: number) => {
-    if (!confirm('Are you sure you want to permanently delete this record from the database?')) return;
+    const targetRecord = records.find(r => r.id === id);
+    if (!targetRecord) return;
+
+    if (onDeleteRecord) {
+      onDeleteRecord(bookType, targetRecord);
+      return;
+    }
+
     const updated = records.filter(r => r.id !== id);
     setRecords(() => updated);
     if (onSyncLegacy) onSyncLegacy(updated);
@@ -544,6 +608,81 @@ export default function UniformBookTab({
         </div>
       </div>
 
+      {/* SUBSIDIARY SALES: INVOICE SEQUENCE & MISSING INVOICE TRACKER BANNER */}
+      {bookType === 'subsidiary_sales' && invoiceSequenceAudit && (
+        <div className={`p-3.5 rounded-xl border ${
+          invoiceSequenceAudit.missing.length > 0
+            ? 'border-rose-500/40 bg-rose-500/10'
+            : 'border-emerald-500/30 bg-emerald-500/10'
+        } flex flex-wrap items-center justify-between gap-3`}>
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className={`w-4 h-4 shrink-0 ${
+              invoiceSequenceAudit.missing.length > 0 ? 'text-rose-400' : 'text-emerald-400'
+            }`} />
+            <div>
+              <div className={`text-xs font-bold ${
+                invoiceSequenceAudit.missing.length > 0 ? 'text-rose-300' : 'text-emerald-300'
+              }`}>
+                {invoiceSequenceAudit.totalTracked === 0
+                  ? 'Invoice Sequence Tracker (Starts at Invoice #1)'
+                  : invoiceSequenceAudit.missing.length === 0
+                  ? `Invoice Sequence Complete: Invoice #1 to Invoice #${invoiceSequenceAudit.max} (No Missing Invoices)`
+                  : `Missing Invoice Alert: ${invoiceSequenceAudit.missing.length} Missing Invoice Number(s) Detected in Sequence (1 to ${invoiceSequenceAudit.max})!`}
+              </div>
+              <div className="text-[11px] text-zinc-300 mt-0.5">
+                {invoiceSequenceAudit.totalTracked === 0 ? (
+                  <span>Subsidiary Sales tracks all invoices in strict numerical sequence starting from Invoice 1 so any skipped or missing invoice is immediately identified.</span>
+                ) : invoiceSequenceAudit.missing.length > 0 ? (
+                  <span>
+                    Missing Invoice #(s):{' '}
+                    <strong className="font-mono text-rose-300 underline">
+                      {invoiceSequenceAudit.missing.slice(0, 20).map(n => `#${n}`).join(', ')}
+                      {invoiceSequenceAudit.missing.length > 20 ? ` ...and ${invoiceSequenceAudit.missing.length - 20} more` : ''}
+                    </strong>
+                  </span>
+                ) : (
+                  <span>All {invoiceSequenceAudit.totalTracked} invoice(s) are accounted for in unbroken sequence.</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* COLLECTIONS BOOK COLLAPSIBLE INVOICE GROUPING VIEW */}
+      {bookType === 'collections' && (
+        <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} flex flex-wrap items-center justify-between gap-3`}>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-cyan-400">Collections Book Display Mode:</span>
+            <span className="text-[11px] text-zinc-400">Click any Invoice row below to collapse or expand all individual collections (COLLECTION 1, COLLECTION 2, etc.) made for that sale.</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setCollectionsDisplayMode('grouped')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                collectionsDisplayMode === 'grouped'
+                  ? 'bg-cyan-600 text-white shadow-xs'
+                  : 'bg-zinc-800 text-zinc-400 hover:text-white'
+              }`}
+            >
+              Group by Invoice (Collapsible)
+            </button>
+            <button
+              type="button"
+              onClick={() => setCollectionsDisplayMode('flat')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                collectionsDisplayMode === 'flat'
+                  ? 'bg-cyan-600 text-white shadow-xs'
+                  : 'bg-zinc-800 text-zinc-400 hover:text-white'
+              }`}
+            >
+              Show All Payments (Flat List)
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* FILTER & SEARCH BAR */}
       <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} flex flex-wrap items-center justify-between gap-3`}>
         <div className="flex items-center gap-2 flex-1 min-w-[240px]">
@@ -593,12 +732,172 @@ export default function UniformBookTab({
         </div>
       </div>
 
-      {/* SPREADSHEET TABLE: EXACT 21 UNIFORM HEADERS */}
+      {/* SPREADSHEET TABLE */}
       <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl shadow-xs overflow-hidden`}>
         <div className="overflow-x-auto max-h-[640px]">
+          {bookType === 'cash_receipt' ? (
+            <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+              <thead className="sticky top-0 z-10">
+                <tr className={`${theme.isLight ? 'bg-slate-100 text-slate-600' : 'bg-zinc-900 text-zinc-400'} uppercase font-bold text-[10px] tracking-wider border-b ${theme.borderCard}`}>
+                  <th className={`p-3 text-center min-w-[105px] sticky left-0 z-20 ${theme.isLight ? 'bg-slate-100 border-r border-slate-200 text-slate-700' : 'bg-zinc-900 border-r border-zinc-800 text-zinc-300'}`}>ACTIONS</th>
+                  <th className="p-3 text-center w-10">#</th>
+                  <th className="p-3 min-w-[110px] font-mono">DATE</th>
+                  <th className="p-3 min-w-[200px]">CUSTOMER NAME</th>
+                  <th className="p-3 min-w-[240px]">PARTICULARS</th>
+                  <th className="p-3 min-w-[130px] font-mono text-cyan-600 dark:text-cyan-400">INVOICE NUMBER</th>
+                  <th className="p-3 min-w-[160px] text-right font-mono text-emerald-600 dark:text-emerald-400">CASH - DEBIT (CASH RECEIVED)</th>
+                  <th className="p-3 min-w-[210px] text-right font-mono text-amber-600 dark:text-amber-400">CREDITABLE WITHHOLDING TAX - DEBIT</th>
+                  <th className="p-3 min-w-[140px] text-right font-mono text-rose-600 dark:text-rose-400">DISCOUNTS - DEBIT</th>
+                  <th className="p-3 min-w-[170px] text-right font-mono text-cyan-600 dark:text-cyan-400">SALES (A/R) - CREDIT</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${theme.borderCard}`}>
+                {filteredRecords.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="p-8 text-center text-zinc-400">
+                      No fully paid invoices recorded in Cash Receipts yet.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRecords.map((r, idx) => {
+                    const isCancelled = r.is_cancelled;
+                    const grossSalesCredit = Number(r.total_amount_vat_inclusive || r.amount) || 0;
+                    const discountDebit = Number(r.discount) || 0;
+                    const cwtDebit = Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0;
+                    const cashDebit = r.amount_collected !== undefined && Number(r.amount_collected) > 0
+                      ? Number(r.amount_collected)
+                      : Math.max(0, Math.round((grossSalesCredit - discountDebit - cwtDebit) * 100) / 100);
+
+                    return (
+                      <tr
+                        key={r.id}
+                        className={`${isCancelled ? 'bg-rose-950/20 text-zinc-500 line-through' : theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/40'} transition-colors`}
+                      >
+                        <td className={`p-2.5 text-center sticky left-0 z-10 border-r ${
+                          theme.isLight
+                            ? 'bg-white border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)]'
+                            : 'bg-zinc-950/95 border-zinc-800'
+                        }`}>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => setPreviewRecord(r)}
+                              title="Preview Official Receipt / Invoice"
+                              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                theme.isLight
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-100'
+                                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                              }`}
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleOpenEditModal(r)}
+                              title="Edit Record"
+                              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                theme.isLight
+                                  ? 'bg-sky-50 border-sky-200 text-sky-600 hover:bg-sky-100'
+                                  : 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/20'
+                              }`}
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRecord(r.id)}
+                              title="Delete Cash Receipt"
+                              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                theme.isLight
+                                  ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100'
+                                  : 'bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500/20'
+                              }`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                        <td className={`p-3 text-center text-[10px] font-mono ${theme.textMuted}`}>{idx + 1}</td>
+                        <td className={`p-3 font-mono ${theme.textMain}`}>{r.date}</td>
+                        <td className={`p-3 font-semibold ${isCancelled ? 'text-zinc-500' : theme.textTitle}`}>
+                          {r.registered_name}
+                        </td>
+                        <td className={`p-3 max-w-[280px] truncate ${theme.textMain}`} title={r.particulars}>
+                          {r.particulars || `Full Settlement for Invoice #${r.invoice_number}`}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewRecord(r)}
+                            className="hover:underline inline-flex items-center gap-1.5 cursor-pointer text-left text-cyan-600 dark:text-cyan-400 hover:opacity-80"
+                            title="Click to preview official BIR Invoice / Receipt"
+                          >
+                            <span>{r.invoice_number}</span>
+                            <Eye className="w-3 h-3 opacity-60 hover:opacity-100" />
+                          </button>
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          ₱{cashDebit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right font-mono font-semibold text-amber-600 dark:text-amber-400">
+                          ₱{cwtDebit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right font-mono font-semibold text-rose-600 dark:text-rose-400">
+                          ₱{discountDebit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right font-mono font-extrabold text-cyan-600 dark:text-cyan-400">
+                          ₱{grossSalesCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+              {filteredRecords.length > 0 && (
+                <tfoot className={`${theme.isLight ? 'bg-slate-100 border-t-2 border-slate-300' : 'bg-zinc-900/90 border-t-2 border-zinc-700'} font-mono font-bold text-xs`}>
+                  <tr>
+                    <td className={`p-3 sticky left-0 ${theme.isLight ? 'bg-slate-100 border-r border-slate-200' : 'bg-zinc-900 border-r border-zinc-800'}`}></td>
+                    <td colSpan={5} className={`p-3 text-right uppercase tracking-wider font-bold ${theme.textMuted}`}>
+                      TOTAL CASH RECEIPTS (DEBIT = CREDIT):
+                    </td>
+                    <td className="p-3 text-right text-emerald-600 dark:text-emerald-400 font-extrabold">
+                      ₱{filteredRecords
+                        .filter(r => !r.is_cancelled)
+                        .reduce((sum, r) => {
+                          const gross = Number(r.total_amount_vat_inclusive || r.amount) || 0;
+                          const disc = Number(r.discount) || 0;
+                          const cwt = Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0;
+                          const cash = r.amount_collected !== undefined && Number(r.amount_collected) > 0
+                            ? Number(r.amount_collected)
+                            : Math.max(0, Math.round((gross - disc - cwt) * 100) / 100);
+                          return sum + cash;
+                        }, 0)
+                        .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="p-3 text-right text-amber-600 dark:text-amber-400 font-extrabold">
+                      ₱{filteredRecords
+                        .filter(r => !r.is_cancelled)
+                        .reduce((sum, r) => sum + (Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0), 0)
+                        .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="p-3 text-right text-rose-600 dark:text-rose-400 font-extrabold">
+                      ₱{filteredRecords
+                        .filter(r => !r.is_cancelled)
+                        .reduce((sum, r) => sum + (Number(r.discount) || 0), 0)
+                        .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="p-3 text-right text-cyan-600 dark:text-cyan-400 font-black text-sm">
+                      ₱{filteredRecords
+                        .filter(r => !r.is_cancelled)
+                        .reduce((sum, r) => sum + (Number(r.total_amount_vat_inclusive || r.amount) || 0), 0)
+                        .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          ) : (
           <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
             <thead className="sticky top-0 z-10">
-              <tr className={`bg-zinc-100 dark:bg-zinc-900 ${theme.textMuted} uppercase font-bold text-[10px] tracking-wider border-b ${theme.borderCard}`}>
+              <tr className={`${theme.isLight ? 'bg-slate-100 text-slate-600' : 'bg-zinc-900 text-zinc-400'} uppercase font-bold text-[10px] tracking-wider border-b ${theme.borderCard}`}>
+                <th className={`p-3 text-center min-w-[115px] sticky left-0 z-20 ${theme.isLight ? 'bg-slate-100 border-r border-slate-200 text-slate-700' : 'bg-zinc-900 border-r border-zinc-800 text-zinc-300'}`}>ACTIONS</th>
                 <th className="p-3 text-center w-10">#</th>
                 <th className="p-3 min-w-[120px]">STATUS</th>
                 <th className="p-3 min-w-[200px]">1. REGISTERED NAME</th>
@@ -608,40 +907,39 @@ export default function UniformBookTab({
                 <th className="p-3 min-w-[140px]">5. TYPE OF TRANSACTION</th>
                 <th className="p-3 min-w-[100px] font-mono">6. DATE</th>
                 <th className="p-3 min-w-[140px]">7. INVOICE TYPE</th>
-                <th className={`p-3 min-w-[120px] font-mono ${isDisbursementOrPurchase ? 'text-amber-500 font-extrabold' : ''}`}>
+                <th className={`p-3 min-w-[120px] font-mono ${isDisbursementOrPurchase ? 'text-amber-600 dark:text-amber-500 font-extrabold' : ''}`}>
                   7.1 VOUCHER #
                 </th>
                 {isDisbursementOrPurchase && (
                   <>
-                    <th className="p-3 min-w-[140px] text-purple-400 font-bold">BUSINESS TAX TYPE</th>
-                    <th className="p-3 min-w-[150px] text-indigo-400 font-bold">EXPENSE TYPE</th>
+                    <th className="p-3 min-w-[140px] text-purple-600 dark:text-purple-400 font-bold">BUSINESS TAX TYPE</th>
+                    <th className="p-3 min-w-[150px] text-indigo-600 dark:text-indigo-400 font-bold">EXPENSE TYPE</th>
                   </>
                 )}
-                <th className="p-3 min-w-[110px] font-mono font-bold text-cyan-500">8. INVOICE #</th>
+                <th className="p-3 min-w-[110px] font-mono font-bold text-cyan-600 dark:text-cyan-500">8. INVOICE #</th>
                 <th className="p-3 min-w-[200px]">9. PARTICULARS</th>
                 <th className="p-3 min-w-[70px] text-right font-mono">10. QTY</th>
                 <th className="p-3 min-w-[100px] text-right font-mono">11. UNIT PRICE</th>
                 <th className="p-3 min-w-[110px] text-right font-mono font-bold">12. AMOUNT</th>
-                <th className="p-3 min-w-[120px] text-right font-mono text-emerald-500">13. VATABLE AMOUNT</th>
-                <th className="p-3 min-w-[110px] text-right font-mono text-cyan-500">14. VAT AMOUNT</th>
+                <th className="p-3 min-w-[120px] text-right font-mono text-emerald-600 dark:text-emerald-500">13. VATABLE AMOUNT</th>
+                <th className="p-3 min-w-[110px] text-right font-mono text-cyan-600 dark:text-cyan-500">14. VAT AMOUNT</th>
                 <th className="p-3 min-w-[110px] text-right font-mono">15. ZERO RATED</th>
                 <th className="p-3 min-w-[110px] text-right font-mono">16. VAT EXEMPT</th>
                 <th className="p-3 min-w-[130px] text-right font-mono">17. VAT INCLUSIVE</th>
                 <th className="p-3 min-w-[130px] text-right font-mono">18. NET OF VAT</th>
-                <th className="p-3 min-w-[90px] text-right font-mono text-rose-400">19. DISCOUNT</th>
-                <th className="p-3 min-w-[100px] text-right font-mono text-amber-500">20. TAX WITHHELD</th>
-                <th className="p-3 min-w-[130px] text-right font-mono font-extrabold text-amber-500">21. TOTAL DUE</th>
+                <th className="p-3 min-w-[90px] text-right font-mono text-rose-600 dark:text-rose-400">19. DISCOUNT</th>
+                <th className="p-3 min-w-[100px] text-right font-mono text-amber-600 dark:text-amber-500">20. TAX WITHHELD</th>
+                <th className="p-3 min-w-[130px] text-right font-mono font-extrabold text-amber-600 dark:text-amber-500">21. TOTAL DUE</th>
                 {isCollectionsOrPaymentsBook && (
                   <>
-                    <th className="p-3 min-w-[140px] text-right font-mono font-extrabold text-emerald-400">
+                    <th className="p-3 min-w-[140px] text-right font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
                       {isDisbursementOrPurchase ? '22. CASH PAID' : '22. CASH RECEIVED'}
                     </th>
-                    <th className="p-3 min-w-[140px] text-right font-mono font-extrabold text-rose-400">
+                    <th className="p-3 min-w-[140px] text-right font-mono font-extrabold text-rose-600 dark:text-rose-400">
                       23. PENDING BALANCE
                     </th>
                   </>
                 )}
-                <th className="p-3 text-center min-w-[100px] sticky right-0 bg-zinc-100 dark:bg-zinc-900 border-l ${theme.borderCard}">ACTIONS</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${theme.borderCard}`}>
@@ -651,6 +949,294 @@ export default function UniformBookTab({
                     No records found in this register. Encode new transactions via &quot;Other Transactions&quot; ➔ &quot;Sales / Purchase Transaction&quot;.
                   </td>
                 </tr>
+              ) : bookType === 'collections' && collectionsDisplayMode === 'grouped' ? (
+                (() => {
+                  const groupsMap = new Map<string, UniformBookRecord[]>();
+                  filteredRecords.forEach(r => {
+                    const key = (r.invoice_number || `NO-INV-${r.id}`).trim().toUpperCase();
+                    if (!groupsMap.has(key)) groupsMap.set(key, []);
+                    groupsMap.get(key)!.push(r);
+                  });
+
+                  const groups = Array.from(groupsMap.entries());
+                  return groups.map(([invKey, groupRows], groupIdx) => {
+                    // Sort collections chronologically (oldest first: COLLECTION 1, COLLECTION 2, etc.)
+                    const sortedPayments = [...groupRows].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+                    const primary = sortedPayments[sortedPayments.length - 1] || sortedPayments[0];
+                    const isExpanded = expandedInvoices[invKey] !== undefined ? expandedInvoices[invKey] : true;
+
+                    const totalDueVal = Number(primary.total_amount_due || primary.amount) || 0;
+                    const withheldVal = Number(primary.tax_withheld || primary.amount_withheld_2307 || primary.withholding_tax_2307) || 0;
+                    const netCashTarget = Math.max(0, Math.round((totalDueVal - withheldVal) * 100) / 100);
+
+                    const activePayments = sortedPayments.filter(p => !p.is_cancelled && (p.amount_collected !== undefined ? Number(p.amount_collected) : 0) > 0);
+                    const totalCashCollectedForInvoice = sortedPayments
+                      .filter(p => !p.is_cancelled)
+                      .reduce((sum, p) => {
+                        const cVal = p.amount_collected !== undefined
+                          ? Number(p.amount_collected)
+                          : (p.status === 'Paid' || p.status === 'Cash' ? netCashTarget : 0);
+                        return sum + cVal;
+                      }, 0);
+
+                    const invoicePendingBalance = Math.max(0, Math.round((netCashTarget - totalCashCollectedForInvoice) * 100) / 100);
+                    const isFullyPaid = invoicePendingBalance <= 0.01 && totalCashCollectedForInvoice > 0;
+                    const isPartial = !isFullyPaid && totalCashCollectedForInvoice > 0;
+
+                    return (
+                      <React.Fragment key={invKey}>
+                        {/* PARENT INVOICE ROW (CLICK TO COLLAPSE/EXPAND) */}
+                        <tr
+                          onClick={() => setExpandedInvoices(prev => ({ ...prev, [invKey]: !isExpanded }))}
+                          className={`cursor-pointer border-t-2 ${
+                            theme.isLight ? 'border-slate-200 bg-slate-100/90 hover:bg-slate-200/70' : 'border-zinc-800 bg-zinc-900/90 hover:bg-zinc-800/80'
+                          } transition-colors`}
+                          title="Click to collapse/expand all collections made for this Invoice"
+                        >
+                          <td
+                            className={`p-2.5 text-center sticky left-0 z-10 border-r ${
+                              theme.isLight
+                                ? 'bg-slate-100 border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)]'
+                                : 'bg-zinc-900 border-zinc-800'
+                            }`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => setPreviewRecord(primary)}
+                                title="Preview Invoice"
+                                className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                  theme.isLight
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-100'
+                                    : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                                }`}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRecord(primary.id)}
+                                title="Delete Collection Record"
+                                className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                  theme.isLight
+                                    ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100'
+                                    : 'bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500/20'
+                                }`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 text-center font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                            {isExpanded ? '▼' : '▶'} {groupIdx + 1}
+                          </td>
+                          <td className="p-3">
+                            {isFullyPaid ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                PAID ({activePayments.length} {activePayments.length === 1 ? 'COLLECTION' : 'COLLECTIONS'})
+                              </span>
+                            ) : isPartial ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">
+                                PARTIAL ({activePayments.length} {activePayments.length === 1 ? 'COLLECTION' : 'COLLECTIONS'})
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                ON ACCOUNT (0 COLLECTIONS)
+                              </span>
+                            )}
+                          </td>
+                          <td className={`p-3 font-bold ${theme.textTitle}`}>{primary.registered_name}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              primary.vat_or_nonvat === 'VAT'
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500 border border-emerald-500/20'
+                                : 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400 border border-zinc-500/20'
+                            }`}>
+                              {primary.vat_or_nonvat}
+                            </span>
+                          </td>
+                          <td className={`p-3 font-mono ${theme.textMuted}`}>{primary.tin}</td>
+                          <td className={`p-3 max-w-[200px] truncate ${theme.textMuted}`}>{primary.address || '-'}</td>
+                          <td className="p-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                              INVOICE SUMMARY
+                            </span>
+                          </td>
+                          <td className={`p-3 font-mono ${theme.textMuted}`}>{primary.date}</td>
+                          <td className={`p-3 ${theme.textMain}`}>{primary.invoice_type}</td>
+                          <td className="p-3 font-mono font-semibold text-amber-600 dark:text-amber-400">
+                            {activePayments.length} payment(s)
+                          </td>
+                          <td className="p-3 font-mono font-extrabold text-cyan-600 dark:text-cyan-400">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span>{primary.invoice_number}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300">
+                                {isExpanded ? 'Hide Collections' : `Show ${activePayments.length} Collection(s)`}
+                              </span>
+                            </span>
+                          </td>
+                          <td className={`p-3 font-semibold max-w-[240px] truncate ${theme.textMain}`}>
+                            Invoice #{primary.invoice_number} — Click to {isExpanded ? 'collapse' : 'view'} collections
+                          </td>
+                          <td className="p-3 text-right font-mono">{primary.qty}</td>
+                          <td className="p-3 text-right font-mono">₱{(primary.unit_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className={`p-3 text-right font-mono font-bold ${theme.textTitle}`}>
+                            ₱{(primary.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                            ₱{(primary.vatable_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono text-cyan-600 dark:text-cyan-400 font-semibold">
+                            ₱{(primary.vat_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className={`p-3 text-right font-mono ${theme.textMuted}`}>
+                            ₱{(primary.zero_rated_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className={`p-3 text-right font-mono ${theme.textMuted}`}>
+                            ₱{(primary.vat_exempt_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className={`p-3 text-right font-mono ${theme.textMain}`}>
+                            ₱{(primary.total_amount_vat_inclusive || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className={`p-3 text-right font-mono ${theme.textMain}`}>
+                            ₱{(primary.total_amount_net_of_vat || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono text-rose-600 dark:text-rose-400">
+                            ₱{(primary.discount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono text-amber-600 dark:text-amber-400">
+                            ₱{(primary.tax_withheld || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono font-extrabold text-amber-600 dark:text-amber-500">
+                            ₱{(primary.total_amount_due || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
+                            ₱{totalCashCollectedForInvoice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-3 text-right font-mono font-extrabold text-rose-600 dark:text-rose-400">
+                            ₱{invoicePendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+
+                        {/* CHILD COLLECTION ROWS (COLLECTION 1, COLLECTION 2, COLLECTION 3...) */}
+                        {isExpanded && (() => {
+                          let runningCollected = 0;
+                          return sortedPayments.map((payment, pIdx) => {
+                            const payAmt = payment.amount_collected !== undefined
+                              ? Number(payment.amount_collected)
+                              : (payment.status === 'Paid' || payment.status === 'Cash' ? netCashTarget : 0);
+                            if (!payment.is_cancelled) {
+                              runningCollected += payAmt;
+                            }
+                            const runningPending = Math.max(0, Math.round((netCashTarget - runningCollected) * 100) / 100);
+                            const isZeroPlaceholder = payAmt === 0 && sortedPayments.length === 1;
+
+                            return (
+                              <tr
+                                key={payment.id}
+                                className={`${
+                                  payment.is_cancelled
+                                    ? 'bg-rose-950/20 text-zinc-500 line-through'
+                                    : theme.isLight ? 'bg-cyan-50/40 hover:bg-cyan-50/80' : 'bg-cyan-950/15 hover:bg-cyan-950/25'
+                                } text-[11px] border-l-4 border-l-cyan-500 transition-colors`}
+                              >
+                                <td className={`p-2 text-center sticky left-0 z-10 border-r ${
+                                  theme.isLight
+                                    ? 'bg-white border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)]'
+                                    : 'bg-zinc-950/90 border-zinc-800'
+                                }`}>
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() => handleOpenEditModal(payment)}
+                                      title="Edit Collection"
+                                      className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                        theme.isLight
+                                          ? 'bg-sky-50 border-sky-200 text-sky-600 hover:bg-sky-100'
+                                          : 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/20'
+                                      }`}
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteRecord(payment.id)}
+                                      title="Delete Collection"
+                                      className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                        theme.isLight
+                                          ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100'
+                                          : 'bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500/20'
+                                      }`}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="p-2.5 text-center font-mono text-cyan-600 dark:text-cyan-400 pl-3">
+                                  ↳ #{pIdx + 1}
+                                </td>
+                                <td className="p-2.5">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    isZeroPlaceholder
+                                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                  }`}>
+                                    {isZeroPlaceholder ? 'NO PAYMENT YET' : `COLLECTION ${pIdx + 1}`}
+                                  </span>
+                                </td>
+                                <td className={`p-2.5 pl-4 font-medium ${theme.textTitle}`}>
+                                  {isZeroPlaceholder ? 'Awaiting 1st Collection' : `COLLECTION ${pIdx + 1} — ${payment.registered_name}`}
+                                </td>
+                                <td className={`p-2.5 ${theme.textMuted}`}>{payment.vat_or_nonvat}</td>
+                                <td className={`p-2.5 font-mono ${theme.textMuted}`}>{payment.tin}</td>
+                                <td className={`p-2.5 truncate max-w-[160px] ${theme.textMuted}`}>{payment.address || '-'}</td>
+                                <td className="p-2.5 font-mono text-cyan-600 dark:text-cyan-300">{payment.type_of_transaction}</td>
+                                <td className={`p-2.5 font-mono font-bold ${theme.textTitle}`}>{payment.date}</td>
+                                <td className={`p-2.5 ${theme.textMuted}`}>{payment.invoice_type}</td>
+                                <td className="p-2.5 font-mono font-bold text-amber-600 dark:text-amber-400">{payment.voucher_number || `COLL-${pIdx + 1}`}</td>
+                                <td className="p-2.5 font-mono text-cyan-600 dark:text-cyan-400">{payment.invoice_number}</td>
+                                <td className={`p-2.5 font-medium max-w-[240px] truncate ${theme.textMain}`} title={payment.particulars}>
+                                  {payment.particulars}
+                                </td>
+                                <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
+                                <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
+                                <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
+                                  ₱{(payment.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
+                                  ₱{(payment.vatable_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
+                                  ₱{(payment.vat_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
+                                <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
+                                <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
+                                  ₱{(payment.total_amount_vat_inclusive || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
+                                  ₱{(payment.total_amount_net_of_vat || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2.5 text-right font-mono text-rose-600 dark:text-rose-400">
+                                  ₱{(payment.discount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2.5 text-right font-mono text-amber-600 dark:text-amber-400">
+                                  ₱{(payment.tax_withheld || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2.5 text-right font-mono text-amber-600/80 dark:text-amber-400/80">
+                                  ₱{(payment.total_amount_due || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2.5 text-right font-mono font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                                  ₱{payAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2.5 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
+                                  ₱{runningPending.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </React.Fragment>
+                    );
+                  });
+                })()
               ) : (
                 filteredRecords.map((r, idx) => {
                   const isCancelled = r.is_cancelled;
@@ -669,22 +1255,74 @@ export default function UniformBookTab({
                       key={r.id} 
                       className={`${isCancelled ? 'bg-rose-950/20 text-zinc-500 line-through' : theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/40'} transition-colors`}
                     >
-                      <td className="p-3 text-center text-zinc-400 text-[10px] font-mono">{idx + 1}</td>
+                      <td className={`p-2.5 text-center sticky left-0 z-10 border-r ${
+                        theme.isLight
+                          ? 'bg-white border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)]'
+                          : 'bg-zinc-950/90 border-zinc-800'
+                      }`}>
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => setPreviewRecord(r)}
+                            title="Preview Official BIR Invoice / Receipt (VAT or Non-VAT)"
+                            className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                              theme.isLight
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-100'
+                                : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                            }`}
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEditModal(r)}
+                            title="Edit Record"
+                            className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                              theme.isLight
+                                ? 'bg-sky-50 border-sky-200 text-sky-600 hover:bg-sky-100'
+                                : 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/20'
+                            }`}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleToggleCancel(r.id)}
+                            title={isCancelled ? "Restore" : "Cancel"}
+                            className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                              theme.isLight
+                                ? 'bg-amber-50 border-amber-200 text-amber-600 hover:bg-amber-100'
+                                : 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20'
+                            }`}
+                          >
+                            {isCancelled ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteRecord(r.id)}
+                            title="Delete"
+                            className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                              theme.isLight
+                                ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100'
+                                : 'bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500/20'
+                            }`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className={`p-3 text-center text-[10px] font-mono ${theme.textMuted}`}>{idx + 1}</td>
                       <td className="p-3">
                         {isCancelled ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                             VOID / CANCELLED
                           </span>
                         ) : r.status === 'Paid' || r.status === 'Cash' || (r.type_of_transaction === 'CASH' && !r.status) ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                             PAID
                           </span>
                         ) : r.status === 'Partial' ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
                             PARTIAL
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                             {r.status || 'ON ACCOUNT'}
                           </span>
                         )}
@@ -695,26 +1333,26 @@ export default function UniformBookTab({
                       <td className="p-3">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                           r.vat_or_nonvat === 'VAT' 
-                            ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
-                            : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500 border border-emerald-500/20' 
+                            : 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400 border border-zinc-500/20'
                         }`}>
                           {r.vat_or_nonvat}
                         </span>
                       </td>
-                      <td className="p-3 font-mono text-zinc-400">{r.tin}</td>
-                      <td className="p-3 text-zinc-400 max-w-[200px] truncate" title={r.address}>{r.address || '-'}</td>
+                      <td className={`p-3 font-mono ${theme.textMuted}`}>{r.tin}</td>
+                      <td className={`p-3 max-w-[200px] truncate ${theme.textMuted}`} title={r.address}>{r.address || '-'}</td>
                       <td className="p-3">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
                           r.type_of_transaction === 'CASH'
-                            ? 'bg-blue-500/10 text-blue-400'
-                            : 'bg-purple-500/10 text-purple-400'
+                            ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                            : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
                         }`}>
                           {r.type_of_transaction}
                         </span>
                       </td>
-                      <td className="p-3 font-mono text-zinc-400">{r.date}</td>
-                      <td className="p-3 text-zinc-300">{r.invoice_type}</td>
-                      <td className={`p-3 font-mono font-semibold ${r.voucher_number ? 'text-amber-400' : 'text-zinc-500'}`}>
+                      <td className={`p-3 font-mono ${theme.textMuted}`}>{r.date}</td>
+                      <td className={`p-3 ${theme.textMain}`}>{r.invoice_type}</td>
+                      <td className={`p-3 font-mono font-semibold ${r.voucher_number ? 'text-amber-600 dark:text-amber-400' : theme.textMuted}`}>
                         {r.voucher_number || '-'}
                       </td>
                       {isDisbursementOrPurchase && (
@@ -722,107 +1360,75 @@ export default function UniformBookTab({
                           <td className="p-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                               (r.business_tax_type || '').toLowerCase() === 'vatable' || r.vat_or_nonvat === 'VAT'
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                                 : (r.business_tax_type || '').toLowerCase() === 'zero-rated'
-                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
                                 : (r.business_tax_type || '').toLowerCase() === 'vat-exempt'
-                                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20'
+                                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
                             }`}>
                               {r.business_tax_type || (r.vat_or_nonvat === 'VAT' ? 'vatable' : 'non-vatable')}
                             </span>
                           </td>
-                          <td className="p-3 font-semibold text-indigo-300">
+                          <td className="p-3 font-semibold text-indigo-600 dark:text-indigo-300">
                             {r.expense_type || 'Operating Expense'}
                           </td>
                         </>
                       )}
-                      <td className="p-3 font-mono font-bold text-cyan-400">
+                      <td className="p-3 font-mono font-bold text-cyan-600 dark:text-cyan-400">
                         <button
                           type="button"
                           onClick={() => setPreviewRecord(r)}
-                          className="hover:underline inline-flex items-center gap-1.5 cursor-pointer text-left text-cyan-400 hover:text-cyan-300"
+                          className="hover:underline inline-flex items-center gap-1.5 cursor-pointer text-left text-cyan-600 dark:text-cyan-400 hover:opacity-80"
                           title="Click to preview official BIR Invoice / Receipt (VAT or Non-VAT)"
                         >
                           <span>{r.invoice_number}</span>
                           <Eye className="w-3 h-3 opacity-60 hover:opacity-100" />
                         </button>
                       </td>
-                      <td className="p-3 text-zinc-300 max-w-[240px] truncate" title={r.particulars}>{r.particulars}</td>
+                      <td className={`p-3 max-w-[240px] truncate ${theme.textMain}`} title={r.particulars}>{r.particulars}</td>
                       <td className="p-3 text-right font-mono">{r.qty}</td>
                       <td className="p-3 text-right font-mono">₱{(r.unit_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                      <td className="p-3 text-right font-mono font-bold text-zinc-200">
+                      <td className={`p-3 text-right font-mono font-bold ${theme.textTitle}`}>
                         ₱{(r.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono text-emerald-400 font-semibold">
+                      <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
                         ₱{(r.vatable_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono text-cyan-400 font-semibold">
+                      <td className="p-3 text-right font-mono text-cyan-600 dark:text-cyan-400 font-semibold">
                         ₱{(r.vat_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono text-zinc-400">
+                      <td className={`p-3 text-right font-mono ${theme.textMuted}`}>
                         ₱{(r.zero_rated_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono text-zinc-400">
+                      <td className={`p-3 text-right font-mono ${theme.textMuted}`}>
                         ₱{(r.vat_exempt_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono text-zinc-300">
+                      <td className={`p-3 text-right font-mono ${theme.textMain}`}>
                         ₱{(r.total_amount_vat_inclusive || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono text-zinc-300">
+                      <td className={`p-3 text-right font-mono ${theme.textMain}`}>
                         ₱{(r.total_amount_net_of_vat || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono text-rose-400">
+                      <td className="p-3 text-right font-mono text-rose-600 dark:text-rose-400">
                         ₱{(r.discount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono text-amber-400">
+                      <td className="p-3 text-right font-mono text-amber-600 dark:text-amber-400">
                         ₱{(r.tax_withheld || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right font-mono font-extrabold text-amber-500">
+                      <td className="p-3 text-right font-mono font-extrabold text-amber-600 dark:text-amber-500">
                         ₱{(r.total_amount_due || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
                       {isCollectionsOrPaymentsBook && (
                         <>
-                          <td className="p-3 text-right font-mono font-extrabold text-emerald-400">
+                          <td className="p-3 text-right font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
                             ₱{cashReceivedOrPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </td>
-                          <td className="p-3 text-right font-mono font-extrabold text-rose-400">
+                          <td className="p-3 text-right font-mono font-extrabold text-rose-600 dark:text-rose-400">
                             ₱{pendingBalanceVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </td>
                         </>
                       )}
-                      <td className="p-3 text-center sticky right-0 bg-zinc-950/80 backdrop-blur-xs border-l border-zinc-800">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => setPreviewRecord(r)}
-                            title="Preview Official BIR Invoice / Receipt (VAT or Non-VAT)"
-                            className="p-1 rounded text-emerald-400 hover:bg-emerald-500/20 cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEditModal(r)}
-                            title="Edit Record"
-                            className="p-1 rounded text-cyan-400 hover:bg-cyan-500/20 cursor-pointer"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleToggleCancel(r.id)}
-                            title={isCancelled ? "Restore" : "Cancel"}
-                            className="p-1 rounded text-amber-400 hover:bg-amber-500/20 cursor-pointer"
-                          >
-                            {isCancelled ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
-                          </button>
-                          <button
-                            onClick={() => handleDeleteRecord(r.id)}
-                            title="Delete"
-                            className="p-1 rounded text-rose-400 hover:bg-rose-500/20 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
                     </tr>
                   );
                 })
@@ -830,44 +1436,45 @@ export default function UniformBookTab({
             </tbody>
             {/* SUMMARY FOOTER: Totals for all numeric columns */}
             {filteredRecords.length > 0 && (
-              <tfoot className="bg-zinc-100 dark:bg-zinc-900/90 font-mono font-bold text-xs border-t-2 border-zinc-300 dark:border-zinc-700">
+              <tfoot className={`${theme.isLight ? 'bg-slate-100 border-t-2 border-slate-300' : 'bg-zinc-900/90 border-t-2 border-zinc-700'} font-mono font-bold text-xs`}>
                 <tr>
-                  <td colSpan={isDisbursementOrPurchase ? 16 : 14} className="p-3 text-right uppercase tracking-wider text-zinc-400 font-bold">
+                  <td className={`p-3 sticky left-0 ${theme.isLight ? 'bg-slate-100 border-r border-slate-200' : 'bg-zinc-900 border-r border-zinc-800'}`}></td>
+                  <td colSpan={isDisbursementOrPurchase ? 16 : 14} className={`p-3 text-right uppercase tracking-wider font-bold ${theme.textMuted}`}>
                     SUMMARY TOTAL OF RECORDS:
                   </td>
-                  <td className="p-3 text-right text-zinc-100 font-extrabold">
+                  <td className={`p-3 text-right font-extrabold ${theme.textTitle}`}>
                     ₱{summaryTotals.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-emerald-400 font-extrabold">
+                  <td className="p-3 text-right text-emerald-600 dark:text-emerald-400 font-extrabold">
                     ₱{summaryTotals.totalVatableAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-cyan-400 font-extrabold">
+                  <td className="p-3 text-right text-cyan-600 dark:text-cyan-400 font-extrabold">
                     ₱{summaryTotals.totalVatAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-zinc-400">
+                  <td className={`p-3 text-right ${theme.textMuted}`}>
                     ₱{summaryTotals.totalZeroRatedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-zinc-400">
+                  <td className={`p-3 text-right ${theme.textMuted}`}>
                     ₱{summaryTotals.totalVatExemptAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-zinc-300">
+                  <td className={`p-3 text-right ${theme.textMain}`}>
                     ₱{summaryTotals.totalAmountVatInclusive.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-zinc-300">
+                  <td className={`p-3 text-right ${theme.textMain}`}>
                     ₱{summaryTotals.totalAmountNetOfVat.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-rose-400">
+                  <td className="p-3 text-right text-rose-600 dark:text-rose-400">
                     ₱{summaryTotals.totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-amber-400">
+                  <td className="p-3 text-right text-amber-600 dark:text-amber-400">
                     ₱{summaryTotals.totalTaxWithheld.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="p-3 text-right text-amber-400 font-black text-sm">
+                  <td className="p-3 text-right text-amber-600 dark:text-amber-400 font-black text-sm">
                     ₱{summaryTotals.totalAmountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   {isCollectionsOrPaymentsBook && (
                     <>
-                      <td className="p-3 text-right text-emerald-400 font-black text-sm">
+                      <td className="p-3 text-right text-emerald-600 dark:text-emerald-400 font-black text-sm">
                         ₱{filteredRecords
                           .filter(r => !r.is_cancelled)
                           .reduce((sum, r) => {
@@ -881,7 +1488,7 @@ export default function UniformBookTab({
                           }, 0)
                           .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
-                      <td className="p-3 text-right text-rose-400 font-black text-sm">
+                      <td className="p-3 text-right text-rose-600 dark:text-rose-400 font-black text-sm">
                         ₱{filteredRecords
                           .filter(r => !r.is_cancelled)
                           .reduce((sum, r) => {
@@ -900,11 +1507,11 @@ export default function UniformBookTab({
                       </td>
                     </>
                   )}
-                  <td className="p-3 sticky right-0 bg-zinc-100 dark:bg-zinc-900 border-l border-zinc-700"></td>
                 </tr>
               </tfoot>
             )}
           </table>
+          )}
         </div>
       </div>
 

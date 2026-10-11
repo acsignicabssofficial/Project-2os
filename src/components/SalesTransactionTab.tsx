@@ -19,6 +19,7 @@ import {
   ArrowUpRight,
   Eye,
   UserPlus,
+  Trash2,
   X
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
@@ -41,6 +42,7 @@ interface SalesTransactionTabProps {
   onNavigateToTab?: (tabKey: string) => void;
   specialEntries?: SpecialEntry[];
   setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
+  onDeleteRecord?: (bookType: string, record: UniformBookRecord) => void;
 }
 
 export default function SalesTransactionTab({
@@ -58,7 +60,8 @@ export default function SalesTransactionTab({
   globalSearch = '',
   onNavigateToTab,
   specialEntries = [],
-  setSpecialEntries
+  setSpecialEntries,
+  onDeleteRecord
 }: SalesTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
 
@@ -67,18 +70,57 @@ export default function SalesTransactionTab({
 
   // Form State
   const [customerName, setCustomerName] = useState('');
+  const [businessTaxType, setBusinessTaxType] = useState<'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated'>(
+    activeCompany?.vat_or_non_vat === 'NON-VATABLE' ? 'non-vatable' : 'vatable'
+  );
   const [vatStatus, setVatStatus] = useState<'VAT' | 'NONVAT'>(
     activeCompany?.vat_or_non_vat === 'NON-VATABLE' ? 'NONVAT' : 'VAT'
   );
   const [tin, setTin] = useState('');
+  const [branchCode, setBranchCode] = useState('00000');
   const [address, setAddress] = useState('');
-  const [invoiceType, setInvoiceType] = useState('SALES INVOICE');
-  const [invoiceNo, setInvoiceNo] = useState(`INV #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+  const [invoiceType, setInvoiceType] = useState('INVOICE');
+
+  // Helper to extract sequential integer from invoice number
+  const extractInvoiceSeqNum = (invStr?: string): number | null => {
+    if (!invStr) return null;
+    const trimmed = invStr.trim();
+    if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+    const match = trimmed.match(/(\d+)$/);
+    if (match) return parseInt(match[1], 10);
+    return null;
+  };
+
+  // Compute next sequential invoice number (starting at 1, or filling/continuing the sequence)
+  const nextSequentialInvoiceNo = useMemo(() => {
+    const companyRecords = subsidiarySales.filter(
+      s => !activeCompanyName || !s.company_name || s.company_name === activeCompanyName
+    );
+    const nums = companyRecords
+      .map(s => extractInvoiceSeqNum(s.invoice_number))
+      .filter((n): n is number => n !== null && n > 0 && n < 1000000);
+    if (nums.length === 0) return '1';
+    const maxNum = Math.max(...nums);
+    return String(maxNum + 1);
+  }, [subsidiarySales, activeCompanyName]);
+
+  const [invoiceNo, setInvoiceNo] = useState(() => nextSequentialInvoiceNo);
+
+  // Sync default invoiceNo to next sequential number when company changes or records update (if untouched)
+  React.useEffect(() => {
+    setInvoiceNo(prev => {
+      if (!prev || prev.startsWith('INV #') || /^\d+$/.test(prev.trim())) {
+        return nextSequentialInvoiceNo;
+      }
+      return prev;
+    });
+  }, [nextSequentialInvoiceNo]);
+
   const [voucherNo, setVoucherNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [particulars, setParticulars] = useState('');
   const [qty, setQty] = useState('1');
-  const [unitPrice, setUnitPrice] = useState('25000');
+  const [unitPrice, setUnitPrice] = useState('');
   const [zeroRated, setZeroRated] = useState('0');
   const [vatExempt, setVatExempt] = useState('0');
   const [discount, setDiscount] = useState('0');
@@ -87,8 +129,8 @@ export default function SalesTransactionTab({
   // Transaction Mode: 'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'
   const [saleMode, setSaleMode] = useState<'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'>('ON CASH');
 
-  // Partial mode fields (Requirement 6: ask only for down payment)
-  const [downPaymentAmount, setDownPaymentAmount] = useState('15000');
+  // Partial mode fields (Requirement 6: ask only for down payment, no default amount)
+  const [downPaymentAmount, setDownPaymentAmount] = useState('');
   const [downPaymentWithholding, setDownPaymentWithholding] = useState('0');
   const [collectionRef, setCollectionRef] = useState(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
 
@@ -97,9 +139,20 @@ export default function SalesTransactionTab({
     isOpen: boolean;
     customerName: string;
     tin: string;
+    branchCode: string;
     address: string;
     taxType: 'VAT' | 'Non-VAT';
     pendingSaleData?: any;
+  } | null>(null);
+
+  // Prompt modal when customer name already exists in Directory > Customers
+  const [existingCustomerMatchPrompt, setExistingCustomerMatchPrompt] = useState<{
+    isOpen: boolean;
+    matchedCustomer: Customer;
+    step: 'ask_same' | 'verify_tin';
+    verifyTinInput: string;
+    verifyBranchInput: string;
+    errorText?: string;
   } | null>(null);
 
   // Quick collection modal for open invoices
@@ -139,31 +192,55 @@ export default function SalesTransactionTab({
       (c.registered_name || c.customer_name || c.trade_name || '').toLowerCase() === custName.toLowerCase()
     );
     if (found) {
-      setTin(found.client_TIN || found.customer_tin || '');
-      setAddress(found.address || found.client_Address || '');
+      const rawDigits = (found.client_TIN || found.customer_tin || '').replace(/\D/g, '').slice(0, 9);
+      const formatted9 = rawDigits.length === 9 ? `${rawDigits.slice(0, 3)}-${rawDigits.slice(3, 6)}-${rawDigits.slice(6, 9)}` : (found.client_TIN || found.customer_tin || '');
+      setTin(formatted9);
+      setBranchCode((found.customer_branch_code || found.tin_branch_code || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5));
+      setAddress(found.address || found.client_Address || found.customer_address || '');
       if (found.vat_status) {
-        setVatStatus((found.vat_status || '').toUpperCase().includes('NON') ? 'NONVAT' : 'VAT');
+        const isNonVat = (found.vat_status || '').toUpperCase().includes('NON');
+        setVatStatus(isNonVat ? 'NONVAT' : 'VAT');
+        setBusinessTaxType(isNonVat ? 'non-vatable' : 'vatable');
       }
     }
   };
 
+  // 9-digit TIN handler (aligned with Directory > Customers format)
   const handleTinChange = (val: string) => {
-    const digits = val.replace(/\D/g, '').slice(0, 14);
+    const digits = val.replace(/\D/g, '').slice(0, 9);
     let formatted = '';
     if (digits.length > 0) formatted += digits.slice(0, 3);
     if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
     if (digits.length > 6) formatted += '-' + digits.slice(6, 9);
-    if (digits.length > 9) formatted += '-' + digits.slice(9, 14);
     setTin(formatted);
 
-    if (digits.length >= 9 && !/^0+$/.test(digits)) {
-      const found = customers.find(c => (c.client_TIN || c.customer_tin || '').replace(/\D/g, '').startsWith(digits.slice(0, 9)));
+    if (digits.length === 9 && !/^0+$/.test(digits)) {
+      const found = customers.find(c => (c.client_TIN || c.customer_tin || '').replace(/\D/g, '').startsWith(digits));
       if (found) {
         if (!customerName) setCustomerName(found.registered_name || found.customer_name || found.trade_name || '');
-        if (!address) setAddress(found.address || found.client_Address || '');
+        if (!address) setAddress(found.address || found.client_Address || found.customer_address || '');
+        if (found.customer_branch_code || found.tin_branch_code) {
+          setBranchCode((found.customer_branch_code || found.tin_branch_code || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5));
+        }
       }
     }
   };
+
+  const handleBranchCodeChange = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 5);
+    setBranchCode(digits);
+  };
+
+  // Live notification if entered customer name matches an existing customer in Directory > Customers
+  const nameMatchedCustomer = useMemo(() => {
+    if (!customerName.trim()) return null;
+    const norm = customerName.trim().toLowerCase();
+    return customers.find(c => {
+      if (activeCompanyName && c.company_name && c.company_name !== activeCompanyName) return false;
+      const cName = (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase();
+      return cName === norm;
+    }) || null;
+  }, [customerName, customers, activeCompanyName]);
 
   // Live Formula Calculations
   const liveFormulas = useMemo(() => {
@@ -189,10 +266,13 @@ export default function SalesTransactionTab({
         c.invoice_number && 
         c.invoice_number.trim().toLowerCase() === s.invoice_number.trim().toLowerCase()
       );
-      const totalCollected = matchingCollections.reduce((sum, c) => sum + (Number(c.amount_collected || c.amount) || 0), 0);
+      const totalCollected = matchingCollections.reduce((sum, c) => {
+        const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : (Number(c.amount) || 0);
+        return sum + cashVal;
+      }, 0);
       const invoiceDue = Number(s.total_amount_due || s.amount) || 0;
-      const isPaid = (s.status === 'Cash' || s.status === 'Paid') && totalCollected >= invoiceDue;
-      return !isPaid && (s.status === 'On Account' || s.status === 'Partial' || totalCollected < invoiceDue);
+      const isPaid = (s.status === 'Cash' || s.status === 'Paid') && totalCollected >= invoiceDue - 0.05;
+      return !isPaid && (s.status === 'On Account' || s.status === 'Partial' || totalCollected < invoiceDue - 0.05);
     });
   }, [subsidiarySales, collections, activeCompanyName]);
 
@@ -207,47 +287,61 @@ export default function SalesTransactionTab({
     );
   }, [openInvoices, openSearch, globalSearch]);
 
-  // EXECUTE SALE RECORDING (Called directly or after New Customer confirmation)
-  const executeRecordSale = (saveAsCustomer: boolean = false, isVariousCustomer: boolean = false) => {
-    const rawTinDigits = tin.replace(/\D/g, '');
-    const hasValidTin = rawTinDigits.length >= 9 && !/^0+$/.test(rawTinDigits);
+  // EXECUTE SALE RECORDING (Called directly or after Customer confirmation)
+  const executeRecordSale = (
+    saveAsCustomer: boolean = false,
+    isVariousCustomer: boolean = false,
+    overrideTin9?: string,
+    overrideBranch5?: string,
+    overrideAddress?: string
+  ) => {
+    const effectiveTinStr = overrideTin9 !== undefined ? overrideTin9 : tin;
+    const effectiveBranchStr = overrideBranch5 !== undefined ? overrideBranch5 : branchCode;
+    const effectiveAddressStr = overrideAddress !== undefined ? overrideAddress : address;
+
+    const rawTinDigits = effectiveTinStr.replace(/\D/g, '').slice(0, 9);
+    const hasValidTin = rawTinDigits.length === 9 && !/^0+$/.test(rawTinDigits);
     const finalIsVarious = isVariousCustomer || !hasValidTin;
+
+    const formattedTin9 = hasValidTin
+      ? `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}`
+      : '000-000-000';
+    const cleanBranch5 = (effectiveBranchStr || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    const fullTin14 = finalIsVarious ? '000-000-000-00000' : `${formattedTin9}-${cleanBranch5}`;
 
     // Requirement 3: Save customer to database if user chose to add new customer
     if (saveAsCustomer && setCustomers && hasValidTin) {
       const custNameToSave = (newCustomerPrompt?.customerName || customerName).trim();
+      const branchToSave = (newCustomerPrompt?.branchCode || cleanBranch5).replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+      const nextIdNum = customers.filter(c => c.company_name === activeCompanyName).length + 1;
+      const newCustId = `CUST-${String(nextIdNum).padStart(4, '0')}`;
+
       const newCust: Customer = {
         id: Date.now(),
+        customer_id: newCustId,
         company_name: activeCompanyName,
         registered_name: custNameToSave,
         customer_name: custNameToSave,
         trade_name: custNameToSave,
-        client_TIN: tin.trim(),
-        customer_tin: tin.trim(),
-        tin_number: tin.trim(),
-        client_Address: (newCustomerPrompt?.address || address).trim(),
-        customer_address: (newCustomerPrompt?.address || address).trim(),
-        address: (newCustomerPrompt?.address || address).trim(),
+        client_TIN: formattedTin9,
+        customer_tin: formattedTin9,
+        tin_number: formattedTin9,
+        customer_branch_code: branchToSave,
+        tin_branch_code: branchToSave,
+        client_Address: (newCustomerPrompt?.address || effectiveAddressStr).trim(),
+        customer_address: (newCustomerPrompt?.address || effectiveAddressStr).trim(),
+        address: (newCustomerPrompt?.address || effectiveAddressStr).trim(),
         tax_type: newCustomerPrompt?.taxType || (vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'),
         vat_status: newCustomerPrompt?.taxType || (vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'),
         client_status: 'Active'
       };
       setCustomers(prev => [newCust, ...prev]);
-      triggerAlert(`Customer "${custNameToSave}" (TIN: ${tin.trim()}) added to Customer Masterlist successfully.`, 'success');
+      triggerAlert(`Customer "${custNameToSave}" (TIN: ${formattedTin9} • Branch: ${branchToSave}) added to Customer Masterlist successfully.`, 'success');
     }
 
     const totalDue = liveFormulas.total_amount_due;
     const nowIso = new Date().toISOString();
     const commonId = Date.now();
-
-    const isVat = vatStatus === 'VAT';
-    const zeroRatedVal = parseFloat(zeroRated) || 0;
-    const vatExemptVal = parseFloat(vatExempt) || 0;
-    const discountsVal = parseFloat(discount) || 0;
-    const wtaxVal = parseFloat(taxWithheld) || 0;
-    const vatableSalesVal = liveFormulas.vatable_sales;
-    const vatOutputVal = liveFormulas.vat;
-    const totalGrossSales = Math.round((vatableSalesVal + vatOutputVal + zeroRatedVal + vatExemptVal) * 100) / 100 || liveFormulas.total_sale_vat_inclusive;
 
     // 1. Prepare Base Record for Subsidiary Sales
     let assignedStatus: 'Cash' | 'On Account' | 'Partial' | 'Paid' = 'On Account';
@@ -266,15 +360,18 @@ export default function SalesTransactionTab({
       id: commonId,
       company_name: activeCompanyName,
       registered_name: customerName.trim(),
+      customer_name: customerName.trim(),
       vat_or_nonvat: vatStatus,
-      tin: tin.trim() || '000-000-000-00000',
-      address: address.trim(),
+      business_tax_type: businessTaxType,
+      tin: fullTin14,
+      customer_tin: finalIsVarious ? '000-000-000' : formattedTin9,
+      address: effectiveAddressStr.trim(),
       type_of_transaction: assignedTransactionType,
       date: date,
       invoice_type: invoiceType,
       voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
       invoice_number: invoiceNo.trim(),
-      particulars: particulars.trim() || 'Sales of Goods & Services',
+      particulars: particulars.trim(),
       qty: parseFloat(qty) || 1,
       unit_price: parseFloat(unitPrice) || 0,
       amount: liveFormulas.amount,
@@ -303,7 +400,7 @@ export default function SalesTransactionTab({
       const onAccountTrackingRecord: UniformBookRecord = {
         ...saleRecord,
         id: commonId + 1,
-        invoice_type: 'SALES INVOICE',
+        invoice_type: invoiceType,
         particulars: `Receivable Tracking for Invoice #${invoiceNo.trim()} (Pending Balance: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
         amount_collected: 0,
         pending_balance: totalDue,
@@ -319,15 +416,18 @@ export default function SalesTransactionTab({
         id: commonId + 1,
         company_name: activeCompanyName,
         registered_name: customerName.trim(),
+        customer_name: customerName.trim(),
         vat_or_nonvat: vatStatus,
-        tin: tin.trim() || '000-000-000-00000',
-        address: address.trim(),
+        business_tax_type: businessTaxType,
+        tin: fullTin14,
+        customer_tin: finalIsVarious ? '000-000-000' : formattedTin9,
+        address: effectiveAddressStr.trim(),
         type_of_transaction: 'CASH',
         date: date,
-        invoice_type: 'OFFICIAL RECEIPT',
+        invoice_type: invoiceType,
         voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
         invoice_number: invoiceNo.trim(),
-        particulars: `Full Cash Settlement for Invoice #${invoiceNo.trim()} - ${particulars || 'Sales'}`,
+        particulars: `Full Cash Settlement for Invoice #${invoiceNo.trim()}${particulars.trim() ? ` - ${particulars.trim()}` : ''}`,
         qty: parseFloat(qty) || 1,
         unit_price: parseFloat(unitPrice) || 0,
         amount: liveFormulas.amount,
@@ -367,23 +467,30 @@ export default function SalesTransactionTab({
         triggerAlert('Please enter a valid Down Payment amount.', 'error');
         return;
       }
+      if (downPmt > totalDue + 0.01) {
+        triggerAlert(`Overpayment Precaution: Down payment (₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the Total Amount Due (₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}). Customer overpayment is blocked.`, 'error');
+        return;
+      }
 
       const pendingBal = Math.max(0, Math.round((totalDue - downPmt) * 100) / 100);
 
-      // Record in Collections Book with 1st payment / down payment
+      // Record COLLECTION 1 in Collections Book as its own individual payment row
       const partialCollectionRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
         registered_name: customerName.trim(),
+        customer_name: customerName.trim(),
         vat_or_nonvat: vatStatus,
-        tin: tin.trim() || '000-000-000-00000',
-        address: address.trim(),
+        business_tax_type: businessTaxType,
+        tin: fullTin14,
+        customer_tin: finalIsVarious ? '000-000-000' : formattedTin9,
+        address: effectiveAddressStr.trim(),
         type_of_transaction: 'ON ACCOUNT',
         date: date,
-        invoice_type: 'OFFICIAL RECEIPT',
+        invoice_type: invoiceType,
         voucher_number: collectionRef.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
         invoice_number: invoiceNo.trim(),
-        particulars: `1st Payment / Down Payment for Invoice #${invoiceNo.trim()} (Down Payment: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} | Pending Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+        particulars: `COLLECTION 1 (Down Payment) for Invoice #${invoiceNo.trim()} — ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
         qty: parseFloat(qty) || 1,
         unit_price: parseFloat(unitPrice) || 0,
         amount: liveFormulas.amount,
@@ -398,19 +505,8 @@ export default function SalesTransactionTab({
         total_amount_due: totalDue,
         amount_collected: downPmt,
         pending_balance: pendingBal,
-        amount_withheld_2307: liveFormulas.less_withholding_tax,
+        amount_withheld_2307: 0,
         status: pendingBal <= 0.01 ? 'Paid' : 'Partial',
-        installments: [
-          {
-            payment_no: 1,
-            date: date,
-            ref_no: collectionRef.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
-            cash_amount: downPmt,
-            discount: 0,
-            wtax_2307: 0,
-            is_final: pendingBal <= 0.01
-          }
-        ],
         is_cancelled: false,
         is_various: finalIsVarious,
         created_at: nowIso
@@ -418,16 +514,39 @@ export default function SalesTransactionTab({
 
       setCollections(prev => [partialCollectionRecord, ...prev]);
 
-      triggerAlert(`Partial Sale ${invoiceNo} recorded to Subsidiary Sales & Collections Book (1st Down Payment: ₱${downPmt.toLocaleString()} | Pending Balance: ₱${pendingBal.toLocaleString()}).`, 'info');
+      // If Down Payment equals full amount due, also record to Cash Receipts
+      if (pendingBal <= 0.01) {
+        const fullCashReceipt: UniformBookRecord = {
+          ...saleRecord,
+          id: commonId + 2,
+          type_of_transaction: 'ON ACCOUNT',
+          date: date,
+          invoice_type: invoiceType,
+          voucher_number: collectionRef.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
+          amount_collected: downPmt,
+          pending_balance: 0,
+          amount_withheld_2307: liveFormulas.less_withholding_tax,
+          tax_withheld: liveFormulas.less_withholding_tax,
+          status: 'Paid',
+          settled_via_collections: true,
+          particulars: `Full Settlement Completed via Collections Book: Invoice #${invoiceNo.trim()}`
+        };
+        setCashReceipts(prev => [fullCashReceipt, ...prev]);
+      }
+
+      triggerAlert(`Partial Sale ${invoiceNo} recorded to Subsidiary Sales & Collections Book (COLLECTION 1: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} | Pending Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`, 'info');
     }
 
-    // Reset Form for next entry with Requirement 4 prefixes
-    setInvoiceNo(`INV #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+    // Reset Form for next entry (advance sequential invoice number: 1, 2, 3...)
+    const currentSeq = extractInvoiceSeqNum(invoiceNo);
+    const nextSeq = currentSeq !== null ? String(currentSeq + 1) : String(( parseInt(nextSequentialInvoiceNo, 10) || 1) + 1);
+    setInvoiceNo(nextSeq);
     setCollectionRef(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
     setParticulars('');
-    setUnitPrice('25000');
-    setDownPaymentAmount('15000');
+    setUnitPrice('');
+    setDownPaymentAmount('');
     setNewCustomerPrompt(null);
+    setExistingCustomerMatchPrompt(null);
   };
 
   // SUBMIT NEW SALE TRANSACTION
@@ -448,16 +567,41 @@ export default function SalesTransactionTab({
       triggerAlert('Invoice Number is required.', 'error');
       return;
     }
+    if ((parseFloat(unitPrice) || 0) <= 0) {
+      triggerAlert('Please enter a valid Unit Price greater than ₱0.00.', 'error');
+      return;
+    }
 
-    const rawTinDigits = tin.replace(/\D/g, '');
-    const hasValidTin = rawTinDigits.length >= 9 && !/^0+$/.test(rawTinDigits);
+    // Overpayment Precaution check on Partial Sale Down Payment
+    if (saleMode === 'ON PARTIAL') {
+      const dpVal = parseFloat(downPaymentAmount) || 0;
+      if (dpVal <= 0) {
+        triggerAlert('Please enter a valid Down Payment amount greater than ₱0.00.', 'error');
+        return;
+      }
+      if (dpVal > liveFormulas.total_amount_due + 0.01) {
+        triggerAlert(
+          `Overpayment Precaution: Down payment (₱${dpVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds Total Amount Due (₱${liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })}). Please reduce the down payment or use ON CASH mode.`,
+          'error'
+        );
+        return;
+      }
+    }
 
-    // Requirement 2: Strict TIN Conflict Validation
-    // If TIN already exists in customer database, customer registered name MUST match!
+    const rawTinDigits = tin.replace(/\D/g, '').slice(0, 9);
+    const hasValidTin = rawTinDigits.length === 9 && !/^0+$/.test(rawTinDigits);
+
+    // Check if Customer Name already exists in Registered Customers Directory
+    const existingCustomerByName = customers.find(c => {
+      if (activeCompanyName && c.company_name && c.company_name !== activeCompanyName) return false;
+      const cName = (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase();
+      return cName === customerName.trim().toLowerCase();
+    });
+
     if (hasValidTin) {
       const existingCustomerWithTin = customers.find(c => {
-        const cDigits = (c.client_TIN || c.customer_tin || '').replace(/\D/g, '');
-        return cDigits.length >= 9 && cDigits.startsWith(rawTinDigits.slice(0, 9));
+        const cDigits = (c.client_TIN || c.customer_tin || '').replace(/\D/g, '').slice(0, 9);
+        return cDigits.length === 9 && cDigits === rawTinDigits;
       });
 
       if (existingCustomerWithTin) {
@@ -467,21 +611,49 @@ export default function SalesTransactionTab({
           return;
         }
       } else {
-        // Requirement 3: Customer has valid TIN but is NOT registered in database.
-        // Prompt user asking if they want to add to customer database:
+        // Customer has valid 9-digit TIN but is NOT registered in database -> ask if user wants to add to regular customers
+        const formattedTin9 = `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}`;
+        const cleanBranch5 = (branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
         setNewCustomerPrompt({
           isOpen: true,
           customerName: customerName.trim(),
-          tin: tin.trim(),
+          tin: formattedTin9,
+          branchCode: cleanBranch5,
           address: address.trim(),
           taxType: vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'
         });
         return;
       }
+    } else {
+      // NO VALID TIN ENTERED:
+      // 1. If Customer Name matches an existing customer in Directory > Customers (e.g., "def"),
+      // ask user if this is the same customer. If Yes -> ask for TIN to confirm; if No -> record as Various Customer!
+      if (existingCustomerByName) {
+        setExistingCustomerMatchPrompt({
+          isOpen: true,
+          matchedCustomer: existingCustomerByName,
+          step: 'ask_same',
+          verifyTinInput: '',
+          verifyBranchInput: existingCustomerByName.customer_branch_code || existingCustomerByName.tin_branch_code || '00000',
+          errorText: undefined
+        });
+        return;
+      }
+
+      // 2. If Customer Name does NOT exist in directory and has no TIN, offer to register as Regular Customer (with TIN) or proceed as Various Customer
+      setNewCustomerPrompt({
+        isOpen: true,
+        customerName: customerName.trim(),
+        tin: '',
+        branchCode: (branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5),
+        address: address.trim(),
+        taxType: vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'
+      });
+      return;
     }
 
-    // If customer already registered or no valid TIN entered (counts as Various Customer), proceed directly:
-    executeRecordSale(false, !hasValidTin);
+    // If customer already registered and TIN matches, proceed directly:
+    executeRecordSale(false, false);
   };
 
   // EXECUTE COLLECTION ON AN OPEN INVOICE
@@ -509,7 +681,10 @@ export default function SalesTransactionTab({
       c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase()
     );
 
-    const prevCashCollected = existingMatching.reduce((sum, c) => sum + (Number(c.amount_collected || 0)), 0);
+    const prevCashCollected = existingMatching.reduce((sum, c) => {
+      const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
+      return sum + cashVal;
+    }, 0);
     const prevDiscount = existingMatching.reduce((sum, c) => {
       if (Array.isArray(c.installments) && c.installments.length > 0) {
         return sum + c.installments.reduce((s, inst) => s + (Number(inst.discount) || 0), 0);
@@ -522,6 +697,18 @@ export default function SalesTransactionTab({
       }
       return sum + (Number(c.amount_withheld_2307) || 0);
     }, 0);
+
+    const remainingBalanceBeforeThis = Math.max(0, Math.round((invTotalDue - prevCashCollected - prevDiscount) * 100) / 100);
+    const currentSettlementAttempt = Math.round((paymentAmt + discountAmt + (invWtax === 0 ? manualWtaxAmt : 0)) * 100) / 100;
+
+    // ISSUE 1: Precaution against Customer Overpayment
+    if (currentSettlementAttempt > remainingBalanceBeforeThis + 0.01) {
+      triggerAlert(
+        `Overpayment Precaution: Collection amount (₱${currentSettlementAttempt.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining balance due of ₱${remainingBalanceBeforeThis.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${inv.invoice_number}. Customer overpayment is blocked.`,
+        'error'
+      );
+      return;
+    }
 
     const newTotalCashCollected = Math.round((prevCashCollected + paymentAmt) * 100) / 100;
     const newTotalSettledTowardsDue = Math.round((newTotalCashCollected + prevDiscount + discountAmt + (invWtax === 0 ? manualWtaxAmt : 0)) * 100) / 100;
@@ -536,105 +723,61 @@ export default function SalesTransactionTab({
     const nowIso = new Date().toISOString();
     const pendingBal = Math.max(0, Math.round((invTotalDue - newTotalSettledTowardsDue) * 100) / 100);
 
-    // 1. Update or add consolidated record in Collections Book (with installments array)
+    // Count existing actual payments (where amount_collected > 0) to determine COLLECTION 1, COLLECTION 2, COLLECTION 3...
+    const existingActualPayments = existingMatching.filter(c => (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0);
+    const nextPaymentNo = existingActualPayments.length + 1;
+
+    // 1. Add a NEW separate collection record per payment in Collections Book (NEVER overwrite previous 50k collection to 60k!)
+    const newCollectionRec: UniformBookRecord = {
+      id: commonId,
+      company_name: activeCompanyName,
+      registered_name: inv.registered_name,
+      vat_or_nonvat: inv.vat_or_nonvat,
+      tin: inv.tin,
+      address: inv.address,
+      type_of_transaction: 'ON ACCOUNT',
+      date: collectDate,
+      invoice_type: 'OFFICIAL RECEIPT',
+      voucher_number: collectRefNo.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
+      invoice_number: inv.invoice_number,
+      particulars: `COLLECTION ${nextPaymentNo} for Invoice #${inv.invoice_number} — ₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} (${isNowFullyCollected ? 'Full Settlement' : `Remaining: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`})`,
+      qty: inv.qty || 1,
+      unit_price: inv.unit_price || inv.amount,
+      amount: inv.amount,
+      vatable_amount: inv.vatable_amount,
+      vat_amount: inv.vat_amount,
+      zero_rated_amount: inv.zero_rated_amount,
+      vat_exempt_amount: inv.vat_exempt_amount,
+      total_amount_vat_inclusive: inv.total_amount_vat_inclusive,
+      total_amount_net_of_vat: inv.total_amount_net_of_vat,
+      discount: discountAmt,
+      tax_withheld: wtaxForThisInstallment,
+      amount_withheld_2307: wtaxForThisInstallment,
+      total_amount_due: invTotalDue,
+      amount_collected: paymentAmt,
+      pending_balance: pendingBal,
+      status: isNowFullyCollected ? 'Paid' : 'Partial',
+      is_cancelled: false,
+      created_at: nowIso
+    };
+
     setCollections(prev => {
-      const existingIdx = prev.findIndex(c => !c.is_cancelled && c.invoice_number && c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase());
-      if (existingIdx !== -1) {
-        const existingRec = prev[existingIdx];
-        const prevInsts = Array.isArray(existingRec.installments) && existingRec.installments.length > 0
-          ? existingRec.installments
-          : (Number(existingRec.amount_collected) > 0 ? [{
-              payment_no: 1,
-              date: existingRec.date || inv.date,
-              ref_no: existingRec.voucher_number || `OR-1ST`,
-              cash_amount: Number(existingRec.amount_collected) || 0,
-              discount: 0,
-              wtax_2307: 0,
-              is_final: false
-            }] : []);
-
-        const nextPaymentNo = prevInsts.length + 1;
-        const nextInst = {
-          payment_no: nextPaymentNo,
-          date: collectDate,
-          ref_no: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
-          cash_amount: paymentAmt,
-          discount: discountAmt,
-          wtax_2307: wtaxForThisInstallment,
-          is_final: isNowFullyCollected
-        };
-
-        const updatedInsts = [...prevInsts, nextInst];
-        const breakdownStr = updatedInsts.map(i => `#${i.payment_no}: ₱${i.cash_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`).join(' + ');
-
-        const updatedRec: UniformBookRecord = {
-          ...existingRec,
-          date: collectDate,
-          voucher_number: collectRefNo.trim() || existingRec.voucher_number,
-          vatable_amount: inv.vatable_amount,
-          vat_amount: inv.vat_amount,
-          zero_rated_amount: inv.zero_rated_amount,
-          vat_exempt_amount: inv.vat_exempt_amount,
-          total_amount_vat_inclusive: inv.total_amount_vat_inclusive,
-          total_amount_net_of_vat: inv.total_amount_net_of_vat,
-          discount: Math.round(((Number(inv.discount) || 0) + discountAmt) * 100) / 100,
-          tax_withheld: invWtax || wtaxForThisInstallment,
-          amount_withheld_2307: invWtax || wtaxForThisInstallment,
-          total_amount_due: invTotalDue,
-          amount_collected: newTotalCashCollected,
-          pending_balance: pendingBal,
-          status: isNowFullyCollected ? 'Paid' : 'Partial',
-          particulars: `Collections for Invoice #${inv.invoice_number} (${breakdownStr})`,
-          installments: updatedInsts
-        };
-
-        const copy = [...prev];
-        copy[existingIdx] = updatedRec;
-        return copy;
-      } else {
-        const newCollectionRec: UniformBookRecord = {
-          id: commonId,
-          company_name: activeCompanyName,
-          registered_name: inv.registered_name,
-          vat_or_nonvat: inv.vat_or_nonvat,
-          tin: inv.tin,
-          address: inv.address,
-          type_of_transaction: 'ON ACCOUNT',
-          date: collectDate,
-          invoice_type: 'OFFICIAL RECEIPT',
-          voucher_number: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
-          invoice_number: inv.invoice_number,
-          particulars: `Collection for Invoice #${inv.invoice_number} (${isNowFullyCollected ? 'Full Settlement' : 'Partial'})`,
-          qty: inv.qty || 1,
-          unit_price: inv.unit_price || inv.amount,
-          amount: inv.amount,
-          vatable_amount: inv.vatable_amount,
-          vat_amount: inv.vat_amount,
-          zero_rated_amount: inv.zero_rated_amount,
-          vat_exempt_amount: inv.vat_exempt_amount,
-          total_amount_vat_inclusive: inv.total_amount_vat_inclusive,
-          total_amount_net_of_vat: inv.total_amount_net_of_vat,
-          discount: Math.round(((Number(inv.discount) || 0) + discountAmt) * 100) / 100,
-          tax_withheld: invWtax || wtaxForThisInstallment,
-          amount_withheld_2307: invWtax || wtaxForThisInstallment,
-          total_amount_due: invTotalDue,
-          amount_collected: newTotalCashCollected,
-          pending_balance: pendingBal,
-          status: isNowFullyCollected ? 'Paid' : 'Partial',
-          installments: [{
-            payment_no: 1,
-            date: collectDate,
-            ref_no: collectRefNo.trim() || `CR-${Date.now().toString().slice(-4)}`,
-            cash_amount: paymentAmt,
-            discount: discountAmt,
-            wtax_2307: wtaxForThisInstallment,
-            is_final: isNowFullyCollected
-          }],
-          is_cancelled: false,
-          created_at: nowIso
-        };
-        return [newCollectionRec, ...prev];
-      }
+      // Remove any 0-amount "On Account" placeholder row for this invoice, keep all actual payment rows intact with their original amounts, and add the new payment row
+      const withoutZeroPlaceholder = prev.filter(c => {
+        const isSameInv = !c.is_cancelled && c.invoice_number && c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase();
+        if (!isSameInv) return true;
+        const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
+        return cashVal > 0;
+      });
+      // Update status on sibling rows of the same invoice if now Paid, while strictly preserving each row's individual amount_collected!
+      const updatedSiblings = withoutZeroPlaceholder.map(c => {
+        const isSameInv = !c.is_cancelled && c.invoice_number && c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase();
+        if (isSameInv && isNowFullyCollected) {
+          return { ...c, status: 'Paid' as const };
+        }
+        return c;
+      });
+      return [newCollectionRec, ...updatedSiblings];
     });
 
     // 2. Update status in Subsidiary Sales (6.2: status "Paid" when full payment is completed)
@@ -672,12 +815,12 @@ export default function SalesTransactionTab({
       });
 
       triggerAlert(
-        `Invoice #${inv.invoice_number} is now PAID IN FULL (Cash Collected: ₱${newTotalCashCollected.toLocaleString(undefined, { minimumFractionDigits: 2 })} | 2307: ₱${(invWtax || wtaxForThisInstallment).toLocaleString(undefined, { minimumFractionDigits: 2 })}) and recorded to Cash Receipts!`,
+        `COLLECTION ${nextPaymentNo} (₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}) recorded! Invoice #${inv.invoice_number} is now PAID IN FULL and recorded to Cash Receipts.`,
         'success'
       );
     } else {
       triggerAlert(
-        `Recorded collection of ₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${inv.invoice_number}. Remaining Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}.`,
+        `Recorded COLLECTION ${nextPaymentNo} of ₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${inv.invoice_number}. Remaining Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}.`,
         'info'
       );
     }
@@ -873,20 +1016,34 @@ export default function SalesTransactionTab({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold text-cyan-300 mb-1">
-                      Down Payment Amount (₱) *
+                      Down Payment Amount (₱) * <span className="text-zinc-400 font-normal">(Max: ₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
                     </label>
                     <input
                       type="number"
                       step="any"
+                      max={liveFormulas.total_amount_due}
                       placeholder="Enter down payment..."
                       value={downPaymentAmount}
                       onChange={(e) => setDownPaymentAmount(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
+                      className={`w-full px-3 py-2 text-xs rounded-lg border bg-zinc-900 text-white font-mono font-bold ${
+                        (parseFloat(downPaymentAmount) || 0) > liveFormulas.total_amount_due + 0.01
+                          ? 'border-rose-500 ring-1 ring-rose-500'
+                          : 'border-cyan-500/40'
+                      }`}
                       required
                     />
-                    <p className="text-[10px] text-zinc-400 mt-1">
-                      Remaining balance will be tracked in Collections Book for subsequent installment payments.
-                    </p>
+                    {(parseFloat(downPaymentAmount) || 0) > liveFormulas.total_amount_due + 0.01 ? (
+                      <div className="mt-1.5 p-2 rounded-lg border border-rose-500/40 bg-rose-500/15 text-rose-300 text-[11px] flex items-center gap-1.5 font-semibold">
+                        <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                        <span>
+                          Overpayment Precaution: Down payment (₱{(parseFloat(downPaymentAmount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds Total Amount Due (₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })}) by ₱{((parseFloat(downPaymentAmount) || 0) - liveFormulas.total_amount_due).toLocaleString(undefined, { minimumFractionDigits: 2 })}!
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-zinc-400 mt-1">
+                        Recorded as <strong>COLLECTION 1</strong> in Collections Book. Remaining balance: ₱{Math.max(0, liveFormulas.total_amount_due - (parseFloat(downPaymentAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-cyan-300 mb-1">
@@ -907,8 +1064,8 @@ export default function SalesTransactionTab({
             )}
 
             {/* CUSTOMER & INVOICE DETAILS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+              <div className="md:col-span-5">
                 <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Customer / Client Registered Name *</label>
                 <div className="flex gap-2">
                   <input
@@ -936,6 +1093,16 @@ export default function SalesTransactionTab({
                   )}
                 </div>
 
+                {/* Live Notification if Customer Name already exists in Directory */}
+                {nameMatchedCustomer && !tin.replace(/\D/g, '') && (
+                  <div className="mt-2 p-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-[11px] flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                    <div>
+                      <strong>Existing Customer Name Detected:</strong> Customer <strong>&quot;{nameMatchedCustomer.customer_name || nameMatchedCustomer.registered_name}&quot;</strong> is already registered in Directory &gt; Customers. Upon saving without a TIN, you will be asked to confirm if this is the same customer (by verifying their TIN) or a different Various Customer.
+                    </div>
+                  </div>
+                )}
+
                 {/* Requirement 2: Visual warning if entered customer name conflicts with registered TIN */}
                 {hasTinNameConflict && tinMatchCustomer && (
                   <div className="mt-2 p-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs flex items-center gap-2">
@@ -947,43 +1114,68 @@ export default function SalesTransactionTab({
                 )}
               </div>
 
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Customer TIN (Masked 000-000-000-00000) *</label>
+              <div className="md:col-span-4">
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Customer TIN (9 Digits)</label>
                 <input
                   type="text"
-                  placeholder="123-456-789-00000"
+                  maxLength={11}
+                  placeholder="000-000-000"
                   value={tin}
                   onChange={(e) => handleTinChange(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
                 />
-                {!tin.replace(/\D/g, '') && (
+                {!tin.replace(/\D/g, '') ? (
                   <p className="text-[10px] text-amber-400/90 mt-1">
-                    ℹ If no TIN is entered, this sale will be counted as "Various Customer" (Directory &gt; Customers &gt; Various Customers).
+                    ℹ 9-digit TIN (aligned with Directory &gt; Customers). Leave blank if Various Customer.
                   </p>
+                ) : (
+                  <p className="text-[10px] text-zinc-500 mt-1">9-digit primary TIN (e.g. 222-222-222)</p>
                 )}
+              </div>
+
+              <div className="md:col-span-3">
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Branch Code (5 Digits)</label>
+                <input
+                  type="text"
+                  maxLength={5}
+                  placeholder="00000"
+                  value={branchCode}
+                  onChange={(e) => handleBranchCodeChange(e.target.value)}
+                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
+                />
+                <p className="text-[10px] text-zinc-500 mt-1">5-digit branch (default: 00000)</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Tax Classification</label>
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Business Tax Type</label>
                 <select
-                  value={vatStatus}
-                  onChange={(e) => setVatStatus(e.target.value as any)}
+                  value={businessTaxType}
+                  onChange={(e) => {
+                    const val = e.target.value as any;
+                    setBusinessTaxType(val);
+                    setVatStatus(val === 'vatable' ? 'VAT' : 'NONVAT');
+                    if (val !== 'zero-rated') setZeroRated('0');
+                    if (val !== 'vat-exempt') setVatExempt('0');
+                  }}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
                 >
-                  <option value="VAT" className="bg-zinc-900 text-white">VAT Registered (12%)</option>
-                  <option value="NONVAT" className="bg-zinc-900 text-white">Non-VAT / Percentage Tax</option>
+                  <option value="vatable" className="bg-zinc-900 text-white">Vatable (12% VAT)</option>
+                  <option value="non-vatable" className="bg-zinc-900 text-white">Non-Vatable / Percentage Tax</option>
+                  <option value="vat-exempt" className="bg-zinc-900 text-white">VAT-Exempt</option>
+                  <option value="zero-rated" className="bg-zinc-900 text-white">Zero-Rated (0%)</option>
                 </select>
               </div>
 
               <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Invoice Document Type</label>
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Document Type</label>
                 <select
                   value={invoiceType}
                   onChange={(e) => setInvoiceType(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-medium cursor-pointer ${theme.borderInput} ${theme.textMain}`}
                 >
+                  <option value="INVOICE" className="bg-zinc-900 text-white">INVOICE</option>
                   <option value="SALES INVOICE" className="bg-zinc-900 text-white">SALES INVOICE</option>
                   <option value="OFFICIAL RECEIPT" className="bg-zinc-900 text-white">OFFICIAL RECEIPT</option>
                   <option value="BILLING STATEMENT" className="bg-zinc-900 text-white">BILLING STATEMENT</option>
@@ -1038,14 +1230,13 @@ export default function SalesTransactionTab({
             </div>
 
             <div>
-              <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Particulars / Description of Sale *</label>
+              <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Particulars / Description of Sale (Optional)</label>
               <input
                 type="text"
-                placeholder="e.g. Professional Consulting & Web Development Services"
+                placeholder="Optional description of sale..."
                 value={particulars}
                 onChange={(e) => setParticulars(e.target.value)}
                 className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
-                required
               />
             </div>
 
@@ -1065,11 +1256,12 @@ export default function SalesTransactionTab({
               </div>
 
               <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Unit Price (₱)</label>
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Unit Price (₱) *</label>
                 <input
                   type="number"
                   min="0"
                   step="any"
+                  placeholder="Enter amount..."
                   value={unitPrice}
                   onChange={(e) => setUnitPrice(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
@@ -1259,19 +1451,23 @@ export default function SalesTransactionTab({
                 <button
                   type="button"
                   onClick={() => {
+                    const rawTin9 = tin.replace(/\D/g, '').slice(0, 9);
+                    const formatted9 = rawTin9.length === 9 ? `${rawTin9.slice(0, 3)}-${rawTin9.slice(3, 6)}-${rawTin9.slice(6, 9)}` : '000-000-000';
+                    const cleanBranch5 = (branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
                     const tempRecord: UniformBookRecord = {
                       id: 0,
                       company_name: activeCompanyName,
                       registered_name: customerName || 'Valued Client / Customer',
-                      vat_or_nonvat: vatStatus,
-                      tin: tin || '000-000-000-00000',
+                      vat_or_nonvat: businessTaxType === 'vatable' ? 'VAT' : 'NONVAT',
+                      business_tax_type: businessTaxType,
+                      tin: `${formatted9}-${cleanBranch5}`,
                       address: address || 'Metro Manila, Philippines',
                       type_of_transaction: saleMode === 'ON CASH' ? 'CASH' : 'ON ACCOUNT',
                       date: date,
                       invoice_type: invoiceType,
                       voucher_number: voucherNo,
                       invoice_number: invoiceNo,
-                      particulars: particulars || 'Sales of goods/services',
+                      particulars: particulars || 'Sales Invoice',
                       qty: parseFloat(qty) || 1,
                       unit_price: parseFloat(unitPrice) || 0,
                       amount: liveFormulas.amount,
@@ -1291,7 +1487,7 @@ export default function SalesTransactionTab({
                   className="w-1/2 py-3.5 rounded-xl border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 font-bold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <Eye className="w-4 h-4" />
-                  <span>Preview ({vatStatus})</span>
+                  <span>Preview ({businessTaxType === 'vatable' ? 'Vatable' : 'Non-Vatable'})</span>
                 </button>
 
                 <button
@@ -1364,8 +1560,12 @@ export default function SalesTransactionTab({
                       c.invoice_number && 
                       c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase()
                     );
-                    const collectedSoFar = matchingColls.reduce((sum, c) => sum + (Number(c.amount_collected || c.amount) || 0), 0);
-                    const balance = Math.max(0, invDue - collectedSoFar);
+                    const collectedSoFar = matchingColls.reduce((sum, c) => {
+                      const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
+                      return sum + cashVal;
+                    }, 0);
+                    const balance = Math.max(0, Math.round((invDue - collectedSoFar) * 100) / 100);
+                    const actualPaymentCount = matchingColls.filter(c => (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0).length;
 
                     return (
                       <tr key={inv.id} className="hover:bg-zinc-800/30 transition">
@@ -1379,18 +1579,21 @@ export default function SalesTransactionTab({
                           ₱{invDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                         <td className="p-3 text-right font-mono text-emerald-400">
-                          ₱{collectedSoFar.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          <div>₱{collectedSoFar.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                          {actualPaymentCount > 0 && (
+                            <div className="text-[10px] text-zinc-400">{actualPaymentCount} collection(s)</div>
+                          )}
                         </td>
                         <td className="p-3 text-right font-mono font-extrabold text-amber-400">
                           ₱{balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                         <td className="p-3 text-center">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            inv.status === 'Partial' 
+                            inv.status === 'Partial' || collectedSoFar > 0
                               ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' 
                               : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                           }`}>
-                            {inv.status || 'On Account'}
+                            {collectedSoFar > 0 ? 'Partial' : (inv.status || 'On Account')}
                           </span>
                         </td>
                         <td className="p-3 text-right">
@@ -1415,7 +1618,24 @@ export default function SalesTransactionTab({
                               className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1"
                             >
                               <Coins className="w-3.5 h-3.5" />
-                              <span>Collect Payment</span>
+                              <span>Collect Payment #{actualPaymentCount + 1}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onDeleteRecord) {
+                                  onDeleteRecord('subsidiary_sales', inv);
+                                } else {
+                                  setSubsidiarySales(prev => prev.filter(s => s.id !== inv.id));
+                                  setCollections(prev => prev.filter(c => !(c.invoice_number && c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase())));
+                                  setCashReceipts(prev => prev.filter(cr => !(cr.invoice_number && cr.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase())));
+                                  triggerAlert(`Deleted sale transaction Invoice #${inv.invoice_number} and all related collections.`, 'info');
+                                }
+                              }}
+                              title="Delete Sales Invoice and all related Collections, Cash Receipts, Journal & Ledger entries"
+                              className="p-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -1430,156 +1650,420 @@ export default function SalesTransactionTab({
       )}
 
       {/* QUICK COLLECTION MODAL */}
-      {selectedInvoiceToCollect && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-fadeIn">
-          <div className={`relative w-full max-w-lg ${theme.bgCard} border ${theme.borderCard} rounded-2xl shadow-2xl overflow-hidden p-6 flex flex-col gap-4`}>
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
-                  <Coins className="w-5 h-5" />
+      {selectedInvoiceToCollect && (() => {
+        const invDueModal = Number(selectedInvoiceToCollect.total_amount_due || selectedInvoiceToCollect.amount) || 0;
+        const matchingCollsModal = collections.filter(c =>
+          !c.is_cancelled &&
+          c.invoice_number &&
+          c.invoice_number.trim().toLowerCase() === selectedInvoiceToCollect.invoice_number.trim().toLowerCase() &&
+          (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0
+        );
+        const collectedSoFarModal = matchingCollsModal.reduce((sum, c) => sum + (Number(c.amount_collected) || 0) + (Number(c.discount) || 0), 0);
+        const remainingBalanceModal = Math.max(0, Math.round((invDueModal - collectedSoFarModal) * 100) / 100);
+        const enteredTotalModal = Math.round(((parseFloat(collectAmount) || 0) + (parseFloat(collectDiscount) || 0)) * 100) / 100;
+        const isOverpaymentModal = enteredTotalModal > remainingBalanceModal + 0.01;
+        const nextCollectionNum = matchingCollsModal.length + 1;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-fadeIn">
+            <div className={`relative w-full max-w-lg ${theme.bgCard} border ${theme.borderCard} rounded-2xl shadow-2xl overflow-hidden p-6 flex flex-col gap-4`}>
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+                    <Coins className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-white">Record COLLECTION {nextCollectionNum}</h3>
+                    <p className="text-[11px] text-zinc-400">Invoice #{selectedInvoiceToCollect.invoice_number} • Listed as Separate Payment Entry</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedInvoiceToCollect(null)}
+                  className="text-zinc-400 hover:text-white text-xs px-2 py-1 rounded"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleExecuteCollection} className="flex flex-col gap-4 text-xs">
+                <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col gap-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Customer:</span>
+                    <span className="font-bold text-zinc-200">{selectedInvoiceToCollect.registered_name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Total Invoice Due:</span>
+                    <span className="font-mono font-bold text-zinc-200">₱{invDueModal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {matchingCollsModal.length > 0 && (
+                    <div className="pt-1 border-t border-zinc-800 space-y-1">
+                      <span className="text-[10px] font-bold uppercase text-cyan-400 block">Previous Collections Made:</span>
+                      {matchingCollsModal.slice().reverse().map((prevCol, idx) => (
+                        <div key={prevCol.id} className="flex justify-between font-mono text-[11px] text-emerald-400">
+                          <span>COLLECTION {idx + 1} ({prevCol.date}):</span>
+                          <span>₱{(Number(prevCol.amount_collected) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-1 border-t border-zinc-800">
+                    <span className="text-amber-400 font-bold">Remaining Pending Balance:</span>
+                    <span className="font-mono font-extrabold text-amber-400">₱{remainingBalanceModal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+
+                {/* OVERPAYMENT PRECAUTION BANNER */}
+                {isOverpaymentModal && (
+                  <div className="p-3 rounded-xl border border-rose-500/50 bg-rose-500/15 text-rose-300 text-xs flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                    <div className="space-y-1">
+                      <div className="font-bold text-rose-200">Customer Overpayment Precaution</div>
+                      <div>
+                        Entered collection (₱{enteredTotalModal.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining balance due (₱{remainingBalanceModal.toLocaleString(undefined, { minimumFractionDigits: 2 })}) by <strong>₱{(enteredTotalModal - remainingBalanceModal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCollectAmount(String(Math.max(0, remainingBalanceModal - (parseFloat(collectDiscount) || 0))));
+                        }}
+                        className="mt-1 px-2.5 py-1 rounded-lg bg-rose-500/30 hover:bg-rose-500/40 text-white font-bold text-[10px] cursor-pointer transition"
+                      >
+                        Set to Exact Remaining Balance (₱{remainingBalanceModal.toLocaleString(undefined, { minimumFractionDigits: 2 })})
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-zinc-300 font-bold mb-1">Cash Collected (₱) *</label>
+                    <input
+                      type="number"
+                      step="any"
+                      max={remainingBalanceModal}
+                      value={collectAmount}
+                      onChange={(e) => setCollectAmount(e.target.value)}
+                      placeholder="0.00"
+                      className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent text-white font-mono font-bold ${
+                        isOverpaymentModal ? 'border-rose-500 ring-1 ring-rose-500' : 'border-zinc-700'
+                      }`}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-300 font-bold mb-1">Discounts (₱)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={collectDiscount}
+                      onChange={(e) => setCollectDiscount(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-300 font-bold mb-1">Withholding Tax (₱)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={collectWtax}
+                      onChange={(e) => setCollectWtax(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* LIVE JOURNAL ENTRY 2 PREVIEW */}
+                <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-700 space-y-1.5">
+                  <div className="flex justify-between items-center text-[11px] font-bold text-amber-400">
+                    <span>COLLECTION {nextCollectionNum} Journal Preview:</span>
+                    <span className="font-mono">
+                      Total A/R Credit: ₱{((parseFloat(collectAmount) || 0) + (parseFloat(collectDiscount) || 0) + (parseFloat(collectWtax) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="font-mono text-[10px] space-y-0.5 text-zinc-300">
+                    <div className="flex justify-between">
+                      <span className="text-emerald-400">(dr) Cash and Cash Equivalents [1010]</span>
+                      <span>₱{(parseFloat(collectAmount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    {(parseFloat(collectDiscount) || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-rose-400">(dr) Sales Discounts [4015]</span>
+                        <span>₱{(parseFloat(collectDiscount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                    {(parseFloat(collectWtax) || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-cyan-400">(dr) Withholding Tax 2307 [1040]</span>
+                        <span>₱{(parseFloat(collectWtax) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between pt-1 border-t border-zinc-800 text-amber-300 font-bold">
+                      <span>(cr) Accounts Receivable [1020]</span>
+                      <span>₱{((parseFloat(collectAmount) || 0) + (parseFloat(collectDiscount) || 0) + (parseFloat(collectWtax) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-zinc-300 font-bold mb-1">Collection Date</label>
+                    <input
+                      type="date"
+                      value={collectDate}
+                      onChange={(e) => setCollectDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-medium"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-300 font-bold mb-1">Official Receipt (OR) / Ref #</label>
+                    <input
+                      type="text"
+                      value={collectRefNo}
+                      onChange={(e) => setCollectRefNo(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedInvoiceToCollect(null)}
+                    className="px-4 py-2 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isOverpaymentModal}
+                    className={`px-4 py-2 rounded-xl font-bold ${
+                      isOverpaymentModal
+                        ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+                    }`}
+                  >
+                    Confirm COLLECTION {nextCollectionNum}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* EXISTING CUSTOMER NAME MATCH CONFIRMATION & TIN VERIFICATION MODAL */}
+      {existingCustomerMatchPrompt && existingCustomerMatchPrompt.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className={`w-full max-w-lg p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-2xl space-y-4 animate-scaleUp`}>
+            <div className="flex items-center justify-between border-b border-zinc-700/40 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+                  <AlertCircle className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm text-white">Record Collection</h3>
-                  <p className="text-[11px] text-zinc-400">Invoice #{selectedInvoiceToCollect.invoice_number}</p>
+                  <h3 className={`text-base font-bold ${theme.textTitle}`}>
+                    Existing Customer Name Found in Directory
+                  </h3>
+                  <p className={`text-xs ${theme.textMuted}`}>
+                    Customer &quot;{existingCustomerMatchPrompt.matchedCustomer.customer_name || existingCustomerMatchPrompt.matchedCustomer.registered_name}&quot; is already recorded
+                  </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedInvoiceToCollect(null)}
-                className="text-zinc-400 hover:text-white text-xs px-2 py-1 rounded"
+                onClick={() => setExistingCustomerMatchPrompt(null)}
+                className="p-1 text-zinc-400 hover:text-white rounded cursor-pointer"
               >
-                ✕
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleExecuteCollection} className="flex flex-col gap-4 text-xs">
-              <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col gap-1">
-                <div className="flex justify-between">
-                  <span className="text-zinc-400">Customer:</span>
-                  <span className="font-bold text-zinc-200">{selectedInvoiceToCollect.registered_name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-400">Total Invoice Amount:</span>
-                  <span className="font-mono font-bold text-zinc-200">₱{(Number(selectedInvoiceToCollect.total_amount_due) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-zinc-300 font-bold mb-1">Cash Collected (₱) *</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={collectAmount}
-                    onChange={(e) => setCollectAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
-                    required
-                  />
+            {existingCustomerMatchPrompt.step === 'ask_same' ? (
+              <>
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs space-y-1.5">
+                  <p className={theme.textMain}>
+                    A registered customer named <strong>&quot;{existingCustomerMatchPrompt.matchedCustomer.customer_name || existingCustomerMatchPrompt.matchedCustomer.registered_name}&quot;</strong> already exists in <strong>Directory &gt; Customers</strong>.
+                  </p>
+                  <p className="text-zinc-400">
+                    Is this the <strong>same customer</strong> as the one recorded in your Customer Directory?
+                  </p>
                 </div>
 
-                <div>
-                  <label className="block text-zinc-300 font-bold mb-1">Discounts (₱)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={collectDiscount}
-                    onChange={(e) => setCollectDiscount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
-                  />
+                <div className="flex flex-col gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExistingCustomerMatchPrompt({
+                        ...existingCustomerMatchPrompt,
+                        step: 'verify_tin',
+                        errorText: undefined
+                      })
+                    }
+                    className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-white bg-cyan-600 hover:bg-cyan-500 transition shadow-sm cursor-pointer"
+                  >
+                    ✓ Yes, Same Customer (Enter TIN to Confirm Identity)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Treated differently even if same name -> goes strictly to Various Customers without duplicating in Registered Customers
+                      executeRecordSale(false, true, '000-000-000', '00000');
+                    }}
+                    className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition cursor-pointer"
+                  >
+                    ✕ No, Different Customer (Record as Various Customer Only)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setExistingCustomerMatchPrompt(null)}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl text-zinc-400 hover:text-white border border-zinc-700/40 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-xs space-y-2">
+                  <p className={theme.textMain}>
+                    Please enter the <strong>9-digit Customer TIN</strong> and <strong>5-digit Branch Code</strong> of <strong>&quot;{existingCustomerMatchPrompt.matchedCustomer.customer_name || existingCustomerMatchPrompt.matchedCustomer.registered_name}&quot;</strong> to confirm that this customer is the same as the one recorded in the directory:
+                  </p>
                 </div>
 
-                <div>
-                  <label className="block text-zinc-300 font-bold mb-1">Withholding Tax (₱)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={collectWtax}
-                    onChange={(e) => setCollectWtax(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* LIVE JOURNAL ENTRY 2 PREVIEW */}
-              <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-700 space-y-1.5">
-                <div className="flex justify-between items-center text-[11px] font-bold text-amber-400">
-                  <span>Entry 2 / A/R Settlement Preview:</span>
-                  <span className="font-mono">
-                    Total A/R Credit: ₱{((parseFloat(collectAmount) || 0) + (parseFloat(collectDiscount) || 0) + (parseFloat(collectWtax) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="font-mono text-[10px] space-y-0.5 text-zinc-300">
-                  <div className="flex justify-between">
-                    <span className="text-emerald-400">(dr) Cash and Cash Equivalents [1010]</span>
-                    <span>₱{(parseFloat(collectAmount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-300 mb-1">
+                      Confirm Customer TIN (9 Digits) *
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={11}
+                      placeholder="e.g. 222-222-222"
+                      value={existingCustomerMatchPrompt.verifyTinInput}
+                      onChange={(e) => {
+                        const d = e.target.value.replace(/\D/g, '').slice(0, 9);
+                        let fmt = '';
+                        if (d.length > 0) fmt += d.slice(0, 3);
+                        if (d.length > 3) fmt += '-' + d.slice(3, 6);
+                        if (d.length > 6) fmt += '-' + d.slice(6, 9);
+                        setExistingCustomerMatchPrompt({
+                          ...existingCustomerMatchPrompt,
+                          verifyTinInput: fmt,
+                          errorText: undefined
+                        });
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-cyan-500/40 bg-zinc-900 font-mono font-bold text-cyan-300 text-xs"
+                    />
                   </div>
-                  {(parseFloat(collectDiscount) || 0) > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-rose-400">(dr) Sales Discounts [4015]</span>
-                      <span>₱{(parseFloat(collectDiscount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  {(parseFloat(collectWtax) || 0) > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-cyan-400">(dr) Withholding Tax 2307 [1040]</span>
-                      <span>₱{(parseFloat(collectWtax) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between pt-1 border-t border-zinc-800 text-amber-300 font-bold">
-                    <span>(cr) Accounts Receivable [1020]</span>
-                    <span>₱{((parseFloat(collectAmount) || 0) + (parseFloat(collectDiscount) || 0) + (parseFloat(collectWtax) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-300 mb-1">
+                      Branch Code (5 Digits)
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={5}
+                      placeholder="00000"
+                      value={existingCustomerMatchPrompt.verifyBranchInput}
+                      onChange={(e) => {
+                        const d = e.target.value.replace(/\D/g, '').slice(0, 5);
+                        setExistingCustomerMatchPrompt({
+                          ...existingCustomerMatchPrompt,
+                          verifyBranchInput: d,
+                          errorText: undefined
+                        });
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 font-mono font-bold text-white text-xs"
+                    />
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-zinc-300 font-bold mb-1">Collection Date</label>
-                  <input
-                    type="date"
-                    value={collectDate}
-                    onChange={(e) => setCollectDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-medium"
-                    required
-                  />
+                {existingCustomerMatchPrompt.errorText && (
+                  <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>{existingCustomerMatchPrompt.errorText}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const enteredDigits = existingCustomerMatchPrompt.verifyTinInput.replace(/\D/g, '').slice(0, 9);
+                      const expectedDigits = (
+                        existingCustomerMatchPrompt.matchedCustomer.customer_tin ||
+                        existingCustomerMatchPrompt.matchedCustomer.client_TIN ||
+                        ''
+                      ).replace(/\D/g, '').slice(0, 9);
+
+                      if (enteredDigits.length !== 9) {
+                        setExistingCustomerMatchPrompt({
+                          ...existingCustomerMatchPrompt,
+                          errorText: 'Please enter the 9-digit TIN to confirm.'
+                        });
+                        return;
+                      }
+
+                      if (enteredDigits !== expectedDigits) {
+                        setExistingCustomerMatchPrompt({
+                          ...existingCustomerMatchPrompt,
+                          errorText: `Entered TIN (${existingCustomerMatchPrompt.verifyTinInput}) does not match the registered TIN on file for "${existingCustomerMatchPrompt.matchedCustomer.customer_name || existingCustomerMatchPrompt.matchedCustomer.registered_name}". If this is a different customer, click "Record as Various Customer Only".`
+                        });
+                        return;
+                      }
+
+                      const fmt9 = `${enteredDigits.slice(0, 3)}-${enteredDigits.slice(3, 6)}-${enteredDigits.slice(6, 9)}`;
+                      const br5 = (existingCustomerMatchPrompt.verifyBranchInput || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+                      const matchedAddr = existingCustomerMatchPrompt.matchedCustomer.customer_address || existingCustomerMatchPrompt.matchedCustomer.client_Address || address;
+                      setTin(fmt9);
+                      setBranchCode(br5);
+                      if (!address && matchedAddr) setAddress(matchedAddr);
+                      executeRecordSale(false, false, fmt9, br5, matchedAddr);
+                    }}
+                    className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-white bg-emerald-600 hover:bg-emerald-500 transition shadow-sm cursor-pointer"
+                  >
+                    ✓ Confirm TIN & Record to Registered Customer
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => executeRecordSale(false, true, '000-000-000', '00000')}
+                    className="px-3 py-2.5 text-xs font-bold rounded-xl text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition cursor-pointer"
+                  >
+                    Record as Various Customer Only
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExistingCustomerMatchPrompt({
+                        ...existingCustomerMatchPrompt,
+                        step: 'ask_same',
+                        errorText: undefined
+                      })
+                    }
+                    className="px-3 py-2 text-xs font-semibold rounded-xl text-zinc-400 hover:text-white border border-zinc-700/40 transition cursor-pointer"
+                  >
+                    Back
+                  </button>
                 </div>
-
-                <div>
-                  <label className="block text-zinc-300 font-bold mb-1">Official Receipt (OR) / Ref #</label>
-                  <input
-                    type="text"
-                    value={collectRefNo}
-                    onChange={(e) => setCollectRefNo(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => setSelectedInvoiceToCollect(null)}
-                  className="px-4 py-2 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
-                >
-                  Confirm Collection
-                </button>
-              </div>
-            </form>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* NEW CUSTOMER PROMPT MODAL (Requirement 3) */}
+      {/* NEW CUSTOMER CONFIRMATION / ADD TO REGULAR CUSTOMERS MODAL */}
       {newCustomerPrompt && newCustomerPrompt.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
           <div className={`w-full max-w-lg p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-2xl space-y-4 animate-scaleUp`}>
@@ -1589,8 +2073,10 @@ export default function SalesTransactionTab({
                   <UserPlus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className={`text-base font-bold ${theme.textTitle}`}>New Customer Detected</h3>
-                  <p className={`text-xs ${theme.textMuted}`}>Customer has a valid TIN and is not in Customer Directory</p>
+                  <h3 className={`text-base font-bold ${theme.textTitle}`}>Confirm Customer Details</h3>
+                  <p className={`text-xs ${theme.textMuted}`}>
+                    Customer &quot;{newCustomerPrompt.customerName}&quot; is not yet in your Registered Customer Directory
+                  </p>
                 </div>
               </div>
               <button 
@@ -1602,7 +2088,7 @@ export default function SalesTransactionTab({
             </div>
 
             <p className={`text-xs ${theme.textMain}`}>
-              Customer <strong>"{newCustomerPrompt.customerName}"</strong> with TIN <strong>{newCustomerPrompt.tin}</strong> is not registered in your customer masterlist. How would you like to save this customer and record the transaction?
+              Would you like to add <strong>&quot;{newCustomerPrompt.customerName}&quot;</strong> to your <strong>Regular Customers Directory</strong> (requires 9-digit TIN &amp; 5-digit Branch Code), or record this transaction under <strong>Various Customers</strong>?
             </p>
 
             <div className="space-y-3 p-3.5 bg-zinc-800/30 rounded-xl border border-zinc-700/30 text-xs">
@@ -1615,14 +2101,37 @@ export default function SalesTransactionTab({
                   className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-900 ${theme.borderInput} ${theme.textMain} text-xs`}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-400 mb-1">Customer TIN</label>
+                  <label className="block text-[11px] font-bold text-zinc-400 mb-1">Customer TIN (9 Digits)</label>
                   <input 
                     type="text"
+                    maxLength={11}
+                    placeholder="000-000-000"
                     value={newCustomerPrompt.tin}
-                    readOnly
-                    className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-950 font-mono text-cyan-400 font-bold border-zinc-700/50 text-xs`}
+                    onChange={(e) => {
+                      const d = e.target.value.replace(/\D/g, '').slice(0, 9);
+                      let fmt = '';
+                      if (d.length > 0) fmt += d.slice(0, 3);
+                      if (d.length > 3) fmt += '-' + d.slice(3, 6);
+                      if (d.length > 6) fmt += '-' + d.slice(6, 9);
+                      setNewCustomerPrompt({ ...newCustomerPrompt, tin: fmt });
+                    }}
+                    className="w-full px-3 py-1.5 rounded-lg border bg-zinc-950 font-mono text-cyan-400 font-bold border-zinc-700/50 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-400 mb-1">Branch (5 Digits)</label>
+                  <input 
+                    type="text"
+                    maxLength={5}
+                    placeholder="00000"
+                    value={newCustomerPrompt.branchCode}
+                    onChange={(e) => {
+                      const d = e.target.value.replace(/\D/g, '').slice(0, 5);
+                      setNewCustomerPrompt({ ...newCustomerPrompt, branchCode: d });
+                    }}
+                    className="w-full px-3 py-1.5 rounded-lg border bg-zinc-950 font-mono text-white font-bold border-zinc-700/50 text-xs"
                   />
                 </div>
                 <div>
@@ -1652,14 +2161,25 @@ export default function SalesTransactionTab({
             <div className="flex flex-col sm:flex-row gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => executeRecordSale(true, false)}
+                onClick={() => {
+                  const raw9 = newCustomerPrompt.tin.replace(/\D/g, '').slice(0, 9);
+                  if (raw9.length !== 9 || /^0+$/.test(raw9)) {
+                    triggerAlert('Please enter a valid 9-digit TIN (e.g. 222-222-222) to add this customer to Regular Customers, or choose "Track as Various Customer Only".', 'error');
+                    return;
+                  }
+                  const fmt9 = `${raw9.slice(0, 3)}-${raw9.slice(3, 6)}-${raw9.slice(6, 9)}`;
+                  const br5 = (newCustomerPrompt.branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+                  setTin(fmt9);
+                  setBranchCode(br5);
+                  executeRecordSale(true, false, fmt9, br5, newCustomerPrompt.address);
+                }}
                 className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-white bg-cyan-600 hover:bg-cyan-500 transition shadow-sm cursor-pointer"
               >
-                ✓ Add to Customer Database & Record Sale
+                ✓ Add to Regular Customers &amp; Record Sale
               </button>
               <button
                 type="button"
-                onClick={() => executeRecordSale(false, true)}
+                onClick={() => executeRecordSale(false, true, '000-000-000', '00000')}
                 className="px-4 py-2.5 text-xs font-bold rounded-xl text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition cursor-pointer"
               >
                 Track as Various Customer Only

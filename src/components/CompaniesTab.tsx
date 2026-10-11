@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, Landmark, Check, Info, Pencil, Trash2, Plus, X, Search, CheckCircle2, ShieldCheck, Mail, Phone, Calendar, MapPin, FolderTree, Folder } from 'lucide-react';
+import { Building2, Landmark, Check, Info, Pencil, Trash2, Plus, X, Search, CheckCircle2, ShieldCheck, Mail, Phone, Calendar, MapPin, FolderTree, Folder, AlertTriangle } from 'lucide-react';
 import { Company } from '../types';
 
 interface CompaniesTabProps {
@@ -24,6 +24,7 @@ export default function CompaniesTab({
   // Modal visibility state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDirectoryCompany, setSelectedDirectoryCompany] = useState<Company | null>(null);
+  const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
   const [localSearch, setLocalSearch] = useState('');
 
   // 2 Clean Sub-tabs: 'company' (Profile / Information) and 'bir' (BIR 2303 Tax Obligations)
@@ -180,15 +181,23 @@ export default function CompaniesTab({
     }
   };
 
-  const handleDeleteCompany = (id: number, name: string) => {
+  const handleDeleteCompany = (company: Company) => {
+    setCompanyToDelete(company);
+  };
+
+  const confirmDeleteCompany = () => {
+    if (!companyToDelete) return;
+    const { id, company_name } = companyToDelete;
+    const remaining = companies.filter(c => c.id !== id);
+    setCompanies(remaining);
     if (activeCompany && activeCompany.id === id) {
-      triggerAlert("Cannot delete the active workspace company. Switch active workspace first.", "error");
-      return;
+      setActiveCompany(remaining.length > 0 ? remaining[0] : null);
     }
-    if (window.confirm(`Delete Company Profile for ${name}?`)) {
-      setCompanies(prev => prev.filter(c => c.id !== id));
-      triggerAlert(`Deleted Company profile successfully!`, 'info');
+    if (selectedDirectoryCompany && selectedDirectoryCompany.id === id) {
+      setSelectedDirectoryCompany(null);
     }
+    triggerAlert(`Deleted Company profile "${company_name || 'Entity'}" successfully!`, 'info');
+    setCompanyToDelete(null);
   };
 
   const handleEditClick = (c: Company) => {
@@ -390,14 +399,9 @@ export default function CompaniesTab({
                           </button>
                           <button
                             type="button"
-                            disabled={isActive}
-                            onClick={() => handleDeleteCompany(c.id, c.company_name || 'Entity')}
-                            className={`p-1.5 rounded-lg border transition ${
-                              isActive 
-                                ? 'border-zinc-800 text-zinc-600 cursor-not-allowed opacity-50' 
-                                : 'border-rose-500/20 text-rose-400 hover:bg-rose-500/10 cursor-pointer'
-                            }`}
-                            title={isActive ? "Cannot delete active entity" : "Delete Entity Profile"}
+                            onClick={() => handleDeleteCompany(c)}
+                            className="p-1.5 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                            title="Delete Entity Profile"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -999,6 +1003,80 @@ export default function CompaniesTab({
                 className="px-4 py-2 text-xs font-bold rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition cursor-pointer"
               >
                 Close View
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* POPUP MODAL: DELETE COMPANY WARNING & CONFIRMATION                        */}
+      {/* ========================================================================= */}
+      {companyToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-fadeIn">
+          <div
+            className={`relative w-full max-w-md flex flex-col ${theme.bgCard} border border-rose-500/40 rounded-2xl shadow-2xl overflow-hidden`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-rose-500/20 flex items-center justify-between bg-rose-500/10">
+              <div className="flex items-center gap-3">
+                <div className="bg-rose-500/20 text-rose-400 p-2.5 rounded-xl border border-rose-500/30">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className={`font-display font-bold text-base ${theme.textTitle}`}>
+                    Warning: Delete Company Profile?
+                  </h3>
+                  <p className="text-xs text-rose-400 font-medium mt-0.5">
+                    This action will remove the entity from your masterlist.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCompanyToDelete(null)}
+                className="p-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 flex flex-col gap-4">
+              <div className={`p-3.5 rounded-xl border ${theme.borderCard} bg-zinc-500/5 flex flex-col gap-1`}>
+                <span className={`text-sm font-bold ${theme.textTitle}`}>
+                  {companyToDelete.company_name}
+                </span>
+                <span className="text-xs font-mono text-cyan-400">
+                  TIN: {companyToDelete.company_tin || '000-000-000-00000'}
+                </span>
+                {activeCompany?.id === companyToDelete.id && (
+                  <span className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-400">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    This is currently your Active Workspace. Deleting it will switch the active workspace to another registered entity (or clear it if none remain).
+                  </span>
+                )}
+              </div>
+
+              <p className={`text-xs ${theme.textMuted} leading-relaxed`}>
+                Are you sure you want to permanently delete this company profile? Please confirm to proceed.
+              </p>
+            </div>
+
+            <div className={`p-4 border-t ${theme.borderCard} flex items-center justify-end gap-2.5 bg-zinc-500/5`}>
+              <button
+                type="button"
+                onClick={() => setCompanyToDelete(null)}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteCompany}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-500 text-white shadow-md transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Yes, Delete Company
               </button>
             </div>
           </div>

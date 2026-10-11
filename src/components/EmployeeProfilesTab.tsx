@@ -120,10 +120,8 @@ export default function EmployeeProfilesTab({
   };
 
   const handleDelete = (id: number, name: string) => {
-    if (window.confirm(`Are you sure you want to delete employee "${name}"?`)) {
-      setEmployees(prev => prev.filter(e => e.id !== id));
-      triggerAlert(`Employee "${name}" deleted.`, 'info');
-    }
+    setEmployees(prev => prev.filter(e => e.id !== id));
+    triggerAlert(`Employee "${name}" deleted.`, 'info');
   };
 
   const filteredEmployees = employees.filter(emp => {

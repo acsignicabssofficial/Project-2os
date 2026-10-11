@@ -123,6 +123,11 @@ export interface ChartOfAccounts {
   isCustom?: boolean;
   financial_statement_classification?: string;
   company_name?: string;
+  // PFRS / PAS Compliance Metadata
+  is_contra?: boolean;
+  parent_account_code?: string;
+  pfrs_classification?: 'Current Asset' | 'Non-Current Asset' | 'Current Liability' | 'Non-Current Liability' | 'Equity' | 'OCI' | 'Operating Revenue' | 'Operating Expense' | 'Finance Cost' | 'Tax Expense' | string;
+  cash_flow_activity?: 'Operating' | 'Investing' | 'Financing' | 'Cash_And_Equivalents';
 }
 
 export interface AccountTitle extends ChartOfAccounts {}
@@ -381,6 +386,12 @@ export interface PPEAsset {
   annual_depreciation?: number;
   monthly_depreciation?: number;
   book_value?: number;
+  // PAS 16, PAS 36 & PFRS 5 Compliance
+  measurement_model?: 'Cost' | 'Revaluation';
+  revaluation_surplus?: number;
+  impairment_loss?: number;
+  is_held_for_sale?: boolean;
+  held_for_sale_date?: string;
 }
 
 export interface IncomeTaxRecord {
@@ -424,6 +435,14 @@ export interface SpecialEntry {
   entry_number?: string;
   company_name?: string;
   created_at?: string;
+  total_debit?: number;
+  total_credit?: number;
+  // PAS 8, PAS 10 & PFRS S2 Sustainability Metadata
+  accounting_treatment?: 'Standard' | 'Prospective' | 'Retrospective Restatement';
+  post_reporting_event?: 'None' | 'Adjusting Event (PAS 10)' | 'Non-Adjusting Note Disclosure (PAS 10)';
+  esg_scope?: 'None' | 'Scope 1 (Direct)' | 'Scope 2 (Electricity)' | 'Scope 3 (Value Chain)';
+  esg_activity_qty?: number;
+  esg_activity_unit?: 'kWh' | 'Liters' | 'kg CO2e';
 }
 
 export interface SssBracket {

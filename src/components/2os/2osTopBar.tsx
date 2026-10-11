@@ -3,8 +3,13 @@ import {
   Building2, 
   ChevronDown, 
   Check, 
-  Server, 
-  Calendar
+  Calendar,
+  Plus,
+  FileSpreadsheet,
+  Upload,
+  Download,
+  Printer,
+  Settings as SettingsIcon
 } from 'lucide-react';
 import { Company, ThemeMode } from '../../types';
 import PeriodModal from './PeriodModal';
@@ -23,10 +28,14 @@ interface TwoOSTopBarProps {
   onSave?: () => void;
   onExportAll?: () => void;
   onExportActiveSheet?: () => void;
+  onOpenImportModal?: () => void;
+  onOpenExportModal?: () => void;
+  onOpenNewEntryModal?: () => void;
   onOpenInfinityFreeModal?: () => void;
   onOpenAuditTrail?: () => void;
   onOpenConvertModal?: () => void;
   onOpenSettings?: () => void;
+  isSettingsOpen?: boolean;
   activeTab?: string;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   theme: any;
@@ -48,8 +57,14 @@ export default function TwoOSTopBar({
   selectedYear: propYear,
   selectedPrefix: propPrefix,
   onMonthYearChange,
-  onOpenInfinityFreeModal,
+  onExportAll,
+  onExportActiveSheet,
+  onOpenImportModal,
+  onOpenExportModal,
+  onOpenNewEntryModal,
   onOpenAuditTrail,
+  onOpenSettings,
+  isSettingsOpen = false,
   activeTab = 'dashboard',
   triggerAlert,
   themeMode
@@ -76,22 +91,14 @@ export default function TwoOSTopBar({
   };
 
   const isDark = themeMode === 'dark';
-  const isNeon = themeMode === 'neon_light';
-  const isTrial = themeMode === 'trial_layout';
 
-  const topBarBg = isTrial
-    ? 'bg-[#f8fafc] border-b border-slate-200 text-slate-900 shadow-2xs'
-    : isNeon
-    ? 'bg-[#EBF5FF] border-b border-sky-200 text-slate-900'
-    : themeMode === 'clean'
-    ? 'bg-white border-zinc-200 text-zinc-900'
-    : 'bg-[#060D1F] border-b border-[#14264F] text-cyan-100';
+  const topBarBg = isDark
+    ? 'bg-[#060D1F] border-b border-[#14264F] text-cyan-100'
+    : 'bg-[#eff7ff] border-b border-sky-200/80 text-slate-900';
 
-  const dropdownBg = (isTrial || isNeon)
-    ? 'bg-white border-sky-200 shadow-xl text-slate-900'
-    : themeMode === 'clean'
-    ? 'bg-white border-zinc-200 shadow-xl text-zinc-900'
-    : 'bg-[#091228] border-[#1c356f] shadow-2xl text-cyan-100';
+  const dropdownBg = isDark
+    ? 'bg-[#091228] border-[#1c356f] shadow-2xl text-cyan-100'
+    : 'bg-white border-sky-200 shadow-xl text-slate-900';
 
   const branchLabel = activeBranchCode === 'ALL'
     ? 'CONSOLIDATED (ALL BRANCHES)'
@@ -100,9 +107,6 @@ export default function TwoOSTopBar({
     : `BRANCH CODE ${activeBranchCode}`;
 
   const periodDisplayText = `${selectedPrefix} ${MONTH_NAMES[selectedMonthIdx].toUpperCase()} ${selectedYear}`;
-  const companyDisplayName = activeCompany?.company_name 
-    ? activeCompany.company_name.toUpperCase() 
-    : 'SELECTED ENTITY';
 
   // Formal Philippine Accounting & Tax Register Title
   const getFormalJournalTitle = (key: string): string => {
@@ -119,6 +123,8 @@ export default function TwoOSTopBar({
         return 'GENERAL JOURNAL / VOUCHER REGISTER';
       case 'general_ledger':
         return 'GENERAL LEDGER (T-ACCOUNTS & ENDING BALANCES)';
+      case 'special_ledger':
+        return 'SPECIAL LEDGER (T-ACCOUNTS & ENDING BALANCES)';
       case 'special_entries':
         return 'SPECIAL JOURNAL VOUCHERS (ADJUSTING & ACCRUAL ENTRIES)';
       case 'dashboard':
@@ -194,20 +200,14 @@ export default function TwoOSTopBar({
   };
 
   return (
-    <header className={`${topBarBg} select-none transition-colors duration-200 px-3 py-1.5 border-b`}>
-      <div className="flex items-center justify-between gap-3">
+    <header className={`${topBarBg} select-none transition-colors duration-200 px-3 pt-1.5 pb-1.5 border-b`}>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-x-4 gap-y-1">
         
         {/* ========================================================================= */}
-        {/* 1. LEFT SECTION: 2OS LOGO + BRANDING                                      */}
+        {/* ROW 1, COL 1: 2OS LOGO + BRANDING (LEFT)                                  */}
         {/* ========================================================================= */}
-        <div className="flex items-center gap-2.5 flex-shrink-0">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm tracking-tighter transition-all flex-shrink-0 ${
-            isNeon 
-              ? 'logo-chromatic-light text-white font-black shadow-sm' 
-              : themeMode === 'clean' 
-              ? 'logo-chromatic-clean text-white font-black shadow-sm' 
-              : 'logo-chromatic text-white font-black shadow-[0_0_10px_rgba(6,182,212,0.4)]'
-          }`}>
+        <div className="flex items-center gap-2.5 justify-self-start">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm tracking-tighter transition-all flex-shrink-0 logo-chromatic-light text-white shadow-sm">
             2OS
           </div>
           <div>
@@ -217,7 +217,7 @@ export default function TwoOSTopBar({
               2OS ACCOUNTING SYSTEM
             </h1>
             <span className={`text-[11px] font-semibold tracking-normal block leading-tight ${
-              isDark ? 'text-cyan-400' : 'text-cyan-700'
+              isDark ? 'text-cyan-400' : 'text-[#0284c7]'
             }`}>
               Philippine Tax & PFRS Books of Accounts
             </span>
@@ -225,36 +225,36 @@ export default function TwoOSTopBar({
         </div>
 
         {/* ========================================================================= */}
-        {/* 2. CENTER SECTION: INTEGRATED ENTITY & CONTEXT HEADER                     */}
+        {/* ROW 1 & 2, COL 2: CENTER STACK (SELECT ENTITY + TITLE + FOR THE MONTH OF) */}
         {/* ========================================================================= */}
-        <div className="flex flex-col items-center justify-center flex-1 max-w-[540px] mx-2 text-center">
-          {/* 1. SELECTED ENTITY + BRANCH BADGE */}
-          <div className="relative flex items-center justify-center gap-1.5 flex-wrap">
+        <div className="row-span-2 flex flex-col items-center justify-center text-center justify-self-center px-2">
+          {/* 1. SELECT ENTITY + BRANCH BADGE */}
+          <div className="relative flex items-center justify-center gap-2 flex-wrap">
             <button
               type="button"
               onClick={() => setShowCompanyMenu(!showCompanyMenu)}
-              className={`group inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg transition cursor-pointer ${
+              className={`group inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg transition cursor-pointer ${
                 isDark 
                   ? 'hover:bg-white/10 text-cyan-200' 
-                  : 'hover:bg-slate-200/80 text-slate-900'
+                  : 'hover:bg-sky-100/80 text-slate-900'
               }`}
               title="Click to switch active taxpayer entity"
             >
               <Building2 className={`w-3.5 h-3.5 ${
-                isDark ? 'text-cyan-400' : 'text-sky-600'
+                isDark ? 'text-cyan-400' : 'text-[#0284c7]'
               }`} />
               <span className={`text-xs font-black tracking-tight uppercase leading-tight ${
                 isDark ? 'text-white' : 'text-slate-950 font-black'
               }`}>
                 {activeCompany?.company_name ? activeCompany.company_name.toUpperCase() : 'SELECT ENTITY'}
               </span>
-              <ChevronDown className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 text-sky-600 dark:text-cyan-400" />
+              <ChevronDown className="w-3.5 h-3.5 text-[#0284c7] dark:text-cyan-400" />
             </button>
 
-            <span className={`px-2 py-0.5 rounded text-[8px] font-mono font-bold tracking-wider uppercase border flex-shrink-0 ${
-              activeBranchCode === 'ALL'
-                ? (isTrial ? 'bg-sky-100 text-sky-900 border-sky-300' : isNeon ? 'bg-sky-100/90 text-sky-900 border-sky-300' : themeMode === 'clean' ? 'bg-violet-100 text-violet-900 border-violet-300' : 'bg-[#0D1E45] text-cyan-300 border-cyan-500/40')
-                : (isTrial ? 'bg-slate-100 text-slate-800 border-slate-300' : isNeon ? 'bg-sky-50 text-cyan-800 border-sky-200' : themeMode === 'clean' ? 'bg-zinc-100 text-zinc-900 border-zinc-300' : 'bg-[#091533] text-cyan-300 border-cyan-500/40')
+            <span className={`px-2.5 py-0.5 rounded text-[8.5px] font-mono font-bold tracking-wider uppercase border flex-shrink-0 ${
+              isDark
+                ? 'bg-[#0D1E45] text-cyan-300 border-cyan-500/40'
+                : 'bg-[#e0f2fe] text-[#0369a1] border-sky-300/80'
             }`}>
               {branchLabel}
             </span>
@@ -305,25 +305,25 @@ export default function TwoOSTopBar({
           </div>
 
           {/* 2. DYNAMIC TAB / JOURNAL TITLE */}
-          <h2 className={`text-[10px] sm:text-[11px] font-bold tracking-wide uppercase text-center leading-tight mt-0.5 truncate max-w-[420px] ${
-            isTrial ? 'text-sky-700' : isNeon ? 'text-sky-700' : themeMode === 'clean' ? 'text-violet-700' : 'text-cyan-400'
+          <h2 className={`text-[11px] font-extrabold tracking-wide uppercase text-center leading-tight mt-0.5 truncate max-w-[460px] ${
+            isDark ? 'text-cyan-400' : 'text-[#0369a1]'
           }`}>
             {getFormalJournalTitle(activeTab || '')}
           </h2>
 
-          {/* 3. REPORTING PERIOD BUTTON */}
-          <div className="mt-0.5">
+          {/* 3. REPORTING PERIOD BUTTON (ALIGNED DIRECTLY UNDER SELECT ENTITY & TITLE) */}
+          <div className="mt-1 flex items-center justify-center">
             <button
               type="button"
               onClick={() => setShowDatePicker(true)}
-              className={`group inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[9.5px] font-semibold tracking-wider uppercase transition cursor-pointer ${
+              className={`group inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-semibold tracking-wider uppercase transition cursor-pointer ${
                 isDark
                   ? 'text-cyan-200/90 hover:bg-white/10'
-                  : 'text-slate-700 hover:bg-slate-200/80'
+                  : 'text-slate-700 hover:bg-sky-100/80'
               }`}
               title="Click to open reporting period configuration screen"
             >
-              <Calendar className="w-3 h-3 text-[#00a8ff]" />
+              <Calendar className="w-3 h-3 text-[#0284c7] dark:text-cyan-400" />
               <span>{periodDisplayText}</span>
               <ChevronDown className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100" />
             </button>
@@ -331,42 +331,10 @@ export default function TwoOSTopBar({
         </div>
 
         {/* ========================================================================= */}
-        {/* 3. RIGHT SECTION: AUDIT TRAIL + INFINITYFREE + USER                       */}
+        {/* ROW 1, COL 3: USER PROFILE (AC) + AUDIT TRAIL + SETTINGS (RIGHT)          */}
         {/* ========================================================================= */}
-        <div className="flex items-center gap-4 flex-shrink-0">
+        <div className="flex items-center gap-4 justify-self-end">
           
-          {/* AUDIT TRAIL LINK/BUTTON (MATCHING SCREENSHOT) */}
-          <button
-            onClick={() => {
-              if (onOpenAuditTrail) onOpenAuditTrail();
-              else triggerAlert('Opening Audit Trail & Activity Logs...', 'info');
-            }}
-            className={`font-bold text-xs transition cursor-pointer px-1 py-1 hover:underline ${
-              isDark ? 'text-cyan-400 hover:text-cyan-300' : 'text-[#0284c7] hover:text-[#0369a1]'
-            }`}
-            title="Open Audit Trail, Change Logs & History"
-          >
-            Audit Trail
-          </button>
-
-          {/* INFINITYFREE BUTTON (PURPLE GRADIENT IN TRIAL LAYOUT TO MATCH IMAGE) */}
-          <button
-            onClick={() => {
-              if (onOpenInfinityFreeModal) onOpenInfinityFreeModal();
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs ${
-              isTrial
-                ? 'bg-gradient-to-r from-[#7c3aed] to-[#6366f1] hover:from-[#6d28d9] hover:to-[#4f46e5] text-white border-0 shadow-xs'
-                : isDark
-                ? 'border-emerald-500/60 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/40 border'
-                : 'border-emerald-500 bg-emerald-50/50 text-emerald-700 hover:bg-emerald-100 border'
-            }`}
-            title="InfinityFree & MySQL Cloud Database Connection"
-          >
-            <Server className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
-            <span>InfinityFree & MySQL</span>
-          </button>
-
           {/* USER PROFILE: (AC) USER NAME \n acsignicabss.official */}
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs bg-[#0F172A] text-white border border-slate-700 flex-shrink-0">
@@ -379,13 +347,128 @@ export default function TwoOSTopBar({
                 USER NAME
               </span>
               <span className={`text-[10px] block leading-none font-semibold ${
-                isTrial ? 'text-[#00a8ff]' : isDark ? 'text-cyan-300' : 'text-cyan-600'
+                isDark ? 'text-cyan-300' : 'text-[#0284c7]'
               }`}>
                 acsignicabss.official
               </span>
             </div>
           </div>
 
+          {/* AUDIT TRAIL LINK/BUTTON */}
+          <button
+            onClick={() => {
+              if (onOpenAuditTrail) onOpenAuditTrail();
+              else triggerAlert('Opening Audit Trail & Activity Logs...', 'info');
+            }}
+            className={`font-bold text-xs transition cursor-pointer px-1.5 py-1 hover:underline ${
+              isDark ? 'text-cyan-400 hover:text-cyan-300' : 'text-[#0284c7] hover:text-[#0369a1]'
+            }`}
+            title="Open Audit Trail, Change Logs & History"
+          >
+            Audit Trail
+          </button>
+
+          {/* SETTINGS BUTTON */}
+          <button
+            onClick={() => {
+              if (onOpenSettings) onOpenSettings();
+            }}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
+              isSettingsOpen
+                ? (isDark ? 'bg-cyan-500/20 text-cyan-300' : 'bg-sky-100 text-slate-900 font-bold')
+                : (isDark ? 'text-slate-200 hover:bg-white/10' : 'text-slate-800 hover:bg-sky-100/70')
+            }`}
+            title="Open System Settings, Themes, About & Architecture"
+          >
+            <SettingsIcon className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+            <span>Settings</span>
+          </button>
+
+        </div>
+
+        {/* ========================================================================= */}
+        {/* ROW 2, COL 1: CREATE ENTITY PROFILE (LEFT)                                */}
+        {/* ========================================================================= */}
+        <div className="flex items-center justify-self-start">
+          <button
+            onClick={() => {
+              if (onOpenNewEntryModal) {
+                onOpenNewEntryModal();
+              }
+            }}
+            className="px-3 py-1 text-xs font-bold rounded-md flex items-center gap-1.5 cursor-pointer transition bg-[#06b6d4] hover:bg-[#0891b2] text-slate-950 shadow-2xs"
+            title="Create Entity Profile"
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Create Entity Profile</span>
+          </button>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* ROW 2, COL 3: EXPORT, IMPORT, WORKBOOK, PRINT (RIGHT)                     */}
+        {/* ========================================================================= */}
+        <div className="flex items-center gap-3 justify-self-end">
+          {/* Export */}
+          <button
+            onClick={() => {
+              if (onOpenExportModal) {
+                onOpenExportModal();
+              } else if (onExportActiveSheet) {
+                onExportActiveSheet();
+              }
+            }}
+            className={`px-2 py-0.5 text-xs font-bold rounded flex items-center gap-1.5 cursor-pointer transition ${
+              isDark ? 'text-cyan-300 hover:bg-white/10' : 'text-[#0f4c81] hover:bg-sky-100/80'
+            }`}
+            title="Export Data (Select dataset, CSV, Excel, or SQL)"
+          >
+            <FileSpreadsheet className={`w-3.5 h-3.5 ${isDark ? 'text-cyan-400' : 'text-[#0284c7]'}`} />
+            <span>Export</span>
+          </button>
+
+          {/* Import */}
+          <button
+            onClick={() => {
+              if (onOpenImportModal) {
+                onOpenImportModal();
+              }
+            }}
+            className={`px-2 py-0.5 text-xs font-bold rounded flex items-center gap-1.5 cursor-pointer transition ${
+              isDark ? 'text-rose-300 hover:bg-white/10' : 'text-[#9f1239] hover:bg-rose-50'
+            }`}
+            title="Import Data (CSV, Templates, Column Summary, DB Update)"
+          >
+            <Upload className="w-3.5 h-3.5 text-[#e11d48]" />
+            <span>Import</span>
+          </button>
+
+          {/* Workbook */}
+          <button
+            onClick={() => {
+              if (onExportAll) {
+                onExportAll();
+              }
+            }}
+            className={`px-2 py-0.5 text-xs font-bold rounded flex items-center gap-1.5 cursor-pointer transition ${
+              isDark ? 'text-blue-300 hover:bg-white/10' : 'text-[#1e3a8a] hover:bg-blue-50'
+            }`}
+            title="Export Full Multi-Sheet 2OS Workbook (.xlsx)"
+          >
+            <Download className={`w-3.5 h-3.5 ${isDark ? 'text-cyan-400' : 'text-[#0284c7]'}`} />
+            <span>Workbook</span>
+          </button>
+
+          {/* Print */}
+          <button
+            onClick={() => window.print()}
+            className={`px-2 py-0.5 text-xs font-bold rounded flex items-center gap-1.5 cursor-pointer transition ${
+              isDark ? 'text-violet-300 hover:bg-white/10' : 'text-[#5b21b6] hover:bg-violet-50'
+            }`}
+            title="Print Current View"
+          >
+            <Printer className="w-3.5 h-3.5 text-[#7c3aed]" />
+            <span>Print</span>
+          </button>
         </div>
 
       </div>

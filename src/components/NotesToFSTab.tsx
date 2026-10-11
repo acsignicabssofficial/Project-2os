@@ -136,11 +136,50 @@ export default function NotesToFSTab({
                   <td className="p-3 font-mono text-amber-400">BIR Form 0619-E / 1601-EQ</td>
                   <td className="p-3 text-right font-mono text-zinc-300">₱{grossExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="p-3 text-right font-mono font-bold text-purple-400">
-                    ₱{expenses.reduce((s, e) => s + e.withholding_2307_2306, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    ₱{expenses.reduce((s, e) => s + (Number(e.withholding_2307_2306 ?? e.tax_withheld) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
                 </tr>
               </tbody>
             </table>
+          </div>
+        </section>
+
+        {/* Note 5: PFRS 15, PFRS 16, PFRS 9, PAS 12 & PFRS 13 Fair Value Hierarchy Disclosures */}
+        <section className="space-y-2">
+          <h3 className={`text-sm font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2 border-b ${theme.borderCard} pb-2`}>
+            <CheckCircle2 className="w-4 h-4" />
+            Note 5 - PFRS 9 Financial Instruments, PFRS 13 Fair Value Hierarchy, PFRS 16 Leases &amp; PAS 37 Contingencies
+          </h3>
+          <ul className={`text-xs ${theme.textMain} space-y-2 list-disc pl-5 leading-relaxed`}>
+            <li><strong>PFRS 9 Expected Credit Loss (ECL) Staging:</strong> Trade receivables (#1020) are evaluated under the simplified lifetime ECL approach, netted against Allowance for Expected Credit Losses (#1025).</li>
+            <li><strong>PFRS 13 Fair Value Hierarchy:</strong> Revalued Property, Plant &amp; Equipment (#1510 / #3040 OCI) and financial instruments are categorized across Level 1 (Quoted prices), Level 2 (Observable market inputs), and Level 3 (Unobservable valuation inputs).</li>
+            <li><strong>PAS 7 Supplier Finance Arrangements &amp; PFRS 16 Leases:</strong> Carrying amounts of Trade Payables (#2010) and Right-of-Use Lease Liabilities (#2070 Current / #2520 Non-Current) are separately presented from bank borrowings (#2510).</li>
+            <li><strong>PAS 10 Events After the Reporting Period &amp; PAS 37 Provisions:</strong> Adjusting events prior to authorization of financial statements are recognized in the ledger; non-adjusting events and contingent liabilities are disclosed herein without retroactive balance sheet adjustment.</li>
+          </ul>
+        </section>
+
+        {/* Note 6: PFRS S1 & PFRS S2 Sustainability & Climate-Related Disclosures */}
+        <section className="space-y-2">
+          <h3 className={`text-sm font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2 border-b ${theme.borderCard} pb-2`}>
+            <Info className="w-4 h-4" />
+            Note 6 - PFRS S1 &amp; PFRS S2 Sustainability &amp; Climate-Related Financial Disclosures
+          </h3>
+          <p className={`text-xs ${theme.textMuted}`}>
+            In alignment with SEC Philippines adoption of PFRS S1 (General Requirements for Disclosure of Sustainability-related Financial Information) and PFRS S2 (Climate-related Disclosures), utility and fuel expenditures recorded in the ledger are linked to Greenhouse Gas (GHG) Protocol Scope 1, Scope 2, and Scope 3 emissions tracking:
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono pt-1">
+            <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+              <span className="text-zinc-400 block text-[10px]">SCOPE 1 (DIRECT FUEL / FLEET)</span>
+              <span className="text-emerald-400 font-bold text-sm">Tracked via Expense &amp; Special Vouchers</span>
+            </div>
+            <div className="p-3 rounded-xl bg-cyan-500/5 border border-cyan-500/20">
+              <span className="text-zinc-400 block text-[10px]">SCOPE 2 (PURCHASED ELECTRICITY #6030)</span>
+              <span className="text-cyan-400 font-bold text-sm">Linked to Philippine Grid Factor (0.712 kg CO₂e/kWh)</span>
+            </div>
+            <div className="p-3 rounded-xl bg-purple-500/5 border border-purple-500/20">
+              <span className="text-zinc-400 block text-[10px]">CAPITAL DEPLOYED TOWARD CLIMATE RESILIENCE</span>
+              <span className="text-purple-400 font-bold text-sm">₱{ppeCost.toLocaleString(undefined, { minimumFractionDigits: 2 })} Gross PPE</span>
+            </div>
           </div>
         </section>
       </div>

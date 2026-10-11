@@ -13,6 +13,8 @@ interface ProvidersTabProps {
   payments?: Payment[];
   setExpenses?: React.Dispatch<React.SetStateAction<Expense[]>>;
   setPayments?: React.Dispatch<React.SetStateAction<Payment[]>>;
+  setCashDisbursements?: React.Dispatch<React.SetStateAction<any[]>>;
+  onDeleteRecord?: (bookType: string, record: any) => void;
   accountTitles?: AccountTitle[];
 }
 
@@ -27,6 +29,8 @@ export default function ProvidersTab({
   payments = [],
   setExpenses,
   setPayments,
+  setCashDisbursements,
+  onDeleteRecord,
   accountTitles = []
 }: ProvidersTabProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -203,10 +207,11 @@ export default function ProvidersTab({
   };
 
   const handleDelete = (id: number, name: string) => {
-    if (window.confirm(`Are you sure you want to delete vendor "${name}"?`)) {
-      setServiceProviders(prev => prev.filter(p => p.id !== id));
-      triggerAlert(`Provider "${name}" deleted.`, 'info');
+    setServiceProviders(prev => prev.filter(p => p.id !== id));
+    if (drilldownProv && drilldownProv.id === id) {
+      setDrilldownProv(null);
     }
+    triggerAlert(`Provider profile "${name}" deleted from directory.`, 'info');
   };
 
   const filteredProviders = serviceProviders.filter(p => {
@@ -504,33 +509,52 @@ export default function ProvidersTab({
                           <th className="p-3 text-right">Input VAT</th>
                           <th className="p-3 text-right">Total Due</th>
                           <th className="p-3 text-center">Status</th>
+                          <th className="p-3 text-center">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-800">
                         {drilldownData.expenses.map((exp) => (
                           <tr key={exp.id} className="hover:bg-zinc-800/30">
                             <td className="p-3 font-mono font-bold text-amber-400">{exp.invoice_number || exp.voucher_number}</td>
-                            <td className="p-3 font-mono text-zinc-400">{exp.issue_date || exp.expense_date}</td>
+                            <td className="p-3 font-mono text-zinc-400">{exp.issue_date || exp.expense_date || (exp as any).date}</td>
                             <td className="p-3">
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                                {exp.business_tax_type || (exp.nonvat_or_vat === 'VAT' ? 'vatable' : 'non-vatable')}
+                                {exp.business_tax_type || (exp.nonvat_or_vat === 'VAT' || (exp as any).vat_or_nonvat === 'VAT' ? 'vatable' : 'non-vatable')}
                               </span>
                             </td>
                             <td className="p-3 font-semibold text-indigo-300">
                               {exp.expense_type || 'Operating Expense'}
                             </td>
-                            <td className="p-3 text-zinc-300 max-w-[200px] truncate">{exp.description || 'Purchases of Goods & Services'}</td>
+                            <td className="p-3 text-zinc-300 max-w-[200px] truncate">{exp.description || (exp as any).particulars || 'Purchases of Goods & Services'}</td>
                             <td className="p-3 text-right font-mono">₱{(exp.amount || exp.expense_invoice_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                            <td className="p-3 text-right font-mono text-cyan-400">₱{(exp.vat || exp.vat_input_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td className="p-3 text-right font-mono text-cyan-400">₱{(exp.vat || exp.vat_input_amount || (exp as any).vat_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td className="p-3 text-right font-mono font-bold text-amber-400">₱{(exp.total_amount_due || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td className="p-3 text-center">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                exp.payment_status === 'Paid' 
+                                exp.payment_status === 'Paid' || (exp as any).status === 'Paid'
                                   ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
                                   : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                               }`}>
-                                {exp.payment_status || 'Unpaid'}
+                                {exp.payment_status || (exp as any).status || 'Unpaid'}
                               </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onDeleteRecord) {
+                                    onDeleteRecord('subsidiary_purchases', exp);
+                                  } else if (setExpenses) {
+                                    setExpenses(prev => prev.filter(e => e.id !== exp.id));
+                                    triggerAlert(`Deleted expense voucher #${exp.voucher_number || exp.invoice_number}.`, 'info');
+                                  }
+                                }}
+                                className="p-1.5 px-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition cursor-pointer inline-flex items-center gap-1 text-[10px] font-bold"
+                                title="Delete Purchase / Expense Voucher and related payments"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete</span>
+                              </button>
                             </td>
                           </tr>
                         ))}

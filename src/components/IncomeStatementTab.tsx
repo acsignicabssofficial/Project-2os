@@ -23,8 +23,7 @@ export default function IncomeStatementTab({
   theme
 }: IncomeStatementTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
-
-  const isVat = activeCompany?.vat_or_non_vat !== 'NON-VATABLE';
+  const [presentationMode, setPresentationMode] = React.useState<'single' | 'two_statement'>('single');
 
   const incomeStatementData = useMemo(() => {
     const compSales = sales.filter(s => !activeCompanyName || s.company_name === activeCompanyName);
@@ -44,14 +43,27 @@ export default function IncomeStatementTab({
       companyName: activeCompanyName
     });
 
+    const grossSales = Math.round((s.vatableSales + s.zeroRatedSales + s.vatExemptSales + s.specialRev) * 100) / 100;
+
     return {
-      grossRevenue: s.grossRevenue,
-      operatingExpenses: Math.round((s.totalOperatingExp + s.depreciationExpense + s.payrollExpense) * 100) / 100,
+      grossSales,
+      salesDiscounts: s.salesDiscounts,
+      netRevenue: s.grossRevenue,
+      operatingExpenses: Math.round((s.totalOperatingExp + s.depreciationExpense + s.impairmentExpense + s.payrollExpense) * 100) / 100,
       depreciationExpense: s.depreciationExpense,
+      impairmentExpense: s.impairmentExpense,
       payrollExpense: s.payrollExpense,
+      operatingProfit: s.operatingProfit,
+      financeCosts: s.financeCosts,
       netIncomeBeforeTax: s.netIncomeBeforeTax,
       provisionForTax: s.incomeTaxProvision,
-      netIncomeAfterTax: s.netIncome
+      deferredTaxExpense: s.deferredTaxExpense,
+      netIncomeAfterTax: s.netIncome,
+      revaluationSurplusOCI: s.revaluationSurplusOCI,
+      actuarialRemeasurementOCI: s.actuarialRemeasurementOCI,
+      fvociReserveOCI: s.fvociReserveOCI,
+      totalOCI: s.totalOCI,
+      totalComprehensiveIncome: s.totalComprehensiveIncome
     };
   }, [sales, expenses, ppeAssets, specialEntries, payrollRecords, activeCompanyName]);
 
@@ -62,67 +74,206 @@ export default function IncomeStatementTab({
           <div>
             <h2 className={`text-base font-bold ${theme.textTitle} font-display flex items-center gap-2`}>
               <TrendingUp className="w-5 h-5 text-cyan-400" />
-              Statement of Comprehensive Income (Income Statement)
+              Statement of Profit or Loss and Other Comprehensive Income (PAS 1 / PFRS 18)
             </h2>
             <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Official financial report for <span className="text-cyan-400 font-bold">{activeCompanyName || 'Active Company'}</span> computing Net Income Before Tax & Provision for Income Tax.
+              Official PFRS/PAS financial report for <span className="text-cyan-400 font-bold">{activeCompanyName || 'Active Company'}</span> featuring PFRS 15 Contra-Revenue, PFRS 18 Operating Profit, and PAS 1.82A OCI classification.
             </p>
           </div>
 
-          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl font-mono text-right">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Net Income After Tax:</span>
-            <span className="text-lg font-extrabold text-emerald-400">
-              ₱{incomeStatementData.netIncomeAfterTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-500/10 border border-zinc-700/30 text-xs">
+              <button
+                type="button"
+                onClick={() => setPresentationMode('single')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                  presentationMode === 'single' ? 'bg-cyan-500 text-slate-950' : theme.textMuted
+                }`}
+              >
+                Single-Statement (PAS 1.81A)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPresentationMode('two_statement')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                  presentationMode === 'two_statement' ? 'bg-cyan-500 text-slate-950' : theme.textMuted
+                }`}
+              >
+                Two-Statement Setup (PAS 1.81B)
+              </button>
+            </div>
+
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl font-mono text-right">
+              <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Total Comprehensive Income:</span>
+              <span className="text-lg font-extrabold text-emerald-400">
+                ₱{incomeStatementData.totalComprehensiveIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </span>
+            </div>
           </div>
         </div>
       </div>
 
+      {/* STATEMENT 1: PROFIT OR LOSS */}
       <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-6 shadow-sm space-y-4 max-w-4xl mx-auto w-full`}>
         <div className="border-b border-zinc-800/40 pb-3 flex justify-between items-center">
           <h3 className={`text-sm font-bold uppercase tracking-wider ${theme.textTitle}`}>
-            Financial Performance Breakdown
+            {presentationMode === 'single'
+              ? 'Part I — Profit or Loss Section (PAS 1 / PFRS 18)'
+              : 'Statement 1 — Separate Statement of Profit or Loss (PAS 1.81B)'}
           </h3>
-          <span className="text-xs font-mono text-zinc-500">PFRS / BIR Compliant</span>
+          <span className="text-xs font-mono text-cyan-400">PAS 1.87 Extraordinary Items Prohibited</span>
         </div>
 
         <div className="space-y-3 font-mono text-xs">
           <div className="flex justify-between p-2.5 rounded-lg bg-zinc-500/5">
-            <span className="font-bold text-zinc-300">GROSS SALES / SERVICE REVENUE (#4010):</span>
-            <span className="font-bold text-cyan-400">₱{incomeStatementData.grossRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            <span className={`font-bold ${theme.textMain}`}>GROSS REVENUE FROM CONTRACTS WITH CUSTOMERS (#4010-4030):</span>
+            <span className="font-bold text-cyan-400">₱{incomeStatementData.grossSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+          </div>
+
+          {incomeStatementData.salesDiscounts > 0 && (
+            <div className="flex justify-between pl-6 text-rose-400 text-[11px]">
+              <span>Less: Sales Discounts &amp; Variable Consideration — PFRS 15 (#4015):</span>
+              <span>(₱{incomeStatementData.salesDiscounts.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
+            </div>
+          )}
+
+          <div className="flex justify-between p-2.5 rounded-lg bg-cyan-500/5 border border-cyan-500/20 font-bold text-cyan-300">
+            <span>NET REVENUE (PFRS 15):</span>
+            <span>₱{incomeStatementData.netRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
           </div>
 
           <div className="flex justify-between p-2.5 rounded-lg bg-zinc-500/5 text-rose-400">
-            <span className="font-bold">LESS: OPERATING EXPENSES (#6010):</span>
+            <span className="font-bold">LESS: OPERATING EXPENSES (#5010 / #6010-6100):</span>
             <span className="font-bold">(₱{incomeStatementData.operatingExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
           </div>
 
           <div className="flex justify-between pl-6 text-zinc-400 text-[11px]">
-            <span>Including Depreciation Expense (#6020):</span>
+            <span>• Employee Benefits &amp; Statutory Contributions — PAS 19 (#6010-6017):</span>
+            <span>₱{incomeStatementData.payrollExpense.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+          </div>
+
+          <div className="flex justify-between pl-6 text-zinc-400 text-[11px]">
+            <span>• Depreciation Expense — PAS 16 / PFRS 16 (#6080):</span>
             <span>₱{incomeStatementData.depreciationExpense.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
           </div>
 
+          {incomeStatementData.impairmentExpense > 0 && (
+            <div className="flex justify-between pl-6 text-rose-400 text-[11px]">
+              <span>• Impairment Losses &amp; ECL Provision — PAS 36 / PFRS 9 (#6085):</span>
+              <span>₱{incomeStatementData.impairmentExpense.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+          )}
+
+          <div className="flex justify-between p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 font-bold text-xs text-purple-300">
+            <span>OPERATING PROFIT / (LOSS) — PFRS 18 MANDATORY SUBTOTAL:</span>
+            <span>₱{incomeStatementData.operatingProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+          </div>
+
+          {incomeStatementData.financeCosts > 0 && (
+            <div className="flex justify-between p-2.5 rounded-lg bg-rose-500/10 text-rose-300">
+              <span>LESS: FINANCE &amp; LEASE INTEREST COSTS — PAS 23 / PFRS 16 (#6090):</span>
+              <span>(₱{incomeStatementData.financeCosts.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
+            </div>
+          )}
+
           <div className="flex justify-between p-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 font-bold text-sm text-cyan-300">
-            <span>NET INCOME BEFORE INCOME TAX:</span>
+            <span>PROFIT / (LOSS) BEFORE INCOME TAX:</span>
             <span>₱{incomeStatementData.netIncomeBeforeTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
           </div>
 
           <div className="flex justify-between p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
             <div>
-              <span className="font-bold block">LESS: PROVISION FOR INCOME TAX EXPENSE (#7010):</span>
-              <span className="text-[10px] text-zinc-400 font-sans italic">Posted via Income Tax Tab special journal entry</span>
+              <span className="font-bold block">LESS: INCOME TAX EXPENSE — PAS 12 (#7010 Current / #7020 Deferred):</span>
+              <span className="text-[10px] text-zinc-400 font-sans italic">Current &amp; Deferred Tax provision under CREATE Act &amp; PAS 12</span>
             </div>
             <span className="font-bold text-amber-300">
               (₱{incomeStatementData.provisionForTax.toLocaleString(undefined, { minimumFractionDigits: 2 })})
             </span>
           </div>
 
-          <div className="flex justify-between p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 font-extrabold text-base text-emerald-300 mt-6">
-            <span>NET INCOME AFTER TAX:</span>
+          <div className="flex justify-between p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 font-extrabold text-base text-emerald-300 mt-4">
+            <span>PROFIT / (LOSS) FOR THE PERIOD (NET INCOME AFTER TAX):</span>
             <span>₱{incomeStatementData.netIncomeAfterTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
           </div>
+
+          {presentationMode === 'single' && (
+            <div className="pt-4 mt-4 border-t border-zinc-800/50 space-y-2.5">
+              <div className="text-xs font-bold uppercase tracking-wider text-purple-400">
+                Part II — Other Comprehensive Income (PAS 1.82A)
+              </div>
+              <div className="text-[11px] text-zinc-400 font-sans">
+                Items that will not be reclassified subsequently to profit or loss:
+              </div>
+              <div className="flex justify-between pl-4 text-xs">
+                <span className={theme.textMain}>Revaluation Surplus on PPE — PAS 16 (#3040):</span>
+                <span className="text-cyan-400">₱{incomeStatementData.revaluationSurplusOCI.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between pl-4 text-xs">
+                <span className={theme.textMain}>Remeasurement of Defined Benefit Plan — PAS 19 (#3050):</span>
+                <span className="text-cyan-400">₱{incomeStatementData.actuarialRemeasurementOCI.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between pl-4 text-xs">
+                <span className={theme.textMain}>Fair Value Reserve on FVOCI Financial Assets — PFRS 9 (#3060):</span>
+                <span className="text-cyan-400">₱{incomeStatementData.fvociReserveOCI.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between p-2.5 rounded-lg bg-purple-500/10 border border-purple-500/20 font-bold text-purple-300">
+                <span>OTHER COMPREHENSIVE INCOME FOR THE PERIOD, NET OF TAX:</span>
+                <span>₱{incomeStatementData.totalOCI.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between p-4 rounded-xl bg-cyan-500/15 border border-cyan-500/30 font-extrabold text-base text-cyan-300">
+                <span>TOTAL COMPREHENSIVE INCOME FOR THE PERIOD:</span>
+                <span>₱{incomeStatementData.totalComprehensiveIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* SEPARATE SECOND STATEMENT WHEN TWO-STATEMENT MODE IS SELECTED (PAS 1.81B) */}
+      {presentationMode === 'two_statement' && (
+        <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-6 shadow-sm space-y-4 max-w-4xl mx-auto w-full`}>
+          <div className="border-b border-zinc-800/40 pb-3 flex justify-between items-center">
+            <h3 className={`text-sm font-bold uppercase tracking-wider text-purple-400`}>
+              Statement 2 — Separate Statement of Comprehensive Income (PAS 1.81B)
+            </h3>
+            <span className="text-xs font-mono text-zinc-500">Starts with Profit/Loss for the Period</span>
+          </div>
+
+          <div className="space-y-3 font-mono text-xs">
+            <div className="flex justify-between p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 font-bold text-emerald-300">
+              <span>PROFIT / (LOSS) FOR THE PERIOD:</span>
+              <span>₱{incomeStatementData.netIncomeAfterTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+
+            <div className="text-[11px] text-zinc-400 font-sans pt-1">
+              Other Comprehensive Income — Items that will not be reclassified to Profit or Loss (PAS 1.82A):
+            </div>
+
+            <div className="flex justify-between pl-4">
+              <span className={theme.textMain}>Gain on Property Revaluation — PAS 16 (#3040):</span>
+              <span className="text-cyan-400">₱{incomeStatementData.revaluationSurplusOCI.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+            <div className="flex justify-between pl-4">
+              <span className={theme.textMain}>Actuarial Remeasurement of Defined Benefit Liability — PAS 19 (#3050):</span>
+              <span className="text-cyan-400">₱{incomeStatementData.actuarialRemeasurementOCI.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+            <div className="flex justify-between pl-4">
+              <span className={theme.textMain}>Net Fair Value Change on FVOCI Equity Investments — PFRS 9 (#3060):</span>
+              <span className="text-cyan-400">₱{incomeStatementData.fvociReserveOCI.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+
+            <div className="flex justify-between p-2.5 rounded-lg bg-purple-500/10 border border-purple-500/20 font-bold text-purple-300">
+              <span>OTHER COMPREHENSIVE INCOME FOR THE PERIOD:</span>
+              <span>₱{incomeStatementData.totalOCI.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+
+            <div className="flex justify-between p-4 rounded-xl bg-cyan-500/15 border border-cyan-500/30 font-extrabold text-base text-cyan-300">
+              <span>TOTAL COMPREHENSIVE INCOME FOR THE PERIOD:</span>
+              <span>₱{incomeStatementData.totalComprehensiveIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

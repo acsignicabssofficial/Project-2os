@@ -16,6 +16,7 @@ import {
   CreditCard,
   Layers,
   ArrowDownRight,
+  Trash2,
   Eye
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
@@ -30,14 +31,17 @@ interface PurchaseTransactionTabProps {
   payments: UniformBookRecord[];
   setPayments: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
   contractors: Contractor[];
+  setContractors?: React.Dispatch<React.SetStateAction<Contractor[]>>;
   activeCompany: Company | null;
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
   onNavigateToTab?: (tabKey: string) => void;
   accountTitles?: AccountTitle[];
+  setAccountTitles?: React.Dispatch<React.SetStateAction<AccountTitle[]>>;
   specialEntries?: SpecialEntry[];
   setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
+  onDeleteRecord?: (bookType: string, record: UniformBookRecord) => void;
 }
 
 export default function PurchaseTransactionTab({
@@ -48,47 +52,86 @@ export default function PurchaseTransactionTab({
   payments,
   setPayments,
   contractors,
+  setContractors,
   activeCompany,
   theme,
   triggerAlert,
   globalSearch = '',
   onNavigateToTab,
   accountTitles = [],
+  setAccountTitles,
   specialEntries = [],
-  setSpecialEntries
+  setSpecialEntries,
+  onDeleteRecord
 }: PurchaseTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
+
+  // Compute next sequential Voucher Number: VOUCHER#[YEAR]-0000001
+  const computeNextVoucherNumber = (records: UniformBookRecord[]) => {
+    const year = new Date().getFullYear();
+    const companyRecords = records.filter(r => !activeCompanyName || !r.company_name || r.company_name === activeCompanyName);
+    let maxSeq = 0;
+    companyRecords.forEach(r => {
+      const v = (r.voucher_number || '').trim();
+      const match = v.match(/(\d+)$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num < 1000000 && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+    });
+    const nextNum = Math.max(maxSeq + 1, companyRecords.length + 1);
+    return `VOUCHER#${year}-${String(nextNum).padStart(7, '0')}`;
+  };
 
   // Tab mode: 'new_purchase' or 'disburse_open'
   const [hubTab, setHubTab] = useState<'new_purchase' | 'disburse_open'>('new_purchase');
 
-  // Form State with additional headers: Business Tax Type & Expense Type (from COA)
+  // Form State:
+  // Expense Type is strictly 'Cost of Sales' or 'Expenses'
   const [providerName, setProviderName] = useState('');
   const [businessTaxType, setBusinessTaxType] = useState<'vatable' | 'non-vatable' | 'vat-exempt' | 'zero-rated'>('vatable');
-  const [expenseType, setExpenseType] = useState('Rent Expense');
+  const [expenseType, setExpenseType] = useState<'Cost of Sales' | 'Expenses'>('Expenses');
   const [vatStatus, setVatStatus] = useState<'VAT' | 'NONVAT'>('VAT');
   const [tin, setTin] = useState('');
+  const [branchCode, setBranchCode] = useState('00000');
   const [address, setAddress] = useState('');
-  const [invoiceType, setInvoiceType] = useState('OFFICIAL RECEIPT');
-  const [voucherNo, setVoucherNo] = useState(`VOUCHER #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
-  const [invoiceNo, setInvoiceNo] = useState(`EXP #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+  const [invoiceType, setInvoiceType] = useState('INVOICE');
+  const [voucherNo, setVoucherNo] = useState(() => computeNextVoucherNumber(subsidiaryPurchases));
+  const [invoiceNo, setInvoiceNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [particulars, setParticulars] = useState('');
   const [qty, setQty] = useState('1');
-  const [unitPrice, setUnitPrice] = useState('15000');
+  const [unitPrice, setUnitPrice] = useState('');
   const [zeroRated, setZeroRated] = useState('0');
   const [vatExempt, setVatExempt] = useState('0');
   const [discount, setDiscount] = useState('0');
   const [taxWithheld, setTaxWithheld] = useState('0');
 
-  // Selectable expense accounts from Chart of Accounts (Expenses) category
-  const expenseOptions = useMemo(() => {
-    const fromCoa = accountTitles
-      .filter(a => a.type === 'Expense' || (a.category && a.category.toLowerCase().includes('expense')))
-      .map(a => a.title);
-    if (fromCoa.length > 0) {
-      return Array.from(new Set(fromCoa));
+  // Selectable Particulars / Expense Descriptions from Chart of Accounts under Cost of Sales or Expenses
+  const coaParticularsOptions = useMemo(() => {
+    const filtered = accountTitles.filter(a => {
+      if (expenseType === 'Cost of Sales') {
+        return a.type === 'Cost of Sales' || (a.category && a.category.toLowerCase().includes('cost of sales')) || a.code.startsWith('5');
+      }
+      return a.type === 'Expense' || (a.category && a.category.toLowerCase().includes('expense')) || a.code.startsWith('6');
+    }).map(a => a.title);
+
+    if (filtered.length > 0) {
+      return Array.from(new Set(filtered));
     }
+
+    if (expenseType === 'Cost of Sales') {
+      return [
+        'Cost of Goods Sold / Merchandise',
+        'Direct Materials & Supplies',
+        'Direct Labor / Subcontractor Cost',
+        'Freight-In & Direct Delivery Cost',
+        'Cost of Services Rendered'
+      ];
+    }
+
     return [
       'Rent Expense',
       'Utilities Expense',
@@ -105,13 +148,13 @@ export default function PurchaseTransactionTab({
       'Insurance Expense',
       'Miscellaneous Operating Expense'
     ];
-  }, [accountTitles]);
+  }, [accountTitles, expenseType]);
 
   // Transaction Mode: 'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'
   const [purchaseMode, setPurchaseMode] = useState<'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'>('ON CASH');
 
-  // Partial mode fields
-  const [downPaymentAmount, setDownPaymentAmount] = useState('5000');
+  // Partial mode fields (no default 5000)
+  const [downPaymentAmount, setDownPaymentAmount] = useState('');
   const [downPaymentWithholding, setDownPaymentWithholding] = useState('0');
   const [disbursementRef, setDisbursementRef] = useState(`PYMT #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
 
@@ -128,15 +171,22 @@ export default function PurchaseTransactionTab({
   // Search filter for open payables
   const [openSearch, setOpenSearch] = useState('');
 
-    // Auto-fill TIN & Provider details
+  // Auto-fill TIN & Provider details
   const handleSelectProvider = (provName: string) => {
     setProviderName(provName);
     const found = contractors.find(c => 
       (c.registered_name || c.service_provider_name || c.company_name || '').toLowerCase() === provName.toLowerCase()
     );
     if (found) {
-      setTin(found.sp_tin || found.client_TIN || '');
-      setAddress(found.address || found.sp_address || '');
+      const rawDigits = (found.sp_tin || found.service_provider_TIN || found.client_TIN || '').replace(/\D/g, '');
+      const tin9 = rawDigits.slice(0, 9);
+      let formattedTin9 = '';
+      if (tin9.length > 0) formattedTin9 += tin9.slice(0, 3);
+      if (tin9.length > 3) formattedTin9 += '-' + tin9.slice(3, 6);
+      if (tin9.length > 6) formattedTin9 += '-' + tin9.slice(6, 9);
+      setTin(formattedTin9);
+      setBranchCode(found.provider_branch_code || found.sp_branch_code || (rawDigits.length > 9 ? rawDigits.slice(9, 14).padEnd(5, '0') : '00000'));
+      setAddress(found.address || found.sp_address || found.service_provider_Address || '');
       if (found.business_tax_type) {
         setBusinessTaxType(found.business_tax_type as any);
         setVatStatus(found.business_tax_type === 'vatable' ? 'VAT' : 'NONVAT');
@@ -147,26 +197,32 @@ export default function PurchaseTransactionTab({
     }
   };
 
+  // Format TIN strictly as 9-digit (000-000-000) to align with Directory > Service Providers
   const handleTinChange = (val: string) => {
-    const digits = val.replace(/\D/g, '').slice(0, 14);
+    const digits = val.replace(/\D/g, '').slice(0, 9);
     let formatted = '';
     if (digits.length > 0) formatted += digits.slice(0, 3);
     if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
     if (digits.length > 6) formatted += '-' + digits.slice(6, 9);
-    if (digits.length > 9) formatted += '-' + digits.slice(9, 14);
     setTin(formatted);
 
-    if (digits.length >= 9) {
-      const found = contractors.find(c => (c.sp_tin || c.client_TIN || '').replace(/\D/g, '').startsWith(digits.slice(0, 9)));
+    if (digits.length === 9) {
+      const found = contractors.find(c => (c.sp_tin || c.service_provider_TIN || c.client_TIN || '').replace(/\D/g, '').slice(0, 9) === digits);
       if (found) {
         if (!providerName) setProviderName(found.registered_name || found.service_provider_name || found.company_name || '');
-        if (!address) setAddress(found.address || found.sp_address || '');
+        if (!address) setAddress(found.address || found.sp_address || found.service_provider_Address || '');
+        setBranchCode(found.provider_branch_code || found.sp_branch_code || '00000');
         if (found.business_tax_type) {
           setBusinessTaxType(found.business_tax_type as any);
           setVatStatus(found.business_tax_type === 'vatable' ? 'VAT' : 'NONVAT');
         }
       }
     }
+  };
+
+  const handleBranchCodeChange = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 5);
+    setBranchCode(digits);
   };
 
   // Live Formula Calculations for Purchases/Expenses
@@ -233,14 +289,48 @@ export default function PurchaseTransactionTab({
       return;
     }
 
-    if (!providerName.trim()) {
-      triggerAlert('Please enter or select a Service Provider / Vendor Name.', 'error');
-      return;
-    }
     if (!voucherNo.trim()) {
       triggerAlert('Voucher Number is required.', 'error');
       return;
     }
+
+    const parsedUnitPrice = parseFloat(unitPrice) || 0;
+    if (parsedUnitPrice <= 0) {
+      triggerAlert('Please enter a valid Unit Price greater than 0.', 'error');
+      return;
+    }
+
+    // Check if entered Particulars / Expense Description exists in Chart of Accounts; if not, add it automatically
+    const cleanParticulars = particulars.trim() || (expenseType === 'Cost of Sales' ? 'Cost of Goods / Services' : 'Operating Expense');
+    if (particulars.trim() && setAccountTitles) {
+      const existsInCoa = accountTitles.some(a => a.title.trim().toLowerCase() === cleanParticulars.toLowerCase());
+      if (!existsInCoa) {
+        const prefix = expenseType === 'Cost of Sales' ? '5' : '6';
+        const existingCodes = accountTitles
+          .filter(a => a.code.startsWith(prefix))
+          .map(a => parseInt(a.code, 10))
+          .filter(n => !isNaN(n));
+        const nextCode = existingCodes.length > 0 ? String(Math.max(...existingCodes) + 10) : (expenseType === 'Cost of Sales' ? '5050' : '6250');
+
+        const newCoaAccount: AccountTitle = {
+          id: Date.now() + 99,
+          code: nextCode,
+          title: cleanParticulars,
+          type: expenseType === 'Cost of Sales' ? 'Cost of Sales' : 'Expense',
+          category: expenseType === 'Cost of Sales' ? 'Cost of Sales' : 'Operating Expenses',
+          normal_balance: 'Debit',
+          description: `Auto-added ${expenseType} account from Purchase Transaction Hub`
+        };
+        setAccountTitles(prev => [...prev, newCoaAccount]);
+        triggerAlert(`New ${expenseType} account "${cleanParticulars}" (#${nextCode}) automatically added to Chart of Accounts!`, 'info');
+      }
+    }
+
+    const effectiveProviderName = providerName.trim() || 'Various Suppliers / Cash Vendor';
+    const rawTin9 = tin.replace(/\D/g, '').slice(0, 9);
+    const formattedTin9 = rawTin9.length === 9 ? `${rawTin9.slice(0, 3)}-${rawTin9.slice(3, 6)}-${rawTin9.slice(6, 9)}` : '000-000-000';
+    const cleanBranch5 = (branchCode.replace(/\D/g, '') || '00000').padStart(5, '0').slice(0, 5);
+    const full14DigitTin = rawTin9.length === 9 ? `${formattedTin9}-${cleanBranch5}` : '000-000-000-00000';
 
     const totalDue = liveFormulas.total_amount_due;
     const nowIso = new Date().toISOString();
@@ -264,20 +354,20 @@ export default function PurchaseTransactionTab({
     const purchaseRecord: UniformBookRecord = {
       id: commonId,
       company_name: activeCompanyName,
-      registered_name: providerName.trim(),
+      registered_name: effectiveProviderName,
       vat_or_nonvat: vatStatus,
       business_tax_type: businessTaxType,
-      expense_type: expenseType,
-      tin: tin.trim() || '000-000-000-00000',
+      expense_type: cleanParticulars,
+      tin: full14DigitTin,
       address: address.trim(),
       type_of_transaction: assignedTransactionType,
       date: date,
       invoice_type: invoiceType,
       voucher_number: voucherNo.trim(),
-      invoice_number: invoiceNo.trim() || `EXP-${voucherNo.trim()}`,
-      particulars: particulars.trim() || `${expenseType} - ${providerName.trim()}`,
+      invoice_number: invoiceNo.trim() || `INV-${voucherNo.trim()}`,
+      particulars: `[${expenseType}] ${cleanParticulars}`,
       qty: parseFloat(qty) || 1,
-      unit_price: parseFloat(unitPrice) || 0,
+      unit_price: parsedUnitPrice,
       amount: liveFormulas.amount,
       vatable_amount: liveFormulas.vatable_purchases,
       vat_amount: liveFormulas.input_vat,
@@ -305,7 +395,7 @@ export default function PurchaseTransactionTab({
         ...purchaseRecord,
         id: commonId + 1,
         type_of_transaction: 'ON ACCOUNT',
-        particulars: `Unpaid Voucher #${voucherNo.trim()} - ${particulars || expenseType} (Pending Balance: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+        particulars: `Unpaid Voucher #${voucherNo.trim()} - ${cleanParticulars} (Pending Balance: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
         amount_paid: 0,
         pending_balance: totalDue,
         status: 'On Account',
@@ -324,20 +414,20 @@ export default function PurchaseTransactionTab({
       const cashDisbursementRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
-        registered_name: providerName.trim(),
+        registered_name: effectiveProviderName,
         vat_or_nonvat: vatStatus,
         business_tax_type: businessTaxType,
-        expense_type: expenseType,
-        tin: tin.trim() || '000-000-000-00000',
+        expense_type: cleanParticulars,
+        tin: full14DigitTin,
         address: address.trim(),
         type_of_transaction: 'CASH',
         date: date,
-        invoice_type: 'OFFICIAL RECEIPT',
+        invoice_type: invoiceType,
         voucher_number: voucherNo.trim(),
-        invoice_number: invoiceNo.trim() || `EXP-${voucherNo.trim()}`,
-        particulars: `Cash Disbursement for Voucher #${voucherNo.trim()} - ${particulars || expenseType}`,
+        invoice_number: invoiceNo.trim() || `INV-${voucherNo.trim()}`,
+        particulars: `Cash Disbursement for Voucher #${voucherNo.trim()} - ${cleanParticulars}`,
         qty: parseFloat(qty) || 1,
-        unit_price: parseFloat(unitPrice) || 0,
+        unit_price: parsedUnitPrice,
         amount: liveFormulas.amount,
         vatable_amount: liveFormulas.vatable_purchases,
         vat_amount: liveFormulas.input_vat,
@@ -396,22 +486,22 @@ export default function PurchaseTransactionTab({
       const partialPaymentRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
-        registered_name: providerName.trim(),
+        registered_name: effectiveProviderName,
         vat_or_nonvat: vatStatus,
         business_tax_type: businessTaxType,
-        expense_type: expenseType,
-        tin: tin.trim() || '000-000-000-00000',
+        expense_type: cleanParticulars,
+        tin: full14DigitTin,
         address: address.trim(),
         type_of_transaction: 'ON ACCOUNT',
         date: date,
-        invoice_type: 'OFFICIAL RECEIPT',
+        invoice_type: invoiceType,
         voucher_number: voucherNo.trim(),
-        invoice_number: invoiceNo.trim() || `EXP-${voucherNo.trim()}`,
+        invoice_number: invoiceNo.trim() || `INV-${voucherNo.trim()}`,
         particulars: isFull
           ? `Full Payment for Voucher #${voucherNo.trim()} (Cash Paid: ₱${actualFirstCash.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
           : `1st Down Payment for Voucher #${voucherNo.trim()} (Paid: ₱${actualFirstCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}, Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
         qty: parseFloat(qty) || 1,
-        unit_price: parseFloat(unitPrice) || 0,
+        unit_price: parsedUnitPrice,
         amount: liveFormulas.amount,
         vatable_amount: liveFormulas.vatable_purchases,
         vat_amount: liveFormulas.input_vat,
@@ -456,13 +546,14 @@ export default function PurchaseTransactionTab({
       }
     }
 
-    // Reset Form for next entry with Requirement 4 prefixes
-    setVoucherNo(`VOUCHER #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
-    setInvoiceNo(`EXP #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+    // Reset Form for next entry with sequential Voucher #[YEAR]-000000X and cleared amounts
+    const nextList = [purchaseRecord, ...subsidiaryPurchases];
+    setVoucherNo(computeNextVoucherNumber(nextList));
+    setInvoiceNo('');
     setDisbursementRef(`PYMT #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
     setParticulars('');
-    setUnitPrice('15000');
-    setDownPaymentAmount('5000');
+    setUnitPrice('');
+    setDownPaymentAmount('');
   };
 
   // EXECUTE PAYMENT ON AN OPEN PAYABLE
@@ -851,17 +942,16 @@ export default function PurchaseTransactionTab({
             )}
 
             {/* PROVIDER & VOUCHER DETAILS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Vendor / Service Provider Name *</label>
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+              <div className="md:col-span-5">
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Vendor / Service Provider Name (Optional)</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="Enter vendor trade name..."
+                    placeholder="Enter vendor trade name (optional)..."
                     value={providerName}
                     onChange={(e) => setProviderName(e.target.value)}
                     className={`flex-1 px-3 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
-                    required
                   />
                   {contractors.length > 0 && (
                     <select
@@ -881,15 +971,25 @@ export default function PurchaseTransactionTab({
                 </div>
               </div>
 
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Provider TIN (Masked 000-000-000-00000) *</label>
+              <div className="md:col-span-4">
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Provider TIN (9 Digits Only)</label>
                 <input
                   type="text"
-                  placeholder="123-456-789-00000"
+                  placeholder="123-456-789"
                   value={tin}
                   onChange={(e) => handleTinChange(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
-                  required
+                />
+              </div>
+
+              <div className="md:col-span-3">
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Branch Code (5 Digits)</label>
+                <input
+                  type="text"
+                  placeholder="00000"
+                  value={branchCode}
+                  onChange={(e) => handleBranchCodeChange(e.target.value)}
+                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
                 />
               </div>
             </div>
@@ -914,17 +1014,14 @@ export default function PurchaseTransactionTab({
               </div>
 
               <div>
-                <label className={`block text-xs font-bold mb-1 text-purple-400`}>2. Expense Type (COA) *</label>
+                <label className={`block text-xs font-bold mb-1 text-purple-400`}>2. Expense Type *</label>
                 <select
                   value={expenseType}
-                  onChange={(e) => setExpenseType(e.target.value)}
+                  onChange={(e) => setExpenseType(e.target.value as 'Cost of Sales' | 'Expenses')}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} text-purple-300`}
                 >
-                  {expenseOptions.map((opt, idx) => (
-                    <option key={idx} value={opt} className="bg-zinc-900 text-white">
-                      {opt}
-                    </option>
-                  ))}
+                  <option value="Cost of Sales" className="bg-zinc-900 text-white">Cost of Sales</option>
+                  <option value="Expenses" className="bg-zinc-900 text-white">Expenses</option>
                 </select>
               </div>
 
@@ -935,8 +1032,9 @@ export default function PurchaseTransactionTab({
                   onChange={(e) => setInvoiceType(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-medium cursor-pointer ${theme.borderInput} ${theme.textMain}`}
                 >
-                  <option value="OFFICIAL RECEIPT" className="bg-zinc-900 text-white">OFFICIAL RECEIPT</option>
+                  <option value="INVOICE" className="bg-zinc-900 text-white">INVOICE</option>
                   <option value="SALES INVOICE" className="bg-zinc-900 text-white">SALES INVOICE</option>
+                  <option value="OFFICIAL RECEIPT" className="bg-zinc-900 text-white">OFFICIAL RECEIPT</option>
                   <option value="BILLING STATEMENT" className="bg-zinc-900 text-white">BILLING STATEMENT</option>
                   <option value="DISBURSEMENT VOUCHER" className="bg-zinc-900 text-white">DISBURSEMENT VOUCHER</option>
                 </select>
@@ -956,7 +1054,7 @@ export default function PurchaseTransactionTab({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className={`block text-xs font-bold mb-1 text-purple-400`}>Voucher Number (PV / DV #) *</label>
+                <label className={`block text-xs font-bold mb-1 text-purple-400`}>Voucher Number (Sequential VOUCHER#[YEAR]-0000001) *</label>
                 <input
                   type="text"
                   value={voucherNo}
@@ -967,13 +1065,13 @@ export default function PurchaseTransactionTab({
               </div>
 
               <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Vendor Invoice / OR Number</label>
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Vendor Invoice / OR Number (Optional)</label>
                 <input
                   type="text"
+                  placeholder="Enter vendor invoice / OR #..."
                   value={invoiceNo}
                   onChange={(e) => setInvoiceNo(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
-                  required
                 />
               </div>
             </div>
@@ -990,15 +1088,45 @@ export default function PurchaseTransactionTab({
             </div>
 
             <div>
-              <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Particulars / Expense Description *</label>
-              <input
-                type="text"
-                placeholder="e.g. Office Supplies, High-Speed Internet, Rent, Subcontractor Fees"
-                value={particulars}
-                onChange={(e) => setParticulars(e.target.value)}
-                className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
-                required
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className={`block text-xs font-bold ${theme.textMuted}`}>
+                  Particulars / Expense Description (Enter manually or pick from {expenseType} under Chart of Accounts)
+                </label>
+                {particulars.trim() && !accountTitles.some(a => a.title.trim().toLowerCase() === particulars.trim().toLowerCase()) && (
+                  <span className="text-[10px] font-bold text-emerald-400">
+                    + Will be added to Chart of Accounts ({expenseType}) on save
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  list="coa-expense-particulars-list"
+                  placeholder={`Type custom ${expenseType.toLowerCase()} particulars or select from Chart of Accounts...`}
+                  value={particulars}
+                  onChange={(e) => setParticulars(e.target.value)}
+                  className={`flex-1 px-3 py-2 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
+                />
+                <datalist id="coa-expense-particulars-list">
+                  {coaParticularsOptions.map((opt, idx) => (
+                    <option key={idx} value={opt} />
+                  ))}
+                </datalist>
+                <select
+                  value={coaParticularsOptions.includes(particulars) ? particulars : ''}
+                  onChange={(e) => {
+                    if (e.target.value) setParticulars(e.target.value);
+                  }}
+                  className={`px-3 py-2 text-xs rounded-xl border bg-transparent font-semibold text-purple-300 cursor-pointer ${theme.borderInput}`}
+                >
+                  <option value="" className="bg-zinc-900 text-zinc-400">Pick from COA ({expenseType})...</option>
+                  {coaParticularsOptions.map((opt, idx) => (
+                    <option key={idx} value={opt} className="bg-zinc-900 text-white">
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* FINANCIAL LINE AMOUNTS */}
@@ -1017,11 +1145,12 @@ export default function PurchaseTransactionTab({
               </div>
 
               <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Unit Price (₱)</label>
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Unit Price (₱) *</label>
                 <input
                   type="number"
                   min="0"
                   step="any"
+                  placeholder="Enter unit price..."
                   value={unitPrice}
                   onChange={(e) => setUnitPrice(e.target.value)}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
@@ -1211,30 +1340,35 @@ export default function PurchaseTransactionTab({
                 <button
                   type="button"
                   onClick={() => {
+                    const rawTin9 = tin.replace(/\D/g, '').slice(0, 9);
+                    const formatted9 = rawTin9.length === 9 ? `${rawTin9.slice(0, 3)}-${rawTin9.slice(3, 6)}-${rawTin9.slice(6, 9)}` : '000-000-000';
+                    const cleanBranch5 = (branchCode.replace(/\D/g, '') || '00000').padStart(5, '0').slice(0, 5);
                     const tempRecord: UniformBookRecord = {
                       id: 0,
                       company_name: activeCompanyName,
-                      registered_name: providerName || 'Valued Supplier / Contractor',
-                      vat_or_nonvat: vatStatus,
-                      tin: tin || '000-000-000-00000',
+                      registered_name: providerName || 'Various Suppliers / Cash Vendor',
+                      vat_or_nonvat: businessTaxType === 'vatable' ? 'VAT' : 'NONVAT',
+                      business_tax_type: businessTaxType,
+                      expense_type: particulars || expenseType,
+                      tin: `${formatted9}-${cleanBranch5}`,
                       address: address || 'Metro Manila, Philippines',
                       type_of_transaction: purchaseMode === 'ON CASH' ? 'CASH' : 'ON ACCOUNT',
                       date: date,
                       invoice_type: invoiceType,
                       voucher_number: voucherNo,
-                      invoice_number: invoiceNo,
-                      particulars: particulars || 'Purchased goods/services',
+                      invoice_number: invoiceNo || voucherNo,
+                      particulars: particulars || expenseType,
                       qty: parseFloat(qty) || 1,
                       unit_price: parseFloat(unitPrice) || 0,
-                      amount: liveFormulas.expense_amount,
-                      vatable_amount: liveFormulas.vatable_expense,
+                      amount: liveFormulas.amount,
+                      vatable_amount: liveFormulas.vatable_purchases,
                       vat_amount: liveFormulas.input_vat,
                       zero_rated_amount: parseFloat(zeroRated) || 0,
                       vat_exempt_amount: parseFloat(vatExempt) || 0,
-                      total_amount_vat_inclusive: liveFormulas.expense_amount,
-                      total_amount_net_of_vat: liveFormulas.amount_net_of_vat,
-                      discount: liveFormulas.discounts,
-                      tax_withheld: liveFormulas.ewt_amount,
+                      total_amount_vat_inclusive: liveFormulas.total_amount_vat_inclusive,
+                      total_amount_net_of_vat: liveFormulas.net_of_discount,
+                      discount: liveFormulas.discount,
+                      tax_withheld: liveFormulas.tax_withheld,
                       total_amount_due: liveFormulas.total_amount_due,
                       status: purchaseMode === 'ON CASH' ? 'Cash' : (purchaseMode === 'ON PARTIAL' ? 'Partial' : 'On Account')
                     };
@@ -1243,7 +1377,7 @@ export default function PurchaseTransactionTab({
                   className="w-1/2 py-3.5 rounded-xl border border-purple-500/40 hover:bg-purple-500/10 text-purple-300 font-bold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <Eye className="w-4 h-4" />
-                  <span>Preview ({vatStatus})</span>
+                  <span>Preview ({businessTaxType === 'vatable' ? 'VATABLE' : 'NON-VATABLE'})</span>
                 </button>
 
                 <button
@@ -1376,6 +1510,23 @@ export default function PurchaseTransactionTab({
                             >
                               <DollarSign className="w-3.5 h-3.5" />
                               <span>Disburse Payment</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onDeleteRecord) {
+                                  onDeleteRecord('subsidiary_purchases', p);
+                                } else {
+                                  setSubsidiaryPurchases(prev => prev.filter(item => item.id !== p.id));
+                                  setPayments(prev => prev.filter(pm => !(pm.voucher_number === p.voucher_number || pm.invoice_number === p.invoice_number)));
+                                  setCashDisbursements(prev => prev.filter(cd => !(cd.voucher_number === p.voucher_number || cd.invoice_number === p.invoice_number)));
+                                  triggerAlert(`Deleted purchase voucher #${p.voucher_number} and all related disbursements.`, 'info');
+                                }
+                              }}
+                              title="Delete Purchase Voucher and all related Payments, Cash Disbursements, Journal & Ledger entries"
+                              className="p-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>

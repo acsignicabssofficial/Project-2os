@@ -55,6 +55,11 @@ export default function SpecialEntriesTab({
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
   const [entryType, setEntryType] = useState<SpecialEntry['entry_type']>('Adjusting Entry');
   const [description, setDescription] = useState('');
+  const [accountingTreatment, setAccountingTreatment] = useState<SpecialEntry['accounting_treatment']>('Standard');
+  const [postReportingEvent, setPostReportingEvent] = useState<SpecialEntry['post_reporting_event']>('None');
+  const [esgScope, setEsgScope] = useState<SpecialEntry['esg_scope']>('None');
+  const [esgActivityQty, setEsgActivityQty] = useState('');
+  const [esgActivityUnit, setEsgActivityUnit] = useState<'kWh' | 'Liters' | 'kg CO2e'>('kWh');
   
   // Line items state
   const [lines, setLines] = useState<SpecialEntryLine[]>([
@@ -152,6 +157,32 @@ export default function SpecialEntriesTab({
         { type: 'Debit', account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: 15000 },
         { type: 'Credit', account_code: '4020', account_title: 'Other Operating Income', amount: 15000 }
       ]);
+    } else if (type === 'PFRS 16 Lease Recognition') {
+      setDescription('PFRS 16 Recognition of Right-of-Use (ROU) Asset and Current/Non-Current Lease Liability at PV of lease payments');
+      setLines([
+        { type: 'Debit', account_code: '1530', account_title: 'Right-of-Use (ROU) Asset', amount: 360000 },
+        { type: 'Credit', account_code: '2070', account_title: 'Lease Liability - Current', amount: 120000 },
+        { type: 'Credit', account_code: '2520', account_title: 'Lease Liability - Non-Current', amount: 240000 }
+      ]);
+    } else if (type === 'PFRS 9 ECL Allowance') {
+      setDescription('PFRS 9 Stage 1/2/3 Expected Credit Loss (ECL) Impairment Provision on Trade Receivables');
+      setLines([
+        { type: 'Debit', account_code: '6085', account_title: 'Impairment Loss (PAS 36 / PFRS 9 ECL)', amount: 12500 },
+        { type: 'Credit', account_code: '1025', account_title: 'Allowance for Expected Credit Losses (ECL)', amount: 12500 }
+      ]);
+    } else if (type === 'PAS 12 Deferred Tax') {
+      setDescription('PAS 12 Recognition of Deferred Tax Asset / Liability from temporary differences');
+      setLines([
+        { type: 'Debit', account_code: '1550', account_title: 'Deferred Tax Asset', amount: 18000 },
+        { type: 'Credit', account_code: '7020', account_title: 'Deferred Tax Expense / (Benefit) (PAS 12)', amount: 18000 }
+      ]);
+    } else if (type === 'PAS 8 Retrospective Restatement') {
+      setAccountingTreatment('Retrospective Restatement');
+      setDescription('PAS 8 Retrospective Restatement of prior period error / accounting policy change (triggers PAS 1.40A Third Balance Sheet)');
+      setLines([
+        { type: 'Debit', account_code: '3020', account_title: 'Retained Earnings', amount: 25000 },
+        { type: 'Credit', account_code: '1520', account_title: 'Accumulated Depreciation', amount: 25000 }
+      ]);
     }
   };
 
@@ -190,6 +221,25 @@ export default function SpecialEntriesTab({
       return;
     }
 
+    // PAS 10 / Period-End Lock Guardrail: Reject posting into a locked fiscal year
+    const postingYear = (entryDate || '').slice(0, 4);
+    if (postingYear && lockedPeriods.includes(postingYear)) {
+      triggerAlert(`PAS 10 / Audit Control Guardrail: Fiscal Period ${postingYear} is CLOSED & LOCKED. Posting backdated entries into a closed reporting period is prohibited.`, 'error');
+      return;
+    }
+
+    // PAS 1.87 Guardrail: Prohibit Extraordinary Items
+    if (/extraordinary/i.test(description) || lines.some(l => /extraordinary/i.test(l.account_title))) {
+      triggerAlert('PAS 1.87 Compliance Guardrail: Presenting or labeling any transaction as an "Extraordinary Item" is strictly prohibited under PFRS/PAS.', 'error');
+      return;
+    }
+
+    // PAS 10.10 Non-Adjusting Event Guardrail: Cannot post ledger amounts to closed period if marked Non-Adjusting Note Disclosure
+    if (postReportingEvent === 'Non-Adjusting Note Disclosure (PAS 10)') {
+      triggerAlert('PAS 10.10 Guardrail: Non-adjusting events after the reporting period are disclosed in the Notes to Financial Statements and must not adjust period-end financial statement amounts.', 'error');
+      return;
+    }
+
     if (!isBalanced) {
       triggerAlert(`Journal entry is unbalanced! Debit (₱${totalDebit.toLocaleString()}) does not equal Credit (₱${totalCredit.toLocaleString()}). Difference: ₱${difference.toLocaleString()}`, 'error');
       return;
@@ -202,6 +252,11 @@ export default function SpecialEntriesTab({
         entry_date: entryDate,
         entry_type: entryType,
         description,
+        accounting_treatment: accountingTreatment,
+        post_reporting_event: postReportingEvent,
+        esg_scope: esgScope,
+        esg_activity_qty: parseFloat(esgActivityQty) || 0,
+        esg_activity_unit: esgActivityUnit,
         lines: lines.map(l => ({ ...l, amount: Number(l.amount) || 0 }))
       } : s));
       triggerAlert(`Special entry "${voucherNo}" updated successfully!`, 'success');
@@ -215,6 +270,11 @@ export default function SpecialEntriesTab({
         entry_date: entryDate,
         entry_type: entryType,
         description,
+        accounting_treatment: accountingTreatment,
+        post_reporting_event: postReportingEvent,
+        esg_scope: esgScope,
+        esg_activity_qty: parseFloat(esgActivityQty) || 0,
+        esg_activity_unit: esgActivityUnit,
         lines: lines.map(l => ({ ...l, amount: Number(l.amount) || 0 }))
       };
       setSpecialEntries(prev => [newEntry, ...prev]);
@@ -245,10 +305,8 @@ export default function SpecialEntriesTab({
   };
 
   const handleDelete = (id: number, vNo: string) => {
-    if (window.confirm(`Are you sure you want to delete special entry "${vNo}"?`)) {
-      setSpecialEntries(prev => prev.filter(s => s.id !== id));
-      triggerAlert(`Special Entry "${vNo}" removed.`, 'info');
-    }
+    setSpecialEntries(prev => prev.filter(s => s.id !== id));
+    triggerAlert(`Special Entry "${vNo}" removed.`, 'info');
   };
 
   // ==========================================
@@ -297,7 +355,7 @@ export default function SpecialEntriesTab({
 
     setSpecialEntries(prev => [newAJE, ...prev]);
     setIsAJEWizardOpen(false);
-    triggerAlert(`Adjusting Entry "${nextVNo}" successfully posted to General Ledger!`, 'success');
+    triggerAlert(`Adjusting Entry "${nextVNo}" successfully posted to Special Ledger!`, 'success');
   };
 
   // ==========================================
@@ -980,7 +1038,7 @@ export default function SpecialEntriesTab({
 
             {/* Quick Templates Bar */}
             <div className="space-y-1.5">
-              <span className="text-[11px] font-bold uppercase text-zinc-400">Quick Standard Presets:</span>
+              <span className="text-[11px] font-bold uppercase text-zinc-400">Quick Standard &amp; PFRS Presets:</span>
               <div className="flex flex-wrap gap-1.5">
                 {[
                   'Adjusting Entry',
@@ -990,7 +1048,11 @@ export default function SpecialEntriesTab({
                   'Sale of PPE',
                   'Loan Payable',
                   'Owner Equity',
-                  'Cancellation'
+                  'Cancellation',
+                  'PFRS 16 Lease Recognition',
+                  'PFRS 9 ECL Allowance',
+                  'PAS 12 Deferred Tax',
+                  'PAS 8 Retrospective Restatement'
                 ].map((tpl) => (
                   <button
                     key={tpl}
@@ -1043,7 +1105,53 @@ export default function SpecialEntriesTab({
                     <option value="Loan Payable">Loan Availment / Repayment</option>
                     <option value="Owner Equity">Capital Stock / Owner Equity</option>
                     <option value="Cancellation">Cancellation / Error Correction</option>
-                    <option value="Accrual / Adjustment">Accrual & Deferral</option>
+                    <option value="Accrual / Adjustment">Accrual &amp; Deferral</option>
+                    <option value="PFRS 16 Lease Recognition">PFRS 16 Lease Recognition</option>
+                    <option value="PFRS 9 ECL Allowance">PFRS 9 ECL Allowance</option>
+                    <option value="PAS 12 Deferred Tax">PAS 12 Deferred Tax</option>
+                    <option value="PAS 8 Retrospective Restatement">PAS 8 Retrospective Restatement</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-xl bg-zinc-500/5 border border-zinc-700/30">
+                <div>
+                  <label className="block text-[10px] font-bold text-cyan-400 uppercase tracking-wider mb-1">PAS 8 Treatment</label>
+                  <select
+                    value={accountingTreatment}
+                    onChange={(e) => setAccountingTreatment(e.target.value as any)}
+                    className={`w-full px-2.5 py-1.5 text-xs rounded-lg border ${theme.borderInput} ${theme.bgInput} ${theme.textMain}`}
+                  >
+                    <option value="Standard">Standard Current Period</option>
+                    <option value="Prospective">Prospective (Estimate Change)</option>
+                    <option value="Retrospective Restatement">Retrospective Restatement (PAS 1.40A)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1">PAS 10 Post-Reporting</label>
+                  <select
+                    value={postReportingEvent}
+                    onChange={(e) => setPostReportingEvent(e.target.value as any)}
+                    className={`w-full px-2.5 py-1.5 text-xs rounded-lg border ${theme.borderInput} ${theme.bgInput} ${theme.textMain}`}
+                  >
+                    <option value="None">Normal In-Period Event</option>
+                    <option value="Adjusting Event (PAS 10)">Adjusting Event (PAS 10.8)</option>
+                    <option value="Non-Adjusting Note Disclosure (PAS 10)">Non-Adjusting Event (PAS 10.10 Block)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-emerald-400 uppercase tracking-wider mb-1">PFRS S2 GHG Scope</label>
+                  <select
+                    value={esgScope}
+                    onChange={(e) => setEsgScope(e.target.value as any)}
+                    className={`w-full px-2.5 py-1.5 text-xs rounded-lg border ${theme.borderInput} ${theme.bgInput} ${theme.textMain}`}
+                  >
+                    <option value="None">Not Climate-Linked</option>
+                    <option value="Scope 1 (Direct)">Scope 1 (Direct Fuel)</option>
+                    <option value="Scope 2 (Electricity)">Scope 2 (Electricity kWh)</option>
+                    <option value="Scope 3 (Value Chain)">Scope 3 (Value Chain)</option>
                   </select>
                 </div>
               </div>

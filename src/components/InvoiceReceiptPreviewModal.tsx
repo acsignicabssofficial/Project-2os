@@ -33,17 +33,16 @@ export default function InvoiceReceiptPreviewModal({
 }: InvoiceReceiptPreviewModalProps) {
   if (!isOpen || !record) return null;
 
-  // Determine whether this record is VAT or Non-VAT
-  const isRecordNonVat = String(record.vat_or_nonvat || '').toUpperCase().includes('NON');
-  const initialVatType: 'VAT' | 'NONVAT' = defaultMode || (isRecordNonVat ? 'NONVAT' : 'VAT');
-  const [vatMode, setVatMode] = useState<'VAT' | 'NONVAT'>(initialVatType);
+  // Strictly determine whether this record is VAT or Non-VAT based on chosen business tax type
+  const bizTax = String(record.business_tax_type || '').toLowerCase().trim();
+  const isStrictlyVat = bizTax
+    ? bizTax === 'vatable'
+    : (defaultMode ? defaultMode === 'VAT' : !String(record.vat_or_nonvat || '').toUpperCase().includes('NON'));
+  const vatMode: 'VAT' | 'NONVAT' = isStrictlyVat ? 'VAT' : 'NONVAT';
   const [copied, setCopied] = useState(false);
 
-  // Determine doc title (Sales Invoice vs Official Receipt)
-  const isReceipt = record.invoice_type?.toUpperCase().includes('RECEIPT') || 
-                    record.type_of_transaction === 'CASH' ||
-                    record.voucher_number?.startsWith('OR-') ||
-                    record.voucher_number?.startsWith('CR-');
+  // Determine doc title (Invoice vs Official Receipt)
+  const isReceipt = record.invoice_type?.toUpperCase().includes('RECEIPT');
 
   const sellerName = activeCompany?.company_name || 'REGISTERED TAXPAYER CORP.';
   const sellerTin = activeCompany?.company_tin || '000-000-000-00000';
@@ -100,34 +99,19 @@ export default function InvoiceReceiptPreviewModal({
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 print:hidden">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-              Tax Regime Preview:
+              Chosen Tax Type Preview:
             </span>
-            <div className="inline-flex rounded-lg p-0.5 bg-slate-200 dark:bg-slate-700">
-              <button
-                type="button"
-                onClick={() => setVatMode('VAT')}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                  vatMode === 'VAT'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
+            {vatMode === 'VAT' ? (
+              <span className="px-3 py-1 rounded-md text-xs font-bold bg-emerald-600 text-white shadow-xs inline-flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>VAT Registered Preview</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setVatMode('NONVAT')}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                  vatMode === 'NONVAT'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
+                <span>VATABLE PREVIEW ONLY (12% VAT)</span>
+              </span>
+            ) : (
+              <span className="px-3 py-1 rounded-md text-xs font-bold bg-amber-600 text-white shadow-xs inline-flex items-center gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5" />
-                <span>NON-VAT Registered Preview</span>
-              </button>
-            </div>
+                <span>NON-VATABLE PREVIEW ONLY ({record.business_tax_type ? record.business_tax_type.toUpperCase() : 'NON-VAT'})</span>
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">

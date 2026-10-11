@@ -235,42 +235,42 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
       },
       {
         key: 'general_journal',
-        label: 'General Journal Entries',
+        label: 'General Journal (Adjusting, Payroll, PPE & Other Entries)',
         shortLabel: 'General\nJournal',
         icon: BookOpen,
         isBookOfAccount: true,
         cellRef: 'GEN_JOURNAL!A1',
-        description: 'General Journal: Chronological double-entry debits and credits from Sales, Purchases, Cash Receipts, Disbursements, and Payroll.',
+        description: 'General Journal: Chronological double-entry debits and credits for Other Transactions including Adjusting Entries, Payroll, PPE Depreciation, Closing, and Reversing entries (Posts to General Ledger).',
         formula: '=GENERAL_JOURNAL(EntryDate, ReferenceNo, AccountTitle, Debit, Credit, Explanation)'
       },
       {
         key: 'special_entries',
-        label: 'Special Journal & Adjusting Entries',
+        label: 'Special Journal (All Sales & Purchases Transactions)',
         shortLabel: 'Special\nJournal',
         icon: Layers,
         isBookOfAccount: true,
         cellRef: 'SPEC_JOURNAL!A1',
-        description: 'Special Journal: Specialized accounting adjustments, depreciation journal, tax provisions, prepayments, and accrual entries.',
+        description: 'Special Journal: Chronological double-entry debits and credits for all transactions related to Sales and Purchases (Subsidiary Sales, Cash Receipts, Collections, Subsidiary Purchases, Cash Disbursements, and Payments — Posts to Special Ledger).',
         formula: '=SPECIAL_JOURNAL(EntryDate, Description, DebitAccount, CreditAccount, Amount)'
       },
       {
         key: 'general_ledger',
-        label: 'General Ledger T-Accounts & Balances',
+        label: 'General Ledger (Posted from General Journal)',
         shortLabel: 'General\nLedger',
         icon: Table,
         isBookOfAccount: true,
         cellRef: 'GEN_LEDGER!A1',
-        description: 'General Ledger: Aggregated running ledger balances and posting history for all balance sheet and income statement accounts.',
+        description: 'General Ledger: Running ledger balances and T-Accounts for all Other Transactions (Adjusting Entries, Payroll, PPE, Closing, Reversing) posted from General Journal.',
         formula: '=GENERAL_LEDGER(AccountCode, AccountTitle, BeginningBalance, TotalDebits, TotalCredits, EndingBalance)'
       },
       {
         key: 'special_ledger',
-        label: 'Special Ledger & Subsidiary Accounts',
+        label: 'Special Ledger (Posted from Special Journal — Sales & Purchases)',
         shortLabel: 'Special\nLedger',
         icon: FileSpreadsheet,
         isBookOfAccount: true,
         cellRef: 'SPEC_LEDGER!A1',
-        description: 'Special Ledger: Specialized subsidiary ledger breakdown for Accounts Receivable, Accounts Payable, and Withholding Tax accounts.',
+        description: 'Special Ledger: Running ledger balances and T-Accounts for all Sales and Purchases transactions posted from Special Journal.',
         formula: '=SPECIAL_LEDGER(SubAccount, Debits, Credits, NetBalance)'
       }
     ]
@@ -347,12 +347,12 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
     subTabs: [
       {
         key: 'fs_balance_sheet',
-        label: 'Balance Sheet (Comparative)',
-        shortLabel: 'Balance\nSheet',
+        label: 'Trial Balance & Worksheet (with Adjusting Entries)',
+        shortLabel: 'Trial\nBalance',
         icon: Scale,
-        cellRef: 'BALANCE_SHEET!A1',
-        description: 'Balance Sheet: Summary of Total Assets, Liabilities, and Owner Equity with balance validation.',
-        formula: '=BALANCE_SHEET(TotalAssets, TotalLiabilities, TotalEquity)'
+        cellRef: 'TRIAL_BALANCE!A1',
+        description: 'Trial Balance: Unadjusted Trial Balance, Adjusting Entries (Debit/Credit), and Adjusted Trial Balance.',
+        formula: '=TRIAL_BALANCE(Unadjusted, Adjustments, Adjusted)'
       },
       {
         key: 'fs_income',

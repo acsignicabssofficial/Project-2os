@@ -9,6 +9,7 @@ import {
   Upload, 
   SlidersHorizontal,
   ChevronDown, 
+  ChevronUp,
   Sparkles, 
   Layers, 
   Database, 
@@ -72,6 +73,10 @@ interface TwoOSRibbonProps {
   onOpenImportModal?: () => void;
   onOpenExportModal?: () => void;
   onOpenNewEntryModal?: () => void;
+  showPromptModal?: boolean;
+  setShowPromptModal?: (val: boolean) => void;
+  isSettingsCategoryOpen?: boolean;
+  setIsSettingsCategoryOpen?: (val: boolean) => void;
   activeBranchCode?: string;
   selectedMonthIdx?: number;
   selectedYear?: number;
@@ -109,6 +114,10 @@ export default function TwoOSRibbon({
   onOpenImportModal,
   onOpenExportModal,
   onOpenNewEntryModal,
+  showPromptModal: propShowPromptModal,
+  setShowPromptModal: propSetShowPromptModal,
+  isSettingsCategoryOpen,
+  setIsSettingsCategoryOpen,
   activeBranchCode = 'ALL',
   selectedMonthIdx: propMonthIdx,
   selectedYear: propYear,
@@ -123,10 +132,14 @@ export default function TwoOSRibbon({
 }: TwoOSRibbonProps) {
   const currentCategoryKey = getCategoryForTab(activeTab);
   const [selectedCategory, setSelectedCategory] = useState<RibbonCategoryKey>(currentCategoryKey);
+  const [isToolsCollapsed, setIsToolsCollapsed] = useState<boolean>(false);
   const [showAuditModal, setShowAuditModal] = useState<boolean>(false);
-  const [showPromptModal, setShowPromptModal] = useState<boolean>(false);
+  const [localShowPromptModal, setLocalShowPromptModal] = useState<boolean>(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(true);
   const [pfrsValidationEnabled, setPfrsValidationEnabled] = useState<boolean>(true);
+
+  const showPromptModal = propShowPromptModal !== undefined ? propShowPromptModal : localShowPromptModal;
+  const setShowPromptModal = propSetShowPromptModal || setLocalShowPromptModal;
 
   // Period / Date State for Ribbon Header Card
   const [localPrefix, setLocalPrefix] = useState<string>('FOR THE MONTH OF');
@@ -149,10 +162,13 @@ export default function TwoOSRibbon({
 
   // Sync category if activeTab changes externally (unless user explicitly viewing Settings tab)
   React.useEffect(() => {
-    if (selectedCategory !== 'SETTINGS') {
+    if (isSettingsCategoryOpen) {
+      setSelectedCategory('SETTINGS');
+      setIsToolsCollapsed(false);
+    } else if (selectedCategory !== 'SETTINGS') {
       setSelectedCategory(getCategoryForTab(activeTab));
     }
-  }, [activeTab]);
+  }, [activeTab, isSettingsCategoryOpen]);
 
   const currentCategory = RIBBON_CATEGORIES.find(c => c.key === selectedCategory) || RIBBON_CATEGORIES[0];
   const activeTabInfo = getTabInfo(activeTab);
@@ -245,218 +261,78 @@ export default function TwoOSRibbon({
     }
   };
 
-  const isLight = themeMode !== 'dark';
-  const isNeon = themeMode === 'neon_light';
-  const isTrial = themeMode === 'trial_layout';
+  const isDark = themeMode === 'dark';
 
-  // Theming colors
-  const menuBarBg = isTrial
-    ? 'bg-[#f1f5f9] border-b border-slate-200 text-slate-800'
-    : isNeon 
-    ? 'bg-[#edf6fc] border-b border-sky-200 text-slate-800' 
-    : themeMode === 'clean' 
-    ? 'bg-[#fafaff] border-b border-zinc-200 text-zinc-800' 
-    : 'bg-[#060D1F] border-b border-[#14264F] text-cyan-200';
+  // Theming colors matching the uploaded reference header image
+  const menuBarBg = isDark
+    ? 'bg-[#060D1F] border-b border-[#14264F] text-cyan-200'
+    : 'bg-[#ebf5ff] border-b border-sky-200/80 text-slate-800';
 
-  const menuTabActive = isTrial
-    ? 'text-white bg-[#00a8ff] font-bold shadow-xs'
-    : isNeon
-    ? 'text-sky-950 bg-white font-black border-b-2 border-b-cyan-500 shadow-2xs'
-    : themeMode === 'clean'
-    ? 'text-zinc-950 bg-white font-black border-b-2 border-b-violet-600 shadow-2xs'
-    : 'text-cyan-300 bg-[#0C1938] font-mono font-black border-b-2 border-b-cyan-400 shadow-[0_2px_10px_rgba(6,182,212,0.3)]';
+  const menuTabActive = isDark
+    ? 'text-cyan-300 bg-[#0C1938] font-mono font-black border-b-2 border-b-cyan-400 shadow-[0_2px_10px_rgba(6,182,212,0.3)]'
+    : 'text-slate-950 bg-white font-black border-b-2 border-b-[#00a8ff] shadow-2xs';
 
-  const menuTabInactive = isTrial
-    ? 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80 font-bold'
-    : isNeon
-    ? 'text-slate-600 hover:text-sky-950 hover:bg-sky-100/60 font-semibold'
-    : themeMode === 'clean'
-    ? 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 font-semibold'
-    : 'text-blue-300/70 hover:text-cyan-200 hover:bg-[#0A1633] font-mono font-semibold';
+  const menuTabInactive = isDark
+    ? 'text-blue-300/70 hover:text-cyan-200 hover:bg-[#0A1633] font-mono font-semibold'
+    : 'text-slate-700 hover:text-slate-950 hover:bg-sky-100/60 font-semibold';
 
-  const settingsTabActive = isTrial
-    ? 'text-white bg-[#64748b] font-bold shadow-xs'
-    : isNeon
-    ? 'text-sky-950 bg-white font-black border-b-2 border-b-cyan-500 shadow-2xs'
-    : themeMode === 'clean'
-    ? 'text-zinc-950 bg-white font-black border-b-2 border-b-violet-600 shadow-2xs'
-    : 'text-cyan-300 bg-[#0C1938] font-mono font-black border-b-2 border-b-cyan-400 shadow-[0_2px_10px_rgba(6,182,212,0.3)]';
+  const ribbonBodyBg = isDark
+    ? 'bg-[#081226] border-b border-[#14264F] text-cyan-100'
+    : 'bg-white border-b border-sky-200/80 text-slate-800';
 
-  const settingsTabInactive = isTrial
-    ? 'text-slate-700 hover:text-slate-900 hover:bg-slate-200 font-bold'
-    : isNeon
-    ? 'text-slate-700 hover:text-sky-950 hover:bg-sky-100 font-bold'
-    : themeMode === 'clean'
-    ? 'text-zinc-700 hover:text-violet-900 hover:bg-violet-50 font-bold'
-    : 'text-blue-300/80 hover:text-cyan-300 hover:bg-[#0A1633] font-mono font-bold';
+  const dividerBorder = isDark
+    ? 'border-[#14264F]'
+    : 'border-sky-200/80';
 
-  const ribbonBodyBg = isTrial
-    ? 'bg-[#f8fafc] border-b border-slate-200 text-slate-800'
-    : isNeon
-    ? 'bg-white border-b border-sky-200 text-slate-800'
-    : themeMode === 'clean'
-    ? 'bg-white border-b border-zinc-200 text-zinc-900'
-    : 'bg-[#081226] border-b border-[#14264F] text-cyan-100';
+  const groupLabelColor = isDark
+    ? 'text-cyan-400/80 font-mono font-semibold'
+    : 'text-[#0284c7] font-semibold';
 
-  const dividerBorder = isTrial
-    ? 'border-slate-200'
-    : isNeon
-    ? 'border-sky-200/80'
-    : themeMode === 'clean'
-    ? 'border-zinc-200'
-    : 'border-[#14264F]';
-
-  const groupLabelColor = isTrial
-    ? 'text-[#0284c7] font-bold'
-    : isNeon
-    ? 'text-sky-700 font-semibold'
-    : themeMode === 'clean'
-    ? 'text-violet-800/70 font-semibold'
-    : 'text-cyan-400/80 font-mono font-semibold';
-
-  // Trial Layout Category Tab Colors (Exact style and saturation from reference image)
-  const getTrialCategoryStyle = (key: RibbonCategoryKey, isActive: boolean) => {
-    switch (key) {
-      case 'HOME':
-        return isActive 
-          ? 'bg-[#00a8ff] text-white shadow-xs font-bold ring-2 ring-sky-300 ring-offset-1'
-          : 'bg-[#00a8ff]/90 hover:bg-[#00a8ff] text-white font-bold opacity-90 hover:opacity-100 shadow-2xs';
-      case 'DIRECTORY':
-        return isActive
-          ? 'bg-[#7c3aed] text-white shadow-xs font-bold ring-2 ring-purple-300 ring-offset-1'
-          : 'bg-[#7c3aed]/90 hover:bg-[#7c3aed] text-white font-bold opacity-90 hover:opacity-100 shadow-2xs';
-      case 'BOOKS OF ACCOUNTS':
-        return isActive
-          ? 'bg-[#059669] text-white shadow-xs font-bold ring-2 ring-emerald-300 ring-offset-1'
-          : 'bg-[#059669]/90 hover:bg-[#059669] text-white font-bold opacity-90 hover:opacity-100 shadow-2xs';
-      case 'OTHER TRANSACTIONS':
-        return isActive
-          ? 'bg-[#f97316] text-white shadow-xs font-bold ring-2 ring-orange-300 ring-offset-1'
-          : 'bg-[#f97316]/90 hover:bg-[#f97316] text-white font-bold opacity-90 hover:opacity-100 shadow-2xs';
-      case 'FINANCIAL STATEMENTS':
-        return isActive
-          ? 'bg-[#0284c7] text-white shadow-xs font-bold ring-2 ring-sky-300 ring-offset-1'
-          : 'bg-[#0284c7]/90 hover:bg-[#0284c7] text-white font-bold opacity-90 hover:opacity-100 shadow-2xs';
-      case 'BIR COMPUTATIONS':
-        return isActive
-          ? 'bg-[#db2777] text-white shadow-xs font-bold ring-2 ring-pink-300 ring-offset-1'
-          : 'bg-[#db2777]/90 hover:bg-[#db2777] text-white font-bold opacity-90 hover:opacity-100 shadow-2xs';
-      default:
-        return isActive ? 'bg-slate-800 text-white' : 'bg-slate-200 text-slate-800';
-    }
-  };
-
-  // Trial Layout Tool Tiles Styling (Solid colorful blocks from image)
-  const getTrialToolStyle = (tabKey: string, isActive: boolean) => {
-    const colorMap: Record<string, string> = {
-      // HOME MODULES (exact match to screenshot)
-      dashboard: 'bg-[#00a8ff] hover:bg-[#0096e6] text-white',
-      reports: 'bg-[#7c3aed] hover:bg-[#6d28d9] text-white',
-      account_titles: 'bg-[#10b981] hover:bg-[#059669] text-white',
-      tax_calendar: 'bg-[#f97316] hover:bg-[#ea580c] text-white',
-      activities: 'bg-[#d946ef] hover:bg-[#c026d3] text-white',
-      // Directory
-      companies: 'bg-[#7c3aed] hover:bg-[#6d28d9] text-white',
-      customers: 'bg-[#0284c7] hover:bg-[#0369a1] text-white',
-      providers: 'bg-[#059669] hover:bg-[#047857] text-white',
-      related_parties: 'bg-[#ea580c] hover:bg-[#c2410c] text-white',
-      employees: 'bg-[#db2777] hover:bg-[#be185d] text-white',
-      payroll: 'bg-[#0891b2] hover:bg-[#0e7490] text-white',
-      bir_2316: 'bg-[#6366f1] hover:bg-[#4f46e5] text-white',
-      contribution_tables: 'bg-[#65a30d] hover:bg-[#4d7c0f] text-white',
-      // Books of Accounts
-      sales: 'bg-[#0284c7] hover:bg-[#0369a1] text-white',
-      collections: 'bg-[#059669] hover:bg-[#047857] text-white',
-      expenses: 'bg-[#ea580c] hover:bg-[#c2410c] text-white',
-      payments: 'bg-[#e11d48] hover:bg-[#be123c] text-white',
-      general_journal: 'bg-[#7c3aed] hover:bg-[#6d28d9] text-white',
-      general_ledger: 'bg-[#0d9488] hover:bg-[#0f766e] text-white',
-      special_entries: 'bg-[#db2777] hover:bg-[#be185d] text-white',
-      bank_recon: 'bg-[#4f46e5] hover:bg-[#4338ca] text-white',
-      ppe: 'bg-[#d97706] hover:bg-[#b45309] text-white',
-      // Other Transactions
-      cwt_customers: 'bg-[#0284c7] hover:bg-[#0369a1] text-white',
-      cwt_providers: 'bg-[#059669] hover:bg-[#047857] text-white',
-      bir_slsp: 'bg-[#ea580c] hover:bg-[#c2410c] text-white',
-      bir_qap: 'bg-[#7c3aed] hover:bg-[#6d28d9] text-white',
-      bir_sawt: 'bg-[#db2777] hover:bg-[#be185d] text-white',
-      // Financial Statements
-      fs_position: 'bg-[#0284c7] hover:bg-[#0369a1] text-white',
-      fs_income: 'bg-[#059669] hover:bg-[#047857] text-white',
-      fs_equity: 'bg-[#7c3aed] hover:bg-[#6d28d9] text-white',
-      fs_cashflows: 'bg-[#ea580c] hover:bg-[#c2410c] text-white',
-      fs_notes: 'bg-[#0891b2] hover:bg-[#0e7490] text-white',
-      // BIR Computations
-      tax_reports: 'bg-[#e11d48] hover:bg-[#be123c] text-white',
-      bir_2550m: 'bg-[#db2777] hover:bg-[#be185d] text-white',
-      bir_2550q: 'bg-[#c026d3] hover:bg-[#a21caf] text-white',
-      bir_1702: 'bg-[#9333ea] hover:bg-[#7e22ce] text-white',
-      bir_1601c: 'bg-[#7c3aed] hover:bg-[#6d28d9] text-white',
-      bir_0605: 'bg-[#6366f1] hover:bg-[#4f46e5] text-white',
-    };
-
-    const base = colorMap[tabKey] || 'bg-[#00a8ff] text-white';
-    if (isActive) {
-      return `${base} shadow-md ring-2 ring-white ring-offset-2 ring-offset-sky-400 font-extrabold scale-[1.03]`;
-    }
-    return `${base} shadow-xs font-bold opacity-90 hover:opacity-100`;
-  };
-
-  // Helper for ribbon button styling
+  // Helper for ribbon button styling (matches exact image: active = light blue rounded square with sky border, inactive = clean transparent square)
   const getToolBtnStyle = (isActive: boolean = false) => {
     if (isActive) {
-      return isTrial
-        ? 'bg-[#00a8ff] text-white font-bold shadow-xs'
-        : isNeon
-        ? 'bg-sky-100 text-cyan-900 border border-sky-300 font-bold shadow-2xs'
-        : themeMode === 'clean'
-        ? 'bg-violet-100 text-violet-950 border border-violet-300 font-bold shadow-2xs'
-        : 'bg-[#0D1E45] text-cyan-300 border border-cyan-500/50 font-mono font-bold shadow-[0_0_8px_rgba(6,182,212,0.3)]';
+      return isDark
+        ? 'bg-[#0D1E45] text-cyan-300 border border-cyan-500/50 font-mono font-bold shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+        : 'bg-[#e0f2fe] text-[#0369a1] border border-sky-300/90 font-semibold shadow-2xs';
     }
-    return isTrial
-      ? 'hover:bg-slate-200/80 text-slate-700 hover:text-slate-950 border border-transparent font-medium'
-      : isNeon
-      ? 'hover:bg-sky-50 text-slate-700 hover:text-cyan-800 border border-transparent'
-      : themeMode === 'clean'
-      ? 'hover:bg-violet-50/60 text-zinc-700 hover:text-violet-950 border border-transparent'
-      : 'hover:bg-[#0D1B3B] text-blue-200/80 hover:text-cyan-300 border border-transparent font-mono';
+    return isDark
+      ? 'hover:bg-[#0D1B3B] text-blue-200/80 hover:text-cyan-300 border border-transparent font-mono'
+      : 'hover:bg-sky-50/80 text-slate-700 hover:text-[#0369a1] border border-transparent';
   };
 
   return (
     <div className="select-none transition-colors duration-200 font-sans">
       
-      {/* 1. TOP MENU TABS BAR (2OS OFFICE STYLE) */}
-      <div className={`flex items-center justify-between px-3 pt-1 border-b transition-colors duration-200 ${menuBarBg}`}>
+      {/* 1. TOP MENU TABS BAR (MATCHING REFERENCE IMAGE: Home, Directory, Books of Accounts, Other Transactions, Financial Statements, BIR Computations) */}
+      <div className={`flex items-center justify-between px-3 pt-1 transition-colors duration-200 ${menuBarBg}`}>
         
-        {/* LEFT SIDE: MAIN CATEGORY TABS (DASHBOARD, DIRECTORY, BOOKS, ETC.) */}
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5">
+        {/* LEFT SIDE: MAIN CATEGORY TABS */}
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
           {RIBBON_CATEGORIES.map((cat) => {
             const isCategoryActive = selectedCategory === cat.key;
             const containsCurrentTab = cat.subTabs.some(st => st.key === activeTab);
             const CatIcon = cat.icon || Layers;
 
-            const tabClass = isTrial
-              ? getTrialCategoryStyle(cat.key, isCategoryActive)
-              : isCategoryActive 
-              ? menuTabActive 
-              : menuTabInactive;
+            const tabClass = isCategoryActive ? menuTabActive : menuTabInactive;
 
             return (
               <button
                 key={cat.key}
                 onClick={() => {
                   setSelectedCategory(cat.key);
+                  setIsToolsCollapsed(false);
+                  if (setIsSettingsCategoryOpen) setIsSettingsCategoryOpen(false);
                   if (!cat.subTabs.some(st => st.key === activeTab)) {
                     onSelectTab(cat.subTabs[0].key);
                   }
                 }}
-                className={`px-3.5 py-1.5 text-xs tracking-tight transition-all duration-150 relative whitespace-nowrap cursor-pointer flex items-center gap-1.5 rounded-t-md ${tabClass}`}
+                className={`px-3.5 py-1.5 text-xs tracking-tight transition-all duration-150 relative whitespace-nowrap cursor-pointer flex items-center gap-1.5 rounded-t-lg ${tabClass}`}
               >
-                <CatIcon className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'opacity-80'}`} />
-                <span className="font-bold">{cat.label}</span>
-                {containsCurrentTab && !isCategoryActive && !isTrial && (
+                <CatIcon className={`w-3.5 h-3.5 ${isCategoryActive ? (isDark ? 'text-cyan-300' : 'text-slate-900') : 'opacity-70'}`} />
+                <span>{cat.label}</span>
+                {containsCurrentTab && !isCategoryActive && (
                   <span className={`w-1.5 h-1.5 rounded-full ${
-                    isNeon ? 'bg-cyan-500' : themeMode === 'clean' ? 'bg-violet-600' : 'bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.8)]'
+                    isDark ? 'bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.8)]' : 'bg-[#00a8ff]'
                   }`}></span>
                 )}
               </button>
@@ -464,146 +340,30 @@ export default function TwoOSRibbon({
           })}
         </div>
 
-        {/* RIGHT SIDE: ACTION BUTTONS (NEW ENTRY, EXPORT, IMPORT, WORKBOOK, PRINT, SETTINGS) */}
-        <div className="flex items-center gap-1.5 flex-shrink-0 pl-2">
-          {/* New Entry Button */}
+        {/* RIGHT SIDE: COLLAPSE / EXPAND TOOLS ARROW BUTTON (DIRECTLY BELOW PRINT BUTTON) */}
+        <div className="flex items-center flex-shrink-0 pb-1 pl-2">
           <button
-            onClick={() => {
-              const hasEntity = Boolean(activeCompany && activeCompany.company_name && activeCompany.company_name.trim().length > 0 && activeCompany.company_name !== 'Select Company...');
-              if (!hasEntity) {
-                triggerAlert('Strict requirement: Please set up an Entity Profile first before entering transactions! Saan mapupunta ang transaction kung wala naman itong designated entity?', 'error');
-                onSelectTab('companies');
-              } else {
-                setShowPromptModal(true);
-              }
-            }}
-            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
-              isTrial
-                ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-xs'
-                : isNeon 
-                ? 'bg-cyan-500 hover:bg-cyan-400 text-white shadow-xs' 
-                : themeMode === 'clean' 
-                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs' 
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+            type="button"
+            onClick={() => setIsToolsCollapsed(prev => !prev)}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${
+              isDark
+                ? 'text-cyan-300 hover:bg-white/10 border border-cyan-500/30 bg-[#0C1938]/80'
+                : 'text-[#0369a1] hover:bg-sky-200/70 border border-sky-200 bg-white/80 shadow-2xs'
             }`}
-            title="Add New Entry (Strictly requires Entity Profile first)"
+            title={isToolsCollapsed ? 'Expand Ribbon Tools' : 'Collapse Ribbon Tools'}
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+ New Entry</span>
-          </button>
-
-          {/* Export Button */}
-          <button
-            onClick={() => {
-              if (onOpenExportModal) {
-                onOpenExportModal();
-              } else {
-                onExportActiveSheet();
-                triggerAlert(`Exported ${activeTabInfo.label} to 2OS spreadsheet`, 'success');
-              }
-            }}
-            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
-              isTrial
-                ? 'bg-[#06b6d4] text-white hover:bg-[#0891b2] shadow-xs'
-                : isNeon 
-                ? 'text-sky-900 hover:bg-white/80 hover:text-cyan-800' 
-                : themeMode === 'clean' 
-                ? 'text-zinc-800 hover:bg-zinc-100' 
-                : 'text-cyan-300 hover:bg-white/10'
-            }`}
-            title="Export Data (Select dataset, CSV, Excel, or SQL)"
-          >
-            <FileSpreadsheet className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'text-cyan-600 dark:text-cyan-400'}`} />
-            <span>Export</span>
-          </button>
-
-          {/* Import Data */}
-          <button
-            onClick={() => {
-              if (onOpenImportModal) {
-                onOpenImportModal();
-              } else {
-                triggerAlert('Import CSV/JSON data dialog: Select file to load', 'info');
-              }
-            }}
-            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
-              isTrial
-                ? 'bg-[#e11d48] text-white hover:bg-[#be123c] shadow-xs'
-                : isNeon 
-                ? 'text-rose-900 hover:bg-rose-50 hover:text-rose-700' 
-                : themeMode === 'clean' 
-                ? 'text-zinc-800 hover:bg-zinc-100' 
-                : 'text-rose-300 hover:bg-white/10'
-            }`}
-            title="Import Data (CSV, Templates, Column Summary, DB Update)"
-          >
-            <Upload className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'text-rose-500'}`} />
-            <span>Import</span>
-          </button>
-
-          {/* Workbook */}
-          <button
-            onClick={() => {
-              onExportAllSheets();
-              triggerAlert('Exporting full multi-sheet 2OS accounting workbook...', 'success');
-            }}
-            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
-              isTrial
-                ? 'bg-[#a855f7] text-white hover:bg-[#9333ea] shadow-xs'
-                : isNeon 
-                ? 'text-blue-900 hover:bg-blue-50 hover:text-blue-700' 
-                : themeMode === 'clean' 
-                ? 'text-zinc-800 hover:bg-zinc-100' 
-                : 'text-blue-300 hover:bg-white/10'
-            }`}
-            title="Export Full Multi-Sheet 2OS Workbook (.xlsx)"
-          >
-            <Download className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'text-cyan-600 dark:text-cyan-400'}`} />
-            <span>Workbook</span>
-          </button>
-
-          {/* Print */}
-          <button
-            onClick={() => window.print()}
-            className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1 cursor-pointer transition ${
-              isTrial
-                ? 'bg-[#6366f1] text-white hover:bg-[#4f46e5] shadow-xs'
-                : isNeon 
-                ? 'text-violet-900 hover:bg-violet-50 hover:text-violet-700' 
-                : themeMode === 'clean' 
-                ? 'text-zinc-800 hover:bg-zinc-100' 
-                : 'text-violet-300 hover:bg-white/10'
-            }`}
-            title="Print Current View"
-          >
-            <Printer className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : 'text-violet-500'}`} />
-            <span>Print</span>
-          </button>
-
-          {/* Settings Tab */}
-          <button
-            onClick={() => {
-              setSelectedCategory('SETTINGS');
-            }}
-            className={`px-3 py-1 text-xs tracking-tight transition-all duration-150 rounded cursor-pointer flex items-center gap-1.5 ${
-              isTrial
-                ? selectedCategory === 'SETTINGS'
-                  ? 'bg-[#475569] text-white font-bold shadow-xs'
-                  : 'bg-[#64748b] text-white hover:bg-[#475569] font-bold shadow-xs'
-                : selectedCategory === 'SETTINGS'
-                ? settingsTabActive
-                : settingsTabInactive
-            }`}
-            title="Open System Settings, Themes, About & Architecture"
-          >
-            <SettingsIcon className={`w-3.5 h-3.5 ${isTrial ? 'text-white' : selectedCategory === 'SETTINGS' ? (isNeon ? 'text-cyan-600' : themeMode === 'clean' ? 'text-violet-600' : 'text-cyan-400') : 'text-zinc-400'}`} />
-            <span className="font-semibold">Settings</span>
+            {isToolsCollapsed ? (
+              <ChevronDown className="w-3.5 h-3.5 stroke-[2.5]" />
+            ) : (
+              <ChevronUp className="w-3.5 h-3.5 stroke-[2.5]" />
+            )}
           </button>
         </div>
       </div>
 
-      {/* 2. 2OS GROUPED RIBBON TOOLBAR */}
-      <div className={`w-full px-3 py-1.5 flex items-stretch overflow-hidden transition-colors duration-200 ${ribbonBodyBg}`}>
+      {/* 2. 2OS GROUPED RIBBON TOOLBAR (COLLAPSIBLE) */}
+      {!isToolsCollapsed && (
+      <div className={`w-full px-3 py-2 flex items-stretch overflow-hidden transition-colors duration-200 ${ribbonBodyBg}`}>
         
         {/* ========================================================= */}
         {/* VIEW A: IF SETTINGS TAB IS ACTIVE                         */}
@@ -614,14 +374,14 @@ export default function TwoOSRibbon({
             <div className={`flex flex-col justify-between pr-3 border-r ${dividerBorder} flex-shrink-0`}>
               <div className="flex items-center gap-1.5">
                 
-                {/* Trial layout Theme (Exact Image Style, Light Themed) */}
+                {/* Trial layout Theme */}
                 <button
                   onClick={() => {
                     setThemeMode('trial_layout');
-                    triggerAlert('Theme set to: Trial layout (Vibrant Colorful Blocks)', 'info');
+                    triggerAlert('Theme set to: Default Light Layout', 'info');
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[70px] text-center ${getToolBtnStyle(themeMode === 'trial_layout')}`}
-                  title="Trial layout: Light themed with vibrant category tiles and colored KPI blocks from reference image"
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[70px] text-center ${getToolBtnStyle(themeMode === 'trial_layout')}`}
+                  title="Default Light Layout"
                 >
                   <div className="flex items-center gap-0.5 mb-0.5">
                     <span className="w-2 h-2 rounded-full bg-[#00a8ff]"></span>
@@ -629,42 +389,42 @@ export default function TwoOSRibbon({
                     <span className="w-2 h-2 rounded-full bg-[#10b981]"></span>
                     <span className="w-2 h-2 rounded-full bg-[#f97316]"></span>
                   </div>
-                  <span className="text-[9px] leading-tight font-bold">Trial layout</span>
+                  <span className="text-[9px] leading-tight font-bold">Default Light</span>
                 </button>
 
-                {/* Neon Light Theme (Light Blue Neon Chromatic) */}
+                {/* Neon Light Theme */}
                 <button
                   onClick={() => {
                     setThemeMode('neon_light');
                     triggerAlert('Theme set to: Neon Light (Light Blue Neon Chromatic)', 'info');
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[70px] text-center ${getToolBtnStyle(themeMode === 'neon_light')}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[70px] text-center ${getToolBtnStyle(themeMode === 'neon_light')}`}
                   title="Neon Light: Light Blue Neon Chromatic"
                 >
                   <Sparkles className="w-4 h-4 text-cyan-500 mb-0.5" />
                   <span className="text-[9px] leading-tight font-bold">Neon Light</span>
                 </button>
 
-                {/* Clean White Theme (Black-White-Violet-Blue) */}
+                {/* Clean White Theme */}
                 <button
                   onClick={() => {
                     setThemeMode('clean');
                     triggerAlert('Theme set to: Clean White (Black-White-Violet-Blue)', 'info');
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[70px] text-center ${getToolBtnStyle(themeMode === 'clean')}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[70px] text-center ${getToolBtnStyle(themeMode === 'clean')}`}
                   title="Clean White: Black-White-Violet-Blue"
                 >
                   <Palette className="w-4 h-4 text-violet-600 mb-0.5" />
                   <span className="text-[9px] leading-tight font-bold">Clean White</span>
                 </button>
 
-                {/* Dark Theme (Hacking Dark Blue, Blue Neon, Chromatic Logo) */}
+                {/* Dark Theme */}
                 <button
                   onClick={() => {
                     setThemeMode('dark');
                     triggerAlert('Theme set to: Hacker Dark Blue (Blue Neon & Chromatic Logo)', 'info');
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[70px] text-center ${getToolBtnStyle(themeMode === 'dark')}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[70px] text-center ${getToolBtnStyle(themeMode === 'dark')}`}
                   title="Dark Mode: Hacker Dark Blue (Blue Neon & Chromatic Logo)"
                 >
                   <Moon className="w-4 h-4 text-cyan-400 mb-0.5" />
@@ -690,7 +450,7 @@ export default function TwoOSRibbon({
                     onSelectTab('system_specs');
                     triggerAlert('Navigated to About 2OS Accounting System Specs', 'info');
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[64px] text-center ${getToolBtnStyle(activeTab === 'system_specs')}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[64px] text-center ${getToolBtnStyle(activeTab === 'system_specs')}`}
                   title="View About 2OS Application & System Specs"
                 >
                   <Info className="w-4 h-4 text-blue-500 mb-0.5" />
@@ -703,7 +463,7 @@ export default function TwoOSRibbon({
                     onSelectTab('tax_calendar');
                     triggerAlert('Navigated to BIR Tax Calendar', 'info');
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[64px] text-center ${getToolBtnStyle(activeTab === 'tax_calendar')}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[64px] text-center ${getToolBtnStyle(activeTab === 'tax_calendar')}`}
                   title="View BIR Philippine Tax Calendar & Deadlines"
                 >
                   <Calendar className="w-4 h-4 text-amber-500 mb-0.5" />
@@ -716,7 +476,7 @@ export default function TwoOSRibbon({
                     onSelectTab('account_titles');
                     triggerAlert('Navigated to Master Chart of Accounts', 'info');
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[64px] text-center ${getToolBtnStyle(activeTab === 'account_titles')}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[64px] text-center ${getToolBtnStyle(activeTab === 'account_titles')}`}
                   title="View Master Account Titles & Balances"
                 >
                   <BookMarked className="w-4 h-4 text-teal-500 mb-0.5" />
@@ -739,12 +499,10 @@ export default function TwoOSRibbon({
                 {/* Audit Trail Log */}
                 <button
                   onClick={() => setShowAuditModal(true)}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[66px] text-center ${
-                    isNeon
-                      ? 'bg-cyan-50 hover:bg-cyan-100 text-cyan-900 border border-cyan-300 font-bold shadow-2xs'
-                      : themeMode === 'clean'
-                      ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border border-zinc-300 font-bold shadow-2xs'
-                      : 'bg-[#0D1E45] hover:bg-[#142A5C] text-cyan-300 border border-cyan-500/40 font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)]'
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[66px] text-center ${
+                    isDark
+                      ? 'bg-[#0D1E45] hover:bg-[#142A5C] text-cyan-300 border border-cyan-500/40 font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)]'
+                      : 'bg-cyan-50 hover:bg-cyan-100 text-cyan-900 border border-cyan-300 font-bold shadow-2xs'
                   }`}
                   title="Open Complete Audit Trail, Edit History & Visual Diff Preview"
                 >
@@ -804,7 +562,7 @@ export default function TwoOSRibbon({
                       triggerAlert('Exporting full multi-sheet 2OS accounting workbook (.xlsx)...', 'success');
                     }
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[60px] text-center ${getToolBtnStyle()}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[60px] text-center ${getToolBtnStyle()}`}
                   title="Export Data (Select dataset, CSV, Excel, or SQL)"
                 >
                   <Download className="w-4 h-4 text-cyan-600 dark:text-cyan-400 mb-0.5" />
@@ -814,7 +572,7 @@ export default function TwoOSRibbon({
                 {/* Print View */}
                 <button
                   onClick={() => window.print()}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[54px] text-center ${getToolBtnStyle()}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[54px] text-center ${getToolBtnStyle()}`}
                   title="Print Current Sheet"
                 >
                   <Printer className="w-4 h-4 text-violet-500 mb-0.5" />
@@ -830,7 +588,7 @@ export default function TwoOSRibbon({
                       triggerAlert('Import data dialog: Select CSV file to restore records', 'info');
                     }
                   }}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[54px] text-center ${getToolBtnStyle()}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[54px] text-center ${getToolBtnStyle()}`}
                   title="Import Data from CSV / Template"
                 >
                   <Upload className="w-4 h-4 text-blue-500 mb-0.5" />
@@ -840,7 +598,7 @@ export default function TwoOSRibbon({
                 {/* 2OS Architecture & Specs */}
                 <button
                   onClick={() => onSelectTab('system_specs')}
-                  className={`flex flex-col items-center justify-center p-1.5 rounded-lg transition cursor-pointer min-w-[62px] text-center ${getToolBtnStyle(activeTab === 'system_specs')}`}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[62px] text-center ${getToolBtnStyle(activeTab === 'system_specs')}`}
                   title="View 2OS Accounting System Architecture, Principles & Specs"
                 >
                   <Info className="w-4 h-4 text-indigo-500 mb-0.5" />
@@ -862,33 +620,29 @@ export default function TwoOSRibbon({
           /* VIEW B: NORMAL CATEGORY RIBBON TOOLBAR                    */
           /* ========================================================= */
           <div className="flex-1 min-w-0 overflow-x-auto pr-3 flex items-stretch scrollbar-thin">
-            {/* GROUP 1: CATEGORY MODULES & BOOKS (THE ONLY HORIZONTALLY SCROLLABLE TOOLS AREA) */}
+            {/* GROUP 1: CATEGORY MODULES & BOOKS */}
             <div className="flex flex-col justify-between flex-shrink-0 h-full py-0.5">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 {currentCategory.subTabs.map((subTab) => {
                   const isActive = activeTab === subTab.key;
                   const SubIcon = subTab.icon;
 
-                  const toolStyle = isTrial 
-                    ? getTrialToolStyle(subTab.key, isActive)
-                    : getToolBtnStyle(isActive);
+                  const toolStyle = getToolBtnStyle(isActive);
 
                   return (
                     <button
                       key={subTab.key}
                       onClick={() => onSelectTab(subTab.key)}
-                      className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-all cursor-pointer min-w-[72px] max-w-[130px] text-center h-[58px] ${toolStyle}`}
+                      className={`flex flex-col items-center justify-center px-3 py-2 rounded-xl transition-all cursor-pointer min-w-[68px] max-w-[130px] text-center h-[62px] ${toolStyle}`}
                       title={subTab.description}
                     >
-                      <SubIcon className={`w-4 h-4 mb-1 flex-shrink-0 ${
-                        isTrial
-                          ? 'text-white'
-                          : isActive 
-                          ? (isNeon ? 'text-cyan-700 font-bold' : themeMode === 'clean' ? 'text-violet-700 font-bold' : 'text-cyan-300 font-bold') 
-                          : 'text-zinc-600 dark:text-zinc-400'
+                      <SubIcon className={`w-4 h-4 mb-1.5 flex-shrink-0 ${
+                        isActive 
+                          ? (isDark ? 'text-cyan-300 font-bold' : 'text-[#0369a1] font-bold') 
+                          : (isDark ? 'text-zinc-400' : 'text-slate-600')
                       }`} />
-                      <span className={`text-[8.5px] sm:text-[9px] leading-[1.15] whitespace-pre-line text-center ${
-                        isTrial ? 'text-white font-bold' : 'font-medium'
+                      <span className={`text-[9.5px] leading-[1.15] whitespace-pre-line text-center ${
+                        isActive ? 'font-bold' : 'font-medium'
                       }`}>
                         {subTab.shortLabel || subTab.label}
                       </span>
@@ -897,7 +651,7 @@ export default function TwoOSRibbon({
                 })}
               </div>
 
-              <div className="text-left mt-1 pl-1">
+              <div className="text-left mt-1.5 pl-0.5">
                 <span className={`text-[8.5px] uppercase font-bold tracking-wider ${groupLabelColor}`}>
                   {currentCategory.label} Tools
                 </span>
@@ -907,6 +661,7 @@ export default function TwoOSRibbon({
         )}
 
       </div>
+      )}
 
       {/* POPUP MODAL 1: AUDIT TRAIL LOG & PREVIEW */}
       <AuditTrailModal

@@ -13,6 +13,8 @@ interface CustomersTabProps {
   collections: Collection[];
   setSales: React.Dispatch<React.SetStateAction<Sale[]>>;
   setCollections: React.Dispatch<React.SetStateAction<Collection[]>>;
+  setCashReceipts?: (updater: (prev: any[]) => any[]) => void;
+  onDeleteRecord?: (bookType: string, record: any) => void;
   globalSearch?: string;
 }
 
@@ -26,6 +28,8 @@ export default function CustomersTab({
   collections,
   setSales,
   setCollections,
+  setCashReceipts,
+  onDeleteRecord,
   globalSearch = ''
 }: CustomersTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
@@ -147,10 +151,33 @@ export default function CustomersTab({
   };
 
   const handleDeleteCustomer = (id: number, name: string) => {
-    if (window.confirm(`Are you sure you want to delete customer profile "${name}"?`)) {
-      setCustomers(prev => prev.filter(c => c.id !== id));
-      triggerAlert(`Customer profile "${name}" deleted.`, "info");
+    const targetCust = customers.find(c => c.id === id);
+    const custTin9 = ((targetCust?.customer_tin || targetCust?.client_TIN || '').replace(/\D/g, '')).slice(0, 9);
+
+    setCustomers(prev => prev.filter(c => c.id !== id));
+    if (drilldownCust && drilldownCust.id === id) {
+      setDrilldownCust(null);
     }
+
+    // If customer had transactions linked by TIN, mark them as Various Customers or keep books clean
+    if (custTin9 && custTin9.length === 9) {
+      setSales((prev: any[]) => prev.map((s: any) => {
+        const sTin9 = ((s.customer_tin || s.tin || '').replace(/\D/g, '')).slice(0, 9);
+        if (s.company_name === activeCompanyName && sTin9 === custTin9 && !s.is_various) {
+          return { ...s, is_various: true };
+        }
+        return s;
+      }));
+      setCollections((prev: any[]) => prev.map((col: any) => {
+        const cTin9 = ((col.customer_tin || col.tin || '').replace(/\D/g, '')).slice(0, 9);
+        if (col.company_name === activeCompanyName && cTin9 === custTin9 && !col.is_various) {
+          return { ...col, is_various: true };
+        }
+        return col;
+      }));
+    }
+
+    triggerAlert(`Customer profile "${name}" deleted from directory.`, "info");
   };
 
   // Mask TIN (Strictly 9 digits only as specified in guide)
@@ -274,46 +301,77 @@ export default function CustomersTab({
 
   const companyCustomers = customers.filter(c => activeCompanyName && c.company_name === activeCompanyName);
 
-  // Calculate statistics per customer profile
+  // Normalize TIN to first 9 digits so 9-digit Customer Directory TINs match 14-digit Books of Accounts TINs
+  const normalizeTin9 = (rawTin?: string) => (rawTin || '').replace(/\D/g, '').slice(0, 9);
+
+  // Calculate statistics per customer profile (strictly synced with Books of Accounts)
   const customerStats = useMemo(() => {
     const stats: Record<string, { totalSales: number; totalCollected: number; balance: number }> = {};
     const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    
-    const uniqueTins = new Set<string>();
-    companyCustomers.forEach(c => uniqueTins.add(c.customer_tin));
-    sales.filter(s => activeCompanyName && s.company_name === activeCompanyName).forEach(s => uniqueTins.add(s.customer_tin));
-    collections.filter(c => activeCompanyName && c.company_name === activeCompanyName).forEach(c => uniqueTins.add(c.customer_tin));
 
-    uniqueTins.forEach(tin => {
-      const customerSales = sales.filter(s => s.customer_tin === tin && activeCompanyName && s.company_name === activeCompanyName);
-      const totalSales = customerSales.reduce((sum, s) => sum + (Number(s.invoice_amount) || 0), 0);
+    const activeSales = sales.filter((s: any) => activeCompanyName && s.company_name === activeCompanyName && !s.is_cancelled);
+    const activeCollections = collections.filter((c: any) => activeCompanyName && c.company_name === activeCompanyName && !c.is_cancelled);
+
+    companyCustomers.forEach(c => {
+      const custTin9 = normalizeTin9(c.customer_tin || c.client_TIN);
+      const custNameNorm = (c.customer_name || c.registered_name || '').trim().toLowerCase();
+
+      const customerSales = activeSales.filter((s: any) => {
+        if (s.is_various === true) return false;
+        const sTin9 = normalizeTin9(s.customer_tin || s.tin);
+        const hasValidSaleTin = sTin9.length === 9 && !/^0+$/.test(sTin9);
+        if (hasValidSaleTin) {
+          return custTin9 && sTin9 === custTin9;
+        }
+        return false;
+      });
+
+      const totalSales = customerSales.reduce((sum: number, s: any) => {
+        return sum + (Number(s.total_amount_vat_inclusive || s.amount || s.invoice_amount) || 0);
+      }, 0);
 
       let totalCollected = 0;
-      customerSales.forEach(s => {
+      customerSales.forEach((s: any) => {
         const invNo = normalizeDocNo(s.invoice_number);
-        const collsForInvoice = collections.filter(c => normalizeDocNo(c.invoice_number) === invNo && activeCompanyName && c.company_name === activeCompanyName);
-        if (collsForInvoice.length > 0) {
-          totalCollected += collsForInvoice.reduce((sum, col) => sum + (Number(col.amount_collected) || 0) + (Number(col.amount_withheld_2307) || 0), 0) + (Number(s.down_payment) || 0);
+        const grossSaleAmt = Number(s.total_amount_vat_inclusive || s.amount || s.invoice_amount) || 0;
+        const w2307OnSale = Number(s.tax_withheld || s.withholding_tax_2307 || s.amount_withheld_2307) || 0;
+        const discOnSale = Number(s.discount) || 0;
+        const netTargetCash = Math.max(0, Math.round((grossSaleAmt - discOnSale - w2307OnSale) * 100) / 100);
+
+        const collsForInvoice = activeCollections.filter((col: any) => normalizeDocNo(col.invoice_number) === invNo);
+        const isPaidSale = s.status === 'Paid' || s.status === 'Cash' || s.sales_status === 'Paid' || s.type_of_transaction === 'CASH';
+
+        if (isPaidSale && collsForInvoice.length <= 1) {
+          // Fully paid sale: full invoice amount is settled (cash received + 2307 + discount)
+          totalCollected += grossSaleAmt;
+        } else if (collsForInvoice.length > 0) {
+          const cashCollectedSum = collsForInvoice.reduce((sum: number, col: any) => {
+            const cVal = col.amount_collected !== undefined ? Number(col.amount_collected) : 0;
+            return sum + cVal;
+          }, 0);
+          const isFullyCollectedNow = cashCollectedSum >= netTargetCash - 0.05 && netTargetCash > 0;
+          totalCollected += cashCollectedSum + discOnSale + (isFullyCollectedNow ? w2307OnSale : 0);
         } else {
-          if (s.sales_status === 'Paid') {
-            totalCollected += (Number(s.invoice_amount) || 0);
-          } else {
-            totalCollected += (Number(s.down_payment) || 0);
-          }
+          totalCollected += (Number(s.down_payment || s.amount_collected) || 0);
         }
       });
 
-      const orphanColls = collections.filter(c => {
-        if (c.customer_tin !== tin || !activeCompanyName || c.company_name !== activeCompanyName) return false;
-        const normInv = normalizeDocNo(c.invoice_number);
-        return !customerSales.some(s => normalizeDocNo(s.invoice_number) === normInv);
+      // Include any standalone collections not matching an invoice in Subsidiary Sales
+      const orphanColls = activeCollections.filter((col: any) => {
+        if (col.is_various === true) return false;
+        const cTin9 = normalizeTin9(col.customer_tin || col.tin);
+        const hasValidCollTin = cTin9.length === 9 && !/^0+$/.test(cTin9);
+        const matchesCustomer = hasValidCollTin && custTin9 && cTin9 === custTin9;
+        if (!matchesCustomer) return false;
+        const normInv = normalizeDocNo(col.invoice_number);
+        return !customerSales.some((s: any) => normalizeDocNo(s.invoice_number) === normInv);
       });
-      totalCollected += orphanColls.reduce((sum, col) => sum + (Number(col.amount_collected) || 0) + (Number(col.amount_withheld_2307) || 0), 0);
+      totalCollected += orphanColls.reduce((sum: number, col: any) => sum + (Number(col.amount_collected) || 0), 0);
 
-      stats[tin] = {
-        totalSales,
-        totalCollected,
-        balance: totalSales - totalCollected
+      stats[c.customer_tin] = {
+        totalSales: Math.round(totalSales * 100) / 100,
+        totalCollected: Math.round(totalCollected * 100) / 100,
+        balance: Math.round((totalSales - totalCollected) * 100) / 100
       };
     });
 
@@ -330,48 +388,97 @@ export default function CustomersTab({
     );
   }, [companyCustomers, localSearch, globalSearch]);
 
-  // Drilldown helper data
+  // Drilldown helper data (Customer Subsidiary Ledger synced with Books of Accounts)
   const drilldownData = useMemo(() => {
     if (!drilldownCust) return null;
     const tin = drilldownCust.customer_tin;
+    const custTin9 = normalizeTin9(tin || drilldownCust.client_TIN);
     const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
-    const customerSales = sales.filter(s => s.customer_tin === tin && activeCompanyName && s.company_name === activeCompanyName);
-    const customerCollections = collections.filter(c => c.customer_tin === tin && activeCompanyName && c.company_name === activeCompanyName);
+    const rawSales = sales.filter((s: any) => {
+      if (!activeCompanyName || s.company_name !== activeCompanyName || s.is_cancelled) return false;
+      if (s.is_various === true) return false;
+      const sTin9 = normalizeTin9(s.customer_tin || s.tin);
+      const hasValidSaleTin = sTin9.length === 9 && !/^0+$/.test(sTin9);
+      return hasValidSaleTin && custTin9 && sTin9 === custTin9;
+    });
+
+    const customerSales = rawSales.map((s: any) => {
+      const grossAmt = Number(s.total_amount_vat_inclusive || s.amount || s.invoice_amount) || 0;
+      const vatableAmt = Number(s.vatable_amount ?? s.vatable_sales) || 0;
+      const vatAmt = Number(s.vat_amount) || 0;
+      const w2307Amt = Number(s.tax_withheld ?? s.withholding_tax_2307 ?? s.amount_withheld_2307) || 0;
+      const statusStr = s.status === 'Paid' || s.status === 'Cash' || s.sales_status === 'Paid'
+        ? 'Paid'
+        : s.status === 'Partial' || s.sales_status === 'Partial'
+        ? 'Partial'
+        : 'Unpaid';
+      return {
+        ...s,
+        invoice_date: s.date || s.invoice_date || '',
+        invoice_amount: grossAmt,
+        vatable_sales: vatableAmt,
+        vat_amount: vatAmt,
+        withholding_tax_2307: w2307Amt,
+        sales_status: statusStr,
+        description: s.particulars || s.description || 'Sales Invoice'
+      };
+    });
+
+    const rawCollections = collections.filter((c: any) => {
+      if (!activeCompanyName || c.company_name !== activeCompanyName || c.is_cancelled) return false;
+      if (c.is_various === true) return false;
+      const cTin9 = normalizeTin9(c.customer_tin || c.tin);
+      const hasValidCollTin = cTin9.length === 9 && !/^0+$/.test(cTin9);
+      const matchesCust = hasValidCollTin && custTin9 && cTin9 === custTin9;
+      const matchesInvoice = customerSales.some((s: any) => normalizeDocNo(s.invoice_number) === normalizeDocNo(c.invoice_number));
+      return matchesCust || matchesInvoice;
+    });
 
     const totals = customerStats[tin] || { totalSales: 0, totalCollected: 0, balance: 0 };
 
-    const actuals = customerCollections.map(c => ({
-      id: c.id,
-      collection_date: c.collection_date,
-      entry_number: c.entry_number || `CR-${c.id}`,
-      invoice_number: c.invoice_number,
-      type: 'Collection' as const,
-      amount_collected: c.amount_collected,
-      amount_withheld_2307: c.amount_withheld_2307,
-      balance: c.balance ?? 0
-    }));
+    // Sort collections chronologically by ID so COLLECTION 1, COLLECTION 2 appear in exact order
+    const sortedRawCollections = [...rawCollections]
+      .filter((c: any) => (c.amount_collected !== undefined ? Number(c.amount_collected) : Number(c.amount || 0)) > 0)
+      .sort((a: any, b: any) => (Number(a.id) || 0) - (Number(b.id) || 0));
 
-    const downPayments = customerSales
-      .filter(s => s.down_payment > 0)
-      .map(s => ({
-        id: `down-${s.id}`,
-        collection_date: s.invoice_date,
-        entry_number: "DOWN-PAYMENT",
-        invoice_number: s.invoice_number,
-        type: 'Down Payment' as const,
-        amount_collected: s.down_payment,
-        amount_withheld_2307: 0,
-        balance: s.invoice_amount - s.down_payment
-      }));
+    // Track per-invoice running balance across individual collections
+    const invoiceRunningPaid: Record<string, number> = {};
+    const invoiceCollectionCount: Record<string, number> = {};
 
-    const combinedCollections = [...downPayments, ...actuals].sort((a, b) => {
-      return new Date(a.collection_date).getTime() - new Date(b.collection_date).getTime();
+    const combinedCollections = sortedRawCollections.map((c: any) => {
+      const invKey = normalizeDocNo(c.invoice_number);
+      invoiceCollectionCount[invKey] = (invoiceCollectionCount[invKey] || 0) + 1;
+      const collNum = invoiceCollectionCount[invKey];
+
+      const matchingSale = customerSales.find((s: any) => normalizeDocNo(s.invoice_number) === invKey);
+      const totalDueForInv = matchingSale
+        ? Number(matchingSale.total_amount_due || matchingSale.invoice_amount) || 0
+        : Number(c.total_amount_due || c.amount) || 0;
+      const w2307ForInv = matchingSale
+        ? Number(matchingSale.withholding_tax_2307) || 0
+        : Number(c.tax_withheld || c.amount_withheld_2307) || 0;
+      const netCashTarget = Math.max(0, Math.round((totalDueForInv - w2307ForInv) * 100) / 100);
+
+      const cashPaid = c.amount_collected !== undefined ? Number(c.amount_collected) : netCashTarget;
+      invoiceRunningPaid[invKey] = (invoiceRunningPaid[invKey] || 0) + cashPaid;
+      const remainingAfterThis = Math.max(0, Math.round((netCashTarget - invoiceRunningPaid[invKey]) * 100) / 100);
+
+      return {
+        id: c.id,
+        collection_date: c.date || c.collection_date || '',
+        entry_number: c.voucher_number || c.entry_number || `COLLECTION ${collNum}`,
+        invoice_number: c.invoice_number,
+        type: (collNum === 1 && remainingAfterThis > 0 ? 'Down Payment' : `COLLECTION ${collNum}`) as any,
+        amount_collected: cashPaid,
+        amount_withheld_2307: remainingAfterThis <= 0.01 ? w2307ForInv : 0,
+        balance: remainingAfterThis
+      };
     });
-    
+
     return {
       sales: customerSales,
-      collections: customerCollections,
+      collections: sortedRawCollections,
       combinedCollections,
       ...totals
     };
