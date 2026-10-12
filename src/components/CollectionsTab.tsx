@@ -175,8 +175,35 @@ export default function CollectionsTab({
     const amtCol = parseFloat(collAmt) || 0;
     const discountAmt = parseFloat(collDiscount) || 0;
     const w2307 = parseFloat(collWithheld) || 0;
-    const totalSettled = amtCol + discountAmt + w2307;
-    const remBalance = Math.max(0, invoiceAmt - totalSettled);
+
+    // Check prior collections for this invoice
+    const cleanInv = collInvNo.trim().toLowerCase();
+    const priorCollections = collections.filter(c => 
+      c.id !== editingId && 
+      !c.is_cancelled && 
+      c.invoice_number && 
+      c.invoice_number.trim().toLowerCase() === cleanInv
+    );
+    const prevPaid = priorCollections.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+    const prevDiscount = priorCollections.reduce((sum, c) => sum + (Number(c.discount || c.discounts) || 0), 0);
+    const prevWtax = priorCollections.reduce((sum, c) => sum + (Number(c.amount_withheld_2307) || 0), 0);
+    const prevTotalSettled = prevPaid + prevDiscount + prevWtax;
+
+    // Overpayment Precaution: block if attempt exceeds remaining balance due
+    if (invoiceAmt > 0) {
+      const remainingBalanceBeforeThis = Math.max(0, Math.round((invoiceAmt - prevTotalSettled) * 100) / 100);
+      const currentAttempt = Math.round((amtCol + discountAmt + w2307) * 100) / 100;
+      if (currentAttempt > remainingBalanceBeforeThis + 0.01) {
+        triggerAlert(
+          `Overpayment Precaution: Collection amount (₱${amtCol.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining balance due of ₱${remainingBalanceBeforeThis.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${collInvNo} (Prior collections: ₱${prevPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })} of total due ₱${invoiceAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}). Customer overpayment is blocked.`,
+          'error'
+        );
+        return;
+      }
+    }
+
+    const totalSettled = prevTotalSettled + amtCol + discountAmt + w2307;
+    const remBalance = Math.max(0, Math.round((invoiceAmt - totalSettled) * 100) / 100);
 
     const newCollItem: Collection = {
       id: editingId !== null ? editingId : Date.now(),

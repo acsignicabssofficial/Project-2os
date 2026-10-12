@@ -303,27 +303,63 @@ export default function CustomersTab({
 
   // Normalize TIN to first 9 digits so 9-digit Customer Directory TINs match 14-digit Books of Accounts TINs
   const normalizeTin9 = (rawTin?: string) => (rawTin || '').replace(/\D/g, '').slice(0, 9);
+  const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+  const matchDocNo = (numA?: string, numB?: string) => {
+    if (!numA || !numB) return false;
+    const cleanA = (numA || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanB = (numB || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanA === cleanB) return true;
+    const digA = cleanA.replace(/\D/g, '');
+    const digB = cleanB.replace(/\D/g, '');
+    if (digA && digB && (parseInt(digA, 10) === parseInt(digB, 10))) return true;
+    return false;
+  };
+
+  const matchesCompany = (txComp?: string, activeComp?: string) => {
+    if (!activeComp || activeComp === 'No Active Company') return true;
+    if (!txComp) return true;
+    return txComp.trim().toLowerCase() === activeComp.trim().toLowerCase();
+  };
+
+  // Robust customer matching helper: matches by TIN (9 digits or full) OR by registered/customer/trade name
+  const isMatchCustomer = (tx: any, c: Customer) => {
+    if (!tx || !c) return false;
+    const cTin9 = normalizeTin9(c.customer_tin || c.client_TIN);
+    const txTin9 = normalizeTin9(tx.customer_tin || tx.tin || tx.client_TIN);
+    const hasValidTxTin = txTin9.length === 9 && !/^0+$/.test(txTin9);
+    const hasValidCustTin = cTin9.length === 9 && !/^0+$/.test(cTin9);
+    if (hasValidTxTin && hasValidCustTin && txTin9 === cTin9) {
+      return true;
+    }
+    const cleanFullTxTin = (tx.customer_tin || tx.tin || '').replace(/[^0-9]/g, '');
+    const cleanFullCustTin = (c.customer_tin || c.client_TIN || '').replace(/[^0-9]/g, '');
+    if (cleanFullTxTin && cleanFullCustTin && (cleanFullTxTin === cleanFullCustTin || cleanFullTxTin.startsWith(cleanFullCustTin) || cleanFullCustTin.startsWith(cleanFullTxTin))) {
+      return true;
+    }
+    const txName = (tx.registered_name || tx.customer_name || tx.client_name || '').trim().toLowerCase();
+    const custName = (c.customer_name || c.registered_name || (c as any).name || '').trim().toLowerCase();
+    const tradeName = (c.trade_name || '').trim().toLowerCase();
+    if (txName && custName && (txName === custName || txName.includes(custName) || custName.includes(txName))) {
+      return true;
+    }
+    if (txName && tradeName && (txName === tradeName || txName.includes(tradeName) || tradeName.includes(txName))) {
+      return true;
+    }
+    return false;
+  };
 
   // Calculate statistics per customer profile (strictly synced with Books of Accounts)
   const customerStats = useMemo(() => {
     const stats: Record<string, { totalSales: number; totalCollected: number; balance: number }> = {};
-    const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
-    const activeSales = sales.filter((s: any) => activeCompanyName && s.company_name === activeCompanyName && !s.is_cancelled);
-    const activeCollections = collections.filter((c: any) => activeCompanyName && c.company_name === activeCompanyName && !c.is_cancelled);
+    const activeSales = sales.filter((s: any) => matchesCompany(s.company_name, activeCompanyName) && !s.is_cancelled);
+    const activeCollections = collections.filter((c: any) => matchesCompany(c.company_name, activeCompanyName) && !c.is_cancelled);
 
     companyCustomers.forEach(c => {
-      const custTin9 = normalizeTin9(c.customer_tin || c.client_TIN);
-      const custNameNorm = (c.customer_name || c.registered_name || '').trim().toLowerCase();
-
       const customerSales = activeSales.filter((s: any) => {
         if (s.is_various === true) return false;
-        const sTin9 = normalizeTin9(s.customer_tin || s.tin);
-        const hasValidSaleTin = sTin9.length === 9 && !/^0+$/.test(sTin9);
-        if (hasValidSaleTin) {
-          return custTin9 && sTin9 === custTin9;
-        }
-        return false;
+        return isMatchCustomer(s, c);
       });
 
       const totalSales = customerSales.reduce((sum: number, s: any) => {
@@ -332,47 +368,47 @@ export default function CustomersTab({
 
       let totalCollected = 0;
       customerSales.forEach((s: any) => {
-        const invNo = normalizeDocNo(s.invoice_number);
         const grossSaleAmt = Number(s.total_amount_vat_inclusive || s.amount || s.invoice_amount) || 0;
         const w2307OnSale = Number(s.tax_withheld || s.withholding_tax_2307 || s.amount_withheld_2307) || 0;
         const discOnSale = Number(s.discount) || 0;
         const netTargetCash = Math.max(0, Math.round((grossSaleAmt - discOnSale - w2307OnSale) * 100) / 100);
 
-        const collsForInvoice = activeCollections.filter((col: any) => normalizeDocNo(col.invoice_number) === invNo);
+        const collsForInvoice = activeCollections.filter((col: any) => matchDocNo(col.invoice_number, s.invoice_number));
         const isPaidSale = s.status === 'Paid' || s.status === 'Cash' || s.sales_status === 'Paid' || s.type_of_transaction === 'CASH';
 
-        if (isPaidSale && collsForInvoice.length <= 1) {
-          // Fully paid sale: full invoice amount is settled (cash received + 2307 + discount)
-          totalCollected += grossSaleAmt;
-        } else if (collsForInvoice.length > 0) {
+        if (collsForInvoice.length > 0) {
           const cashCollectedSum = collsForInvoice.reduce((sum: number, col: any) => {
-            const cVal = col.amount_collected !== undefined ? Number(col.amount_collected) : 0;
+            const cVal = col.amount_collected !== undefined ? Number(col.amount_collected) : (Number(col.amount) || 0);
             return sum + cVal;
           }, 0);
           const isFullyCollectedNow = cashCollectedSum >= netTargetCash - 0.05 && netTargetCash > 0;
           totalCollected += cashCollectedSum + discOnSale + (isFullyCollectedNow ? w2307OnSale : 0);
+        } else if (isPaidSale) {
+          totalCollected += grossSaleAmt;
         } else {
           totalCollected += (Number(s.down_payment || s.amount_collected) || 0);
         }
       });
 
-      // Include any standalone collections not matching an invoice in Subsidiary Sales
+      // Include any standalone collections for this customer not matched to an existing sale
       const orphanColls = activeCollections.filter((col: any) => {
         if (col.is_various === true) return false;
-        const cTin9 = normalizeTin9(col.customer_tin || col.tin);
-        const hasValidCollTin = cTin9.length === 9 && !/^0+$/.test(cTin9);
-        const matchesCustomer = hasValidCollTin && custTin9 && cTin9 === custTin9;
-        if (!matchesCustomer) return false;
+        if (!isMatchCustomer(col, c)) return false;
         const normInv = normalizeDocNo(col.invoice_number);
         return !customerSales.some((s: any) => normalizeDocNo(s.invoice_number) === normInv);
       });
       totalCollected += orphanColls.reduce((sum: number, col: any) => sum + (Number(col.amount_collected) || 0), 0);
 
-      stats[c.customer_tin] = {
+      const custStatObj = {
         totalSales: Math.round(totalSales * 100) / 100,
         totalCollected: Math.round(totalCollected * 100) / 100,
         balance: Math.round((totalSales - totalCollected) * 100) / 100
       };
+
+      if (c.customer_tin) stats[c.customer_tin] = custStatObj;
+      if (c.client_TIN) stats[c.client_TIN] = custStatObj;
+      if (c.id) stats[String(c.id)] = custStatObj;
+      if (c.customer_id) stats[c.customer_id] = custStatObj;
     });
 
     return stats;
@@ -391,16 +427,11 @@ export default function CustomersTab({
   // Drilldown helper data (Customer Subsidiary Ledger synced with Books of Accounts)
   const drilldownData = useMemo(() => {
     if (!drilldownCust) return null;
-    const tin = drilldownCust.customer_tin;
-    const custTin9 = normalizeTin9(tin || drilldownCust.client_TIN);
-    const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
     const rawSales = sales.filter((s: any) => {
-      if (!activeCompanyName || s.company_name !== activeCompanyName || s.is_cancelled) return false;
+      if (!matchesCompany(s.company_name, activeCompanyName) || s.is_cancelled) return false;
       if (s.is_various === true) return false;
-      const sTin9 = normalizeTin9(s.customer_tin || s.tin);
-      const hasValidSaleTin = sTin9.length === 9 && !/^0+$/.test(sTin9);
-      return hasValidSaleTin && custTin9 && sTin9 === custTin9;
+      return isMatchCustomer(s, drilldownCust);
     });
 
     const customerSales = rawSales.map((s: any) => {
@@ -426,16 +457,12 @@ export default function CustomersTab({
     });
 
     const rawCollections = collections.filter((c: any) => {
-      if (!activeCompanyName || c.company_name !== activeCompanyName || c.is_cancelled) return false;
+      if (!matchesCompany(c.company_name, activeCompanyName) || c.is_cancelled) return false;
       if (c.is_various === true) return false;
-      const cTin9 = normalizeTin9(c.customer_tin || c.tin);
-      const hasValidCollTin = cTin9.length === 9 && !/^0+$/.test(cTin9);
-      const matchesCust = hasValidCollTin && custTin9 && cTin9 === custTin9;
-      const matchesInvoice = customerSales.some((s: any) => normalizeDocNo(s.invoice_number) === normalizeDocNo(c.invoice_number));
+      const matchesCust = isMatchCustomer(c, drilldownCust);
+      const matchesInvoice = customerSales.some((s: any) => matchDocNo(s.invoice_number, c.invoice_number));
       return matchesCust || matchesInvoice;
     });
-
-    const totals = customerStats[tin] || { totalSales: 0, totalCollected: 0, balance: 0 };
 
     // Sort collections chronologically by ID so COLLECTION 1, COLLECTION 2 appear in exact order
     const sortedRawCollections = [...rawCollections]
@@ -476,13 +503,19 @@ export default function CustomersTab({
       };
     });
 
+    const totalSalesCalc = customerSales.reduce((sum, s) => sum + (Number(s.invoice_amount) || 0), 0);
+    const totalCollectedCalc = combinedCollections.reduce((sum, c) => sum + (Number(c.amount_collected) || 0) + (Number(c.amount_withheld_2307) || 0), 0);
+    const balanceCalc = Math.round((totalSalesCalc - totalCollectedCalc) * 100) / 100;
+
     return {
       sales: customerSales,
       collections: sortedRawCollections,
       combinedCollections,
-      ...totals
+      totalSales: totalSalesCalc,
+      totalCollected: totalCollectedCalc,
+      balance: balanceCalc
     };
-  }, [drilldownCust, sales, collections, activeCompany, customerStats, activeCompanyName]);
+  }, [drilldownCust, sales, collections, activeCompanyName]);
 
   if (!activeCompany) {
     return (
@@ -912,18 +945,13 @@ export default function CustomersTab({
                 ) : (
                   <div className="space-y-4">
                     {drilldownData.sales.map((sale) => {
-                      const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-                      const invNo = normalizeDocNo(sale.invoice_number);
-                      
-                      // Find collections linked to this sale
-                      const actualsForSale = collections.filter(c => normalizeDocNo(c.invoice_number) === invNo && activeCompanyName && c.company_name === activeCompanyName);
-                      
-                      const hasDP = Number(sale.down_payment) > 0;
-                      const totalCollectedOnInvoice = actualsForSale.reduce((a, b) => a + (Number(b.amount_collected) || 0) + (Number(b.amount_withheld_2307) || 0), 0) + (hasDP ? Number(sale.down_payment) : 0);
-                      const invoiceBalance = (Number(sale.invoice_amount) || 0) - totalCollectedOnInvoice;
+                      // Find collections linked to this sale from synced drilldownData
+                      const actualsForSale = drilldownData.combinedCollections.filter(c => matchDocNo(c.invoice_number, sale.invoice_number));
+                      const totalCollectedOnInvoice = actualsForSale.reduce((a, b) => a + (Number(b.amount_collected) || 0) + (Number(b.amount_withheld_2307) || 0), 0);
+                      const invoiceBalance = Math.round(((Number(sale.invoice_amount) || 0) - totalCollectedOnInvoice) * 100) / 100;
 
                       const isExpanded = expandedInvoices[sale.invoice_number] !== false; // default open
-                      const actualStatus = invoiceBalance <= 0.01 ? 'Paid' : (totalCollectedOnInvoice > 0 ? 'Partial' : 'Unpaid');
+                      const actualStatus = invoiceBalance <= 0.01 && totalCollectedOnInvoice > 0 ? 'Paid' : (totalCollectedOnInvoice > 0 ? 'Partial' : 'Unpaid');
 
                       return (
                         <div key={sale.id} className={`border ${theme.borderCard} rounded-xl overflow-hidden shadow-sm transition-colors ${theme.bgCard}`}>
@@ -981,7 +1009,7 @@ export default function CustomersTab({
                             <div className={`p-4 border-t ${theme.borderCard} bg-zinc-500/5 space-y-2`}>
                               <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-400 px-1">
                                 <span>-- Payment Collections Breakdown</span>
-                                <span className="font-mono text-[10px]">{actualsForSale.length + (hasDP ? 1 : 0)} collection record(s)</span>
+                                <span className="font-mono text-[10px]">{actualsForSale.length} collection record(s)</span>
                               </div>
 
                               <div className="overflow-x-auto border border-zinc-800/20 rounded-lg">
@@ -989,42 +1017,27 @@ export default function CustomersTab({
                                   <thead>
                                     <tr className="bg-zinc-500/10 text-zinc-400 uppercase font-bold text-[10px]">
                                       <th className="p-2 font-mono">Date</th>
-                                      <th className="p-2 font-mono">Ref / CR #</th>
-                                      <th className="p-2">Collection Type</th>
+                                      <th className="p-2 font-mono">Ref / Voucher #</th>
+                                      <th className="p-2">Collection Payment</th>
                                       <th className="p-2 text-right">Cash Collected</th>
                                       <th className="p-2 text-right">BIR 2307</th>
                                       <th className="p-2 text-right">Running Balance</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-zinc-800/10">
-                                    {hasDP && (
-                                      <tr className="bg-amber-500/5">
-                                        <td className="p-2 font-mono">{sale.invoice_date}</td>
-                                        <td className="p-2 font-mono font-semibold text-amber-500">DOWN-PAYMENT</td>
-                                        <td className="p-2 font-sans font-medium text-amber-400">Advance Down Payment</td>
-                                        <td className="p-2 text-right font-mono text-emerald-400 font-bold">₱{(Number(sale.down_payment) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                        <td className="p-2 text-right font-mono text-zinc-500">₱0.00</td>
-                                        <td className="p-2 text-right font-mono text-amber-500 font-bold">₱{(Number(sale.invoice_amount) - Number(sale.down_payment)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                      </tr>
-                                    )}
-
-                                    {actualsForSale.length === 0 && !hasDP ? (
+                                    {actualsForSale.length === 0 ? (
                                       <tr>
                                         <td colSpan={6} className="p-3 text-center text-zinc-500 text-[10px]">
-                                          No collections logged for this invoice yet.
+                                          No collections logged for this invoice yet (Receivable On Account).
                                         </td>
                                       </tr>
                                     ) : (
-                                      actualsForSale.map((col, idx) => {
-                                        const collsUpToCurrent = actualsForSale.slice(0, idx + 1);
-                                        const collectedUpToCurrent = collsUpToCurrent.reduce((sum, c) => sum + (Number(c.amount_collected) || 0) + (Number(c.amount_withheld_2307) || 0), 0) + (hasDP ? Number(sale.down_payment) : 0);
-                                        const runningBal = (Number(sale.invoice_amount) || 0) - collectedUpToCurrent;
-
+                                      actualsForSale.map((col) => {
                                         return (
                                           <tr key={col.id} className={theme.isLight ? 'hover:bg-slate-50' : 'hover:bg-zinc-800/20'}>
                                             <td className="p-2 font-mono">{col.collection_date}</td>
                                             <td className={`p-2 font-mono font-bold ${theme.textTitle}`}>{col.entry_number || `CR-${col.id}`}</td>
-                                            <td className="p-2 text-zinc-400">Collection Receipt</td>
+                                            <td className="p-2 text-zinc-400 font-semibold">{col.type}</td>
                                             <td className="p-2 text-right font-mono text-emerald-400 font-bold">
                                               ₱{(Number(col.amount_collected) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                             </td>
@@ -1032,9 +1045,9 @@ export default function CustomersTab({
                                               ₱{(Number(col.amount_withheld_2307) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                             </td>
                                             <td className={`p-2 text-right font-mono font-bold ${
-                                              runningBal > 0 ? 'text-amber-500' : runningBal < 0 ? 'text-cyan-400' : 'text-zinc-500'
+                                              col.balance > 0 ? 'text-amber-500' : col.balance < 0 ? 'text-cyan-400' : 'text-zinc-500'
                                             }`}>
-                                              {runningBal < 0 ? `₱${Math.abs(runningBal).toLocaleString(undefined, { minimumFractionDigits: 2 })} (Credit)` : `₱${runningBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                                              {col.balance < 0 ? `₱${Math.abs(col.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })} (Credit)` : `₱${col.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                                             </td>
                                           </tr>
                                         );

@@ -51,6 +51,7 @@ interface UniformBookTabProps {
   onSyncLegacy?: (updated: UniformBookRecord[]) => void;
   accountTitles?: AccountTitle[];
   onDeleteRecord?: (bookType: UniformBookType, record: UniformBookRecord) => void;
+  subsidiarySales?: UniformBookRecord[];
 }
 
 export default function UniformBookTab({
@@ -66,7 +67,8 @@ export default function UniformBookTab({
   globalSearch = '',
   onSyncLegacy,
   accountTitles = [],
-  onDeleteRecord
+  onDeleteRecord,
+  subsidiarySales = []
 }: UniformBookTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const effectiveCompanyNames = useMemo(() => {
@@ -352,6 +354,29 @@ export default function UniformBookTab({
     if (!formInvoiceNo.trim()) {
       triggerAlert('Invoice # is required.', 'error');
       return;
+    }
+
+    if (bookType === 'collections') {
+      const amtCol = liveFormulas.amount || parseFloat(formUnitPrice) || 0;
+      const totDue = liveFormulas.total_amount_due || parseFloat(formUnitPrice) || 0;
+      
+      // Calculate prior collections for this invoice
+      const cleanInv = formInvoiceNo.trim().toLowerCase();
+      const priorCols = records.filter(r => 
+        r.id !== editingRecordId && 
+        !r.is_cancelled && 
+        r.invoice_number && 
+        r.invoice_number.trim().toLowerCase() === cleanInv
+      );
+      const prevPaid = priorCols.reduce((sum, r) => sum + (Number(r.amount_collected) || (Number(r.amount) || 0)), 0);
+
+      if (totDue > 0) {
+        const remainingDue = Math.max(0, Math.round((totDue - prevPaid) * 100) / 100);
+        if (amtCol > remainingDue + 0.01) {
+          triggerAlert(`Overpayment Precaution: Collection amount (₱${amtCol.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining balance due of ₱${remainingDue.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${formInvoiceNo.trim()} (Prior collections: ₱${prevPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })} of total due ₱${totDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}). Customer overpayment is blocked.`, 'error');
+          return;
+        }
+      }
     }
 
     const newRecord: UniformBookRecord = {
@@ -959,6 +984,24 @@ export default function UniformBookTab({
               ) : bookType === 'collections' && collectionsDisplayMode === 'grouped' ? (
                 (() => {
                   const groupsMap = new Map<string, UniformBookRecord[]>();
+
+                  // Seed with all sales on account / partial sales from subsidiarySales matching active scope
+                  if (subsidiarySales && subsidiarySales.length > 0) {
+                    subsidiarySales.forEach(s => {
+                      if (!matchesActiveScope(s.company_name) || s.is_cancelled) return;
+                      const isSaleOnAccountOrPartial = (s.type_of_transaction || '').toUpperCase().includes('ACCOUNT') ||
+                        (s.status || '').toLowerCase().includes('account') ||
+                        (s.status || '').toLowerCase().includes('partial') ||
+                        (Number(s.down_payment) > 0);
+                      if (isSaleOnAccountOrPartial && s.invoice_number) {
+                        const key = s.invoice_number.trim().toUpperCase();
+                        if (!groupsMap.has(key)) {
+                          groupsMap.set(key, []);
+                        }
+                      }
+                    });
+                  }
+
                   filteredRecords.forEach(r => {
                     const key = (r.invoice_number || `NO-INV-${r.id}`).trim().toUpperCase();
                     if (!groupsMap.has(key)) groupsMap.set(key, []);
@@ -969,7 +1012,8 @@ export default function UniformBookTab({
                   return groups.map(([invKey, groupRows], groupIdx) => {
                     // Sort collections chronologically (oldest first: COLLECTION 1, COLLECTION 2, etc.)
                     const sortedPayments = [...groupRows].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
-                    const primary = sortedPayments[sortedPayments.length - 1] || sortedPayments[0];
+                    const matchingSale = subsidiarySales?.find(s => s.invoice_number && s.invoice_number.trim().toUpperCase() === invKey);
+                    const primary = matchingSale || sortedPayments[sortedPayments.length - 1] || sortedPayments[0] || {} as UniformBookRecord;
                     const isExpanded = expandedInvoices[invKey] !== undefined ? expandedInvoices[invKey] : true;
 
                     const totalDueVal = Number(primary.total_amount_due || primary.amount) || 0;
@@ -1205,7 +1249,7 @@ export default function UniformBookTab({
                                 <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
                                 <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
                                 <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
-                                  ₱{(payment.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  ₱{(payAmt > 0 ? payAmt : (payment.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
                                 <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
                                   ₱{(payment.vatable_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -1216,7 +1260,7 @@ export default function UniformBookTab({
                                 <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
                                 <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
                                 <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
-                                  ₱{(payment.total_amount_vat_inclusive || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  ₱{(payAmt > 0 ? payAmt : (payment.total_amount_vat_inclusive || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
                                 <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
                                   ₱{(payment.total_amount_net_of_vat || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
