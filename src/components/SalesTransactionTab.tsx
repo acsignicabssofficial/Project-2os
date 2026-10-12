@@ -857,87 +857,64 @@ export default function SalesTransactionTab({
   }
 
   return (
-    <div className="flex flex-col gap-5 w-full">
-      {/* HEADER BANNER */}
-      <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-5 shadow-xs`}>
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-              <Receipt className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className={`text-xl font-bold tracking-tight ${theme.textTitle}`}>
-                  Sales Transaction Hub
-                </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
-                  Primary Encoding Tool
-                </span>
-              </div>
-              <p className={`text-xs mt-0.5 ${theme.textMuted}`}>
-                Record new sales transactions. Routes automatically to <strong>Subsidiary Sales</strong>, <strong>Cash Receipts</strong> (Cash only), and <strong>Collections</strong>.
-              </p>
-            </div>
-          </div>
-
-          {/* QUICK LINKS TO BOOKS */}
-          <div className="flex items-center gap-2 text-xs">
-            {onNavigateToTab && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onNavigateToTab('sales')}
-                  className="px-3 py-1.5 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <FileText className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>View Subsidiary Sales</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onNavigateToTab('collections')}
-                  className="px-3 py-1.5 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Coins className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>View Cash Receipts</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
+    <div className="flex flex-col gap-4 w-full">
+      {/* FUNCTIONAL CONTROLS: SUB-TABS & JUMP LINKS (REDUNDANT TITLE BANNER REMOVED PER REQ 4) */}
+      <div className={`${theme.bgCard} border ${theme.borderCard} rounded-xl px-4 py-2.5 shadow-2xs flex flex-wrap items-center justify-between gap-3`}>
         {/* SUB-TABS: Record Sale vs Collect Payment */}
-        <div className="flex gap-2 mt-5 pt-3 border-t border-zinc-800">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setHubTab('new_sale')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               hubTab === 'new_sale'
-                ? 'bg-cyan-600 text-white shadow-sm'
+                ? 'bg-cyan-600 text-white shadow-xs'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
             }`}
           >
-            <PlusCircle className="w-4 h-4" />
+            <PlusCircle className="w-3.5 h-3.5" />
             <span>1. Record New Sale Transaction</span>
           </button>
 
           <button
             type="button"
             onClick={() => setHubTab('collect_open')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               hubTab === 'collect_open'
-                ? 'bg-emerald-600 text-white shadow-sm'
+                ? 'bg-emerald-600 text-white shadow-xs'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
             }`}
           >
-            <Coins className="w-4 h-4" />
+            <Coins className="w-3.5 h-3.5" />
             <span>2. Collect Payment for Existing Invoices</span>
             {openInvoices.length > 0 && (
-              <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                 {openInvoices.length} open
               </span>
             )}
           </button>
         </div>
+
+        {/* QUICK LINKS TO BOOKS */}
+        {onNavigateToTab && (
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => onNavigateToTab('sales')}
+              className="px-2.5 py-1 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1.5 cursor-pointer text-[11px]"
+            >
+              <FileText className="w-3 h-3 text-cyan-400" />
+              <span>Subsidiary Sales</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateToTab('collections')}
+              className="px-2.5 py-1 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1.5 cursor-pointer text-[11px]"
+            >
+              <Coins className="w-3 h-3 text-emerald-400" />
+              <span>Cash Receipts</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ========================================================================= */}
@@ -946,432 +923,526 @@ export default function SalesTransactionTab({
       {hubTab === 'new_sale' && (
         <form onSubmit={handleSubmitSale} className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* LEFT 2 COLUMNS: FORM INPUTS */}
-          <div className={`lg:col-span-2 ${theme.bgCard} border ${theme.borderCard} rounded-2xl p-6 shadow-xs flex flex-col gap-5`}>
-            {/* STEP 1: TRANSACTION MODE SELECTOR */}
-            <div>
-              <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${theme.textTitle} flex items-center gap-2`}>
-                <CreditCard className="w-4 h-4 text-cyan-400" />
-                <span>Select Transaction Mode (Cash, On Account, or Partial)</span>
-              </label>
-              <div className="grid grid-cols-3 gap-3">
+          <div className={`lg:col-span-2 ${theme.bgCard} border ${theme.borderCard} rounded-2xl p-6 shadow-xs flex flex-col gap-6`}>
+            
+            {/* 1. TRANSACTION SETTLEMENT MODE */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <label className={`text-xs font-bold uppercase tracking-wider ${theme.textTitle} flex items-center gap-2`}>
+                  <CreditCard className="w-4 h-4 text-cyan-400" />
+                  <span>1. Settlement Mode</span>
+                </label>
+                <span className="text-[10px] font-semibold text-zinc-400">
+                  Select payment terms for automatic book routing
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <button
                   type="button"
                   onClick={() => setSaleMode('ON CASH')}
-                  className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex flex-col gap-1 ${
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
                     saleMode === 'ON CASH'
-                      ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300 shadow-xs'
+                      ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40 shadow-xs'
                       : 'border-zinc-800 hover:bg-zinc-800/40 text-zinc-400'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs uppercase">ON CASH</span>
-                    {saleMode === 'ON CASH' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                    <span className="font-extrabold text-xs uppercase tracking-wide">ON CASH</span>
+                    {saleMode === 'ON CASH' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <span className="w-2 h-2 rounded-full bg-zinc-700" />
+                    )}
                   </div>
                   <span className="text-[10px] text-zinc-400 leading-tight">
-                    Full payment received. Recorded to <strong>Subsidiary Sales & Cash Receipts</strong>.
+                    Full payment &rarr; <strong className="text-zinc-300">Sales & Cash Receipts</strong>
                   </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSaleMode('ON ACCOUNT')}
-                  className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex flex-col gap-1 ${
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
                     saleMode === 'ON ACCOUNT'
-                      ? 'bg-amber-500/15 border-amber-500 text-amber-300 shadow-xs'
+                      ? 'bg-amber-500/15 border-amber-500 text-amber-300 ring-1 ring-amber-500/40 shadow-xs'
                       : 'border-zinc-800 hover:bg-zinc-800/40 text-zinc-400'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs uppercase">ON ACCOUNT</span>
-                    {saleMode === 'ON ACCOUNT' && <CheckCircle2 className="w-4 h-4 text-amber-400" />}
+                    <span className="font-extrabold text-xs uppercase tracking-wide">ON ACCOUNT</span>
+                    {saleMode === 'ON ACCOUNT' ? (
+                      <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                    ) : (
+                      <span className="w-2 h-2 rounded-full bg-zinc-700" />
+                    )}
                   </div>
                   <span className="text-[10px] text-zinc-400 leading-tight">
-                    Credit / Receivable. Recorded to <strong>Subsidiary Sales ONLY</strong>.
+                    Credit / Receivable &rarr; <strong className="text-zinc-300">Subsidiary Sales Only</strong>
                   </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSaleMode('ON PARTIAL')}
-                  className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex flex-col gap-1 ${
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
                     saleMode === 'ON PARTIAL'
-                      ? 'bg-cyan-500/15 border-cyan-500 text-cyan-300 shadow-xs'
+                      ? 'bg-cyan-500/15 border-cyan-500 text-cyan-300 ring-1 ring-cyan-500/40 shadow-xs'
                       : 'border-zinc-800 hover:bg-zinc-800/40 text-zinc-400'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs uppercase">ON PARTIAL</span>
-                    {saleMode === 'ON PARTIAL' && <CheckCircle2 className="w-4 h-4 text-cyan-400" />}
+                    <span className="font-extrabold text-xs uppercase tracking-wide">ON PARTIAL</span>
+                    {saleMode === 'ON PARTIAL' ? (
+                      <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                    ) : (
+                      <span className="w-2 h-2 rounded-full bg-zinc-700" />
+                    )}
                   </div>
                   <span className="text-[10px] text-zinc-400 leading-tight">
-                    Down payment. Recorded to <strong>Subsidiary Sales & Collections</strong>.
+                    Down payment &rarr; <strong className="text-zinc-300">Sales & Collections</strong>
                   </span>
                 </button>
               </div>
-            </div>
 
-            {/* PARTIAL DOWN PAYMENT DETAILS IF SELECTED (Requirement 6: ask only for down payment) */}
-            {saleMode === 'ON PARTIAL' && (
-              <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 flex flex-col gap-3 animate-fadeIn">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-cyan-300 mb-1">
-                      Down Payment Amount (₱) * <span className="text-zinc-400 font-normal">(Max: ₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      max={liveFormulas.total_amount_due}
-                      placeholder="Enter down payment..."
-                      value={downPaymentAmount}
-                      onChange={(e) => setDownPaymentAmount(e.target.value)}
-                      className={`w-full px-3 py-2 text-xs rounded-lg border bg-zinc-900 text-white font-mono font-bold ${
-                        (parseFloat(downPaymentAmount) || 0) > liveFormulas.total_amount_due + 0.01
-                          ? 'border-rose-500 ring-1 ring-rose-500'
-                          : 'border-cyan-500/40'
-                      }`}
-                      required
-                    />
-                    {(parseFloat(downPaymentAmount) || 0) > liveFormulas.total_amount_due + 0.01 ? (
-                      <div className="mt-1.5 p-2 rounded-lg border border-rose-500/40 bg-rose-500/15 text-rose-300 text-[11px] flex items-center gap-1.5 font-semibold">
-                        <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                        <span>
-                          Overpayment Precaution: Down payment (₱{(parseFloat(downPaymentAmount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds Total Amount Due (₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })}) by ₱{((parseFloat(downPaymentAmount) || 0) - liveFormulas.total_amount_due).toLocaleString(undefined, { minimumFractionDigits: 2 })}!
-                        </span>
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-zinc-400 mt-1">
-                        Recorded as <strong>COLLECTION 1</strong> in Collections Book. Remaining balance: ₱{Math.max(0, liveFormulas.total_amount_due - (parseFloat(downPaymentAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}.
-                      </p>
-                    )}
+              {/* PARTIAL DOWN PAYMENT SUB-PANEL */}
+              {saleMode === 'ON PARTIAL' && (
+                <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/25 flex flex-col gap-3 animate-fadeIn">
+                  <div className="flex items-center justify-between text-xs border-b border-cyan-900/50 pb-2">
+                    <span className="font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5 text-[11px]">
+                      <Coins className="w-3.5 h-3.5 text-cyan-400" />
+                      Partial Payment Details
+                    </span>
+                    <span className="text-[11px] text-zinc-400 font-mono">
+                      Max: ₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-cyan-300 mb-1">
-                      1st Collection Ref / OR #
-                    </label>
-                    <input
-                      type="text"
-                      value={collectionRef}
-                      onChange={(e) => setCollectionRef(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold"
-                    />
-                    <p className="text-[10px] text-zinc-400 mt-1">
-                      Official Receipt / Collection Voucher reference
-                    </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="block text-[11px] font-bold text-cyan-200 mb-1">
+                        Down Payment Amount (₱) *
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        max={liveFormulas.total_amount_due}
+                        placeholder="0.00"
+                        value={downPaymentAmount}
+                        onChange={(e) => setDownPaymentAmount(e.target.value)}
+                        className={`w-full px-3.5 py-2 text-xs rounded-xl border bg-zinc-900 text-white font-mono font-bold ${
+                          (parseFloat(downPaymentAmount) || 0) > liveFormulas.total_amount_due + 0.01
+                            ? 'border-rose-500 ring-1 ring-rose-500'
+                            : 'border-cyan-500/40 focus:ring-1 focus:ring-cyan-400'
+                        }`}
+                        required
+                      />
+                      {(parseFloat(downPaymentAmount) || 0) > liveFormulas.total_amount_due + 0.01 ? (
+                        <div className="mt-1.5 p-2 rounded-lg border border-rose-500/40 bg-rose-500/15 text-rose-300 text-[11px] flex items-center gap-1.5 font-semibold">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                          <span>Overpayment: Down payment exceeds Total Amount Due!</span>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-zinc-400 mt-1">
+                          Remaining A/R: <span className="font-mono text-cyan-300 font-semibold">₱{Math.max(0, liveFormulas.total_amount_due - (parseFloat(downPaymentAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-cyan-200 mb-1">
+                        1st Collection Reference / OR #
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="OR # / Voucher ref"
+                        value={collectionRef}
+                        onChange={(e) => setCollectionRef(e.target.value)}
+                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold focus:ring-1 focus:ring-cyan-400"
+                      />
+                      <p className="text-[10px] text-zinc-400 mt-1">
+                        Recorded as 1st Collection entry in Collections Book
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* CUSTOMER & INVOICE DETAILS */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-              <div className="md:col-span-5">
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Customer / Client Registered Name *</label>
-                <div className="flex gap-2">
+            {/* 2. INVOICE & DOCUMENT DETAILS */}
+            <div className="flex flex-col gap-3 pt-3 border-t border-zinc-800/60">
+              <label className={`text-xs font-bold uppercase tracking-wider ${theme.textTitle} flex items-center gap-2`}>
+                <FileText className="w-4 h-4 text-cyan-400" />
+                <span>2. Document & Invoice Schedule</span>
+              </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>
+                    Transaction Date *
+                  </label>
                   <input
-                    type="text"
-                    placeholder="Enter customer trade name..."
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    className={`flex-1 px-3 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
                     required
                   />
-                  {customers.length > 0 && (
-                    <select
-                      onChange={(e) => {
-                        if (e.target.value) handleSelectCustomer(e.target.value);
-                      }}
-                      className={`px-2 text-xs rounded-xl border bg-transparent text-zinc-400 ${theme.borderInput}`}
-                    >
-                      <option value="">Quick Pick</option>
-                      {customers.map((c, idx) => (
-                        <option key={idx} value={c.registered_name || c.customer_name || c.trade_name} className="bg-zinc-900 text-white">
-                          {c.registered_name || c.customer_name || c.trade_name}
-                        </option>
-                      ))}
-                    </select>
+                </div>
+
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>
+                    Document Type
+                  </label>
+                  <select
+                    value={invoiceType}
+                    onChange={(e) => setInvoiceType(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-medium cursor-pointer ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                  >
+                    <option value="INVOICE" className="bg-zinc-900 text-white">INVOICE</option>
+                    <option value="SALES INVOICE" className="bg-zinc-900 text-white">SALES INVOICE</option>
+                    <option value="OFFICIAL RECEIPT" className="bg-zinc-900 text-white">OFFICIAL RECEIPT</option>
+                    <option value="BILLING STATEMENT" className="bg-zinc-900 text-white">BILLING STATEMENT</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold mb-1 text-cyan-400">
+                    Invoice Number (Unique) *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. SI-2026-0001"
+                    value={invoiceNo}
+                    onChange={(e) => setInvoiceNo(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold text-cyan-400 ${theme.borderInput} focus:ring-1 focus:ring-cyan-500`}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>
+                    Voucher # / Ref (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. V-2026-001"
+                    value={voucherNo}
+                    onChange={(e) => setVoucherNo(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 3. CUSTOMER & TAXPAYER IDENTITY */}
+            <div className="flex flex-col gap-3 pt-3 border-t border-zinc-800/60">
+              <label className={`text-xs font-bold uppercase tracking-wider ${theme.textTitle} flex items-center gap-2`}>
+                <Building2 className="w-4 h-4 text-cyan-400" />
+                <span>3. Customer & Taxpayer Identity</span>
+              </label>
+
+              {/* Row A: Customer Name & Quick Pick */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                <div className="md:col-span-8">
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>
+                    Customer Registered Name *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter customer registered trade name..."
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className={`w-full px-3.5 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                    required
+                  />
+                </div>
+
+                <div className="md:col-span-4">
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>
+                    Quick Pick from Directory
+                  </label>
+                  <select
+                    onChange={(e) => {
+                      if (e.target.value) handleSelectCustomer(e.target.value);
+                    }}
+                    value=""
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent text-zinc-400 ${theme.borderInput} cursor-pointer focus:ring-1 focus:ring-cyan-500`}
+                  >
+                    <option value="" className="bg-zinc-900 text-zinc-400">
+                      {customers.length > 0 ? `Select Customer (${customers.length})` : 'No Customers Saved'}
+                    </option>
+                    {customers.map((c, idx) => (
+                      <option key={idx} value={c.registered_name || c.customer_name || c.trade_name} className="bg-zinc-900 text-white">
+                        {c.registered_name || c.customer_name || c.trade_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Row B: TIN & Branch Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-3">
+                <div className="md:col-span-6">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className={`text-[11px] font-bold ${theme.textMuted}`}>Customer TIN (9 Digits)</label>
+                    <span className="text-[10px] text-zinc-500">Format: 000-000-000</span>
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={11}
+                    placeholder="000-000-000"
+                    value={tin}
+                    onChange={(e) => handleTinChange(e.target.value)}
+                    className={`w-full px-3.5 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                  />
+                  {!tin.replace(/\D/g, '') ? (
+                    <p className="text-[10px] text-amber-400/90 mt-1">Leave blank if Various / Non-TIN walk-in</p>
+                  ) : (
+                    <p className="text-[10px] text-zinc-500 mt-1">9-digit primary TIN</p>
                   )}
                 </div>
 
-                {/* Live Notification if Customer Name already exists in Directory */}
-                {nameMatchedCustomer && !tin.replace(/\D/g, '') && (
-                  <div className="mt-2 p-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-[11px] flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
-                    <div>
-                      <strong>Existing Customer Name Detected:</strong> Customer <strong>&quot;{nameMatchedCustomer.customer_name || nameMatchedCustomer.registered_name}&quot;</strong> is already registered in Directory &gt; Customers. Upon saving without a TIN, you will be asked to confirm if this is the same customer (by verifying their TIN) or a different Various Customer.
-                    </div>
+                <div className="md:col-span-6">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className={`text-[11px] font-bold ${theme.textMuted}`}>Branch Code (5 Digits)</label>
+                    <span className="text-[10px] text-zinc-500">Default: 00000</span>
                   </div>
-                )}
+                  <input
+                    type="text"
+                    maxLength={5}
+                    placeholder="00000"
+                    value={branchCode}
+                    onChange={(e) => handleBranchCodeChange(e.target.value)}
+                    className={`w-full px-3.5 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                  />
+                  <p className="text-[10px] text-zinc-500 mt-1">00000 indicates Head Office</p>
+                </div>
+              </div>
 
-                {/* Requirement 2: Visual warning if entered customer name conflicts with registered TIN */}
-                {hasTinNameConflict && tinMatchCustomer && (
-                  <div className="mt-2 p-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                    <span>
-                      <strong>TIN Conflict:</strong> TIN {tin} is already registered to <strong>{tinMatchCustomer.registered_name || tinMatchCustomer.customer_name}</strong>. Entering a different customer name is blocked.
-                    </span>
+              {/* Customer Match / Conflict Alerts */}
+              {nameMatchedCustomer && !tin.replace(/\D/g, '') && (
+                <div className="p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-[11px] flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                  <div>
+                    <strong>Existing Customer Profile Detected:</strong> &quot;{nameMatchedCustomer.customer_name || nameMatchedCustomer.registered_name}&quot; exists in Customer Masterlist.
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              <div className="md:col-span-4">
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Customer TIN (9 Digits)</label>
-                <input
-                  type="text"
-                  maxLength={11}
-                  placeholder="000-000-000"
-                  value={tin}
-                  onChange={(e) => handleTinChange(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
-                />
-                {!tin.replace(/\D/g, '') ? (
-                  <p className="text-[10px] text-amber-400/90 mt-1">
-                    ℹ 9-digit TIN (aligned with Directory &gt; Customers). Leave blank if Various Customer.
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-zinc-500 mt-1">9-digit primary TIN (e.g. 222-222-222)</p>
-                )}
-              </div>
-
-              <div className="md:col-span-3">
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Branch Code (5 Digits)</label>
-                <input
-                  type="text"
-                  maxLength={5}
-                  placeholder="00000"
-                  value={branchCode}
-                  onChange={(e) => handleBranchCodeChange(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
-                />
-                <p className="text-[10px] text-zinc-500 mt-1">5-digit branch (default: 00000)</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Business Tax Type</label>
-                <select
-                  value={businessTaxType}
-                  onChange={(e) => {
-                    const val = e.target.value as any;
-                    setBusinessTaxType(val);
-                    setVatStatus(val === 'vatable' ? 'VAT' : 'NONVAT');
-                    if (val !== 'zero-rated') setZeroRated('0');
-                    if (val !== 'vat-exempt') setVatExempt('0');
-                  }}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
-                >
-                  <option value="vatable" className="bg-zinc-900 text-white">Vatable (12% VAT)</option>
-                  <option value="non-vatable" className="bg-zinc-900 text-white">Non-Vatable / Percentage Tax</option>
-                  <option value="vat-exempt" className="bg-zinc-900 text-white">VAT-Exempt</option>
-                  <option value="zero-rated" className="bg-zinc-900 text-white">Zero-Rated (0%)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Document Type</label>
-                <select
-                  value={invoiceType}
-                  onChange={(e) => setInvoiceType(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-medium cursor-pointer ${theme.borderInput} ${theme.textMain}`}
-                >
-                  <option value="INVOICE" className="bg-zinc-900 text-white">INVOICE</option>
-                  <option value="SALES INVOICE" className="bg-zinc-900 text-white">SALES INVOICE</option>
-                  <option value="OFFICIAL RECEIPT" className="bg-zinc-900 text-white">OFFICIAL RECEIPT</option>
-                  <option value="BILLING STATEMENT" className="bg-zinc-900 text-white">BILLING STATEMENT</option>
-                </select>
-              </div>
-
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Transaction Date</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className={`block text-xs font-bold mb-1 text-cyan-400`}>Invoice Number (Unique #) *</label>
-                <input
-                  type="text"
-                  value={invoiceNo}
-                  onChange={(e) => setInvoiceNo(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold text-cyan-400 ${theme.borderInput}`}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Voucher # / Reference (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. V-2026-001"
-                  value={voucherNo}
-                  onChange={(e) => setVoucherNo(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Registered Address</label>
-              <input
-                type="text"
-                placeholder="e.g. Unit 502 Ayala Tower, Makati City"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
-              />
-            </div>
-
-            <div>
-              <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Particulars / Description of Sale (Optional)</label>
-              <input
-                type="text"
-                placeholder="Optional description of sale..."
-                value={particulars}
-                onChange={(e) => setParticulars(e.target.value)}
-                className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
-              />
-            </div>
-
-            {/* FINANCIAL LINE AMOUNTS */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Quantity</label>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="any"
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Unit Price (₱) *</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  placeholder="Enter amount..."
-                  value={unitPrice}
-                  onChange={(e) => setUnitPrice(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Discount (₱)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={discount}
-                  onChange={(e) => setDiscount(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono text-rose-400 ${theme.borderInput}`}
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className={`text-xs font-bold ${theme.textMuted}`}>CWT 2307 Withheld (₱)</label>
-                  <span className="text-[10px] text-amber-400 font-mono">
-                    {liveFormulas.vatable_sales > 0 && `(10% = ₱${(Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2)})`}
+              {hasTinNameConflict && tinMatchCustomer && (
+                <div className="p-3 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>
+                    <strong>TIN Conflict:</strong> TIN {tin} belongs to <strong>{tinMatchCustomer.registered_name || tinMatchCustomer.customer_name}</strong>.
                   </span>
                 </div>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={taxWithheld}
-                  onChange={(e) => setTaxWithheld(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono text-amber-400 ${theme.borderInput}`}
-                />
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setTaxWithheld('0')}
-                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono transition"
-                  >
-                    0%
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.01 * 100) / 100).toFixed(2))}
-                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
-                  >
-                    1% Goods
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.02 * 100) / 100).toFixed(2))}
-                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
-                  >
-                    2% Services
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.05 * 100) / 100).toFixed(2))}
-                    className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition"
-                  >
-                    5% Rent
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2))}
-                    className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono font-bold border border-amber-500/40 transition"
-                  >
-                    10% (₱{(Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2)})
-                  </button>
+              )}
+
+              {/* Row C: Address & Particulars */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>Registered Address</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Unit 502 Ayala Tower, Makati City"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    className={`w-full px-3.5 py-2 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>Particulars / Description of Sale</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Professional consulting, merchandise goods..."
+                    value={particulars}
+                    onChange={(e) => setParticulars(e.target.value)}
+                    className={`w-full px-3.5 py-2 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                  />
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Zero-Rated Amount (₱)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={zeroRated}
-                  onChange={(e) => setZeroRated(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
-                />
+            {/* 4. PRICING, QUANTITY & TAX COMPUTATION */}
+            <div className="flex flex-col gap-3 pt-3 border-t border-zinc-800/60">
+              <label className={`text-xs font-bold uppercase tracking-wider ${theme.textTitle} flex items-center gap-2`}>
+                <DollarSign className="w-4 h-4 text-cyan-400" />
+                <span>4. Pricing, Line Amounts & Tax Classification</span>
+              </label>
+
+              {/* Row A: Tax Classification, Qty, Price, Discount */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>Tax Classification</label>
+                  <select
+                    value={businessTaxType}
+                    onChange={(e) => {
+                      const val = e.target.value as any;
+                      setBusinessTaxType(val);
+                      setVatStatus(val === 'vatable' ? 'VAT' : 'NONVAT');
+                      if (val !== 'zero-rated') setZeroRated('0');
+                      if (val !== 'vat-exempt') setVatExempt('0');
+                    }}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                  >
+                    <option value="vatable" className="bg-zinc-900 text-white">Vatable (12% Output VAT)</option>
+                    <option value="non-vatable" className="bg-zinc-900 text-white">Non-Vatable / Percentage</option>
+                    <option value="vat-exempt" className="bg-zinc-900 text-white">VAT-Exempt</option>
+                    <option value="zero-rated" className="bg-zinc-900 text-white">Zero-Rated (0% VAT)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>Quantity</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="any"
+                    value={qty}
+                    onChange={(e) => setQty(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>Unit Price (₱) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.00"
+                    value={unitPrice}
+                    onChange={(e) => setUnitPrice(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>Trade Discount (₱)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.00"
+                    value={discount}
+                    onChange={(e) => setDiscount(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono text-rose-400 ${theme.borderInput} focus:ring-1 focus:ring-rose-500`}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>VAT-Exempt Amount (₱)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={vatExempt}
-                  onChange={(e) => setVatExempt(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
-                />
+              {/* Row B: CWT 2307, Zero-Rated & VAT-Exempt in a balanced 3-column layout */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                {/* Column 1: CWT 2307 */}
+                <div className="flex flex-col gap-1.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/40">
+                  <div className="flex items-center justify-between">
+                    <label className={`text-[11px] font-bold ${theme.textMuted}`}>CWT 2307 Withheld (₱)</label>
+                    <span className="text-[10px] text-amber-400 font-mono">
+                      {liveFormulas.vatable_sales > 0 && `(10% = ₱${(Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2)})`}
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.00"
+                    value={taxWithheld}
+                    onChange={(e) => setTaxWithheld(e.target.value)}
+                    className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-zinc-900 font-mono text-amber-400 ${theme.borderInput}`}
+                  />
+                  <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                    <span className="text-[9px] text-zinc-500 font-bold uppercase">Rate:</span>
+                    <button
+                      type="button"
+                      onClick={() => setTaxWithheld('0')}
+                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono transition cursor-pointer"
+                    >
+                      0%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.01 * 100) / 100).toFixed(2))}
+                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition cursor-pointer"
+                    >
+                      1%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.02 * 100) / 100).toFixed(2))}
+                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition cursor-pointer"
+                    >
+                      2%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.05 * 100) / 100).toFixed(2))}
+                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition cursor-pointer"
+                    >
+                      5%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2))}
+                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono font-bold border border-amber-500/40 transition cursor-pointer"
+                    >
+                      10%
+                    </button>
+                  </div>
+                </div>
+
+                {/* Column 2: Zero-Rated */}
+                <div className="flex flex-col gap-1.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/40">
+                  <div className="flex items-center justify-between">
+                    <label className={`text-[11px] font-bold ${theme.textMuted}`}>Zero-Rated Amount (₱)</label>
+                    <span className="text-[10px] text-zinc-500 font-mono">0% VAT</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.00"
+                    value={zeroRated}
+                    onChange={(e) => setZeroRated(e.target.value)}
+                    className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-zinc-900 font-mono ${theme.borderInput} ${theme.textMain}`}
+                  />
+                  <p className="text-[10px] text-zinc-500 mt-1">Export sales / PEZA registered</p>
+                </div>
+
+                {/* Column 3: VAT-Exempt */}
+                <div className="flex flex-col gap-1.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/40">
+                  <div className="flex items-center justify-between">
+                    <label className={`text-[11px] font-bold ${theme.textMuted}`}>VAT-Exempt Amount (₱)</label>
+                    <span className="text-[10px] text-zinc-500 font-mono">Sec. 109</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.00"
+                    value={vatExempt}
+                    onChange={(e) => setVatExempt(e.target.value)}
+                    className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-zinc-900 font-mono ${theme.borderInput} ${theme.textMain}`}
+                  />
+                  <p className="text-[10px] text-zinc-500 mt-1">Exempt goods & services under law</p>
+                </div>
               </div>
             </div>
+
           </div>
 
           {/* RIGHT 1 COLUMN: LIVE COMPUTATION & SUBMISSION */}
           <div className="flex flex-col gap-5">
-            <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-6 shadow-xs flex flex-col gap-4`}>
+            <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-6 shadow-xs flex flex-col gap-4 sticky top-4`}>
               <h3 className={`text-xs font-bold uppercase tracking-wider ${theme.textTitle} flex items-center gap-2 border-b border-zinc-800 pb-3`}>
                 <BadgePercent className="w-4 h-4 text-emerald-400" />
                 <span>Live Tax & Financial Math</span>
               </h3>
 
-              <div className="flex flex-col gap-2.5 text-xs font-mono">
+              <div className="flex flex-col gap-2 text-xs font-mono">
                 <div className="flex justify-between py-1 border-b border-zinc-800/40">
                   <span className={theme.textMuted}>Gross Amount:</span>
                   <span className="font-bold text-zinc-200">₱{liveFormulas.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -1401,13 +1472,13 @@ export default function SalesTransactionTab({
                   </div>
                 )}
 
-                <div className="flex justify-between py-2 border-t-2 border-zinc-700 text-sm font-bold">
-                  <span className="text-zinc-200">TOTAL AMOUNT DUE:</span>
-                  <span className="text-amber-400 font-extrabold">₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <div className="flex justify-between items-baseline py-2.5 px-3 rounded-xl bg-zinc-900/80 border border-zinc-800 mt-1">
+                  <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wide">TOTAL DUE:</span>
+                  <span className="text-base font-black text-amber-400">₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
 
                 {saleMode === 'ON PARTIAL' && (
-                  <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 flex flex-col gap-1 text-[11px]">
+                  <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 flex flex-col gap-1 text-[11px] mt-1">
                     <div className="flex justify-between text-cyan-300">
                       <span>Initial Down Payment:</span>
                       <span className="font-bold">₱{(parseFloat(downPaymentAmount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -1421,33 +1492,33 @@ export default function SalesTransactionTab({
               </div>
 
               {/* ROUTING SUMMARY BOX */}
-              <div className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 flex flex-col gap-1.5 text-[11px]">
-                <span className="font-bold text-zinc-300 uppercase tracking-wider text-[10px]">Destination Books:</span>
+              <div className="p-3 rounded-xl border border-zinc-800 bg-zinc-900/60 flex flex-col gap-1.5 text-[11px]">
+                <span className="font-bold text-zinc-400 uppercase tracking-wider text-[10px]">Destination Books:</span>
                 <div className="flex items-center gap-1.5 text-emerald-400">
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Subsidiary Sales Register (Status: {saleMode === 'ON CASH' ? 'Paid' : saleMode === 'ON PARTIAL' ? 'Partial' : 'On Account'})</span>
+                  <Check className="w-3.5 h-3.5 shrink-0" />
+                  <span>Subsidiary Sales ({saleMode === 'ON CASH' ? 'Paid' : saleMode === 'ON PARTIAL' ? 'Partial' : 'On Account'})</span>
                 </div>
                 {saleMode === 'ON CASH' && (
                   <>
                     <div className="flex items-center gap-1.5 text-cyan-400">
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Cash Receipts Book (Fully Paid Entry &rarr; Dr Cash, Dr CWT 2307, Cr A/R)</span>
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                      <span>Cash Receipts Book (Cash Sales Settlement)</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-purple-400">
-                      <Check className="w-3.5 h-3.5" />
+                      <Check className="w-3.5 h-3.5 shrink-0" />
                       <span>Collections Book (Payment Audit Tracking)</span>
                     </div>
                   </>
                 )}
                 {saleMode === 'ON PARTIAL' && (
                   <div className="flex items-center gap-1.5 text-purple-400">
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Collections Book (1st Down Payment Disbursed & Pending Receivable Tracked)</span>
+                    <Check className="w-3.5 h-3.5 shrink-0" />
+                    <span>Collections Book (1st Down Payment Logged)</span>
                   </div>
                 )}
               </div>
 
-              <div className="flex gap-2 mt-2">
+              <div className="flex gap-2 mt-1">
                 <button
                   type="button"
                   onClick={() => {
@@ -1484,15 +1555,15 @@ export default function SalesTransactionTab({
                     };
                     setPreviewRecord(tempRecord);
                   }}
-                  className="w-1/2 py-3.5 rounded-xl border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 font-bold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
+                  className="w-1/2 py-3 rounded-xl border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 font-bold text-xs uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <Eye className="w-4 h-4" />
-                  <span>Preview ({businessTaxType === 'vatable' ? 'Vatable' : 'Non-Vatable'})</span>
+                  <span>Preview</span>
                 </button>
 
                 <button
                   type="submit"
-                  className="w-1/2 py-3.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-cyan-600/20 transition cursor-pointer flex items-center justify-center gap-2"
+                  className="w-1/2 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-cyan-600/20 transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Save & Route</span>

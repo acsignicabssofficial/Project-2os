@@ -968,33 +968,16 @@ export default function BusinessTaxHubTab({
         className="hidden" 
       />
 
-      {/* 1. HEADER BANNER */}
-      <div className={`p-5 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-200`}>
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-cyan-500/10 text-cyan-500 border border-cyan-500/20 flex items-center justify-center flex-shrink-0">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className={`text-xl font-bold font-display ${theme.textTitle}`}>
-                Business Tax Hub
-              </h1>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider ${
-                isVatRegistered 
-                  ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' 
-                  : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
-              }`}>
-                {isVatRegistered ? 'VAT Registered' : 'Non-VAT (Percentage Tax)'}
-              </span>
-            </div>
-            <p className={`text-xs ${theme.textMuted} mt-0.5 flex items-center gap-2 flex-wrap`}>
-              <span className="font-semibold text-cyan-500">{companyName}</span>
-              <span>•</span>
-              <span className="font-mono text-zinc-400">TIN: {rawTin}</span>
-              <span>•</span>
-              <span className="text-zinc-400">{lineOfBusiness}</span>
-            </p>
-          </div>
+      {/* 1. SUBTABS CONTROLS BAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-2.5 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-wrap items-center justify-between gap-3 transition-colors duration-200`}>
+        <div className="flex items-center gap-2">
+          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase tracking-wider ${
+            isVatRegistered 
+              ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' 
+              : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+          }`}>
+            {isVatRegistered ? 'VAT Registered' : 'Non-VAT (Percentage Tax)'}
+          </span>
         </div>
 
         {/* Action Controls & Navigation Subtabs */}

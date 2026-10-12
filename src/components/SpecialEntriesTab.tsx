@@ -462,26 +462,14 @@ export default function SpecialEntriesTab({
   }, [specialEntries, searchTerm, globalSearch]);
 
   return (
-    <div className="space-y-6">
-      {/* HEADER BANNER */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                PFRS & BIR Books of Accounts
-              </span>
-              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${isPeriodLocked ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'}`}>
-                {isPeriodLocked ? `🔒 ${selectedFiscalYear} PERIOD LOCKED` : `🟢 ${selectedFiscalYear} PERIOD OPEN`}
-              </span>
-            </div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2 mt-1`}>
-              <Layers className="w-6 h-6 text-purple-400" />
-              Special Journal & Period-End Action Center
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              On-demand manual triggers for Adjusting (AJE), Closing (CJE), Post-Closing Lock, and Reversing (RJE) entries with PAS 8 compliance.
-            </p>
+    <div className="space-y-4">
+      {/* PERIOD & ACTION TOOLBAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg ${isPeriodLocked ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'}`}>
+              {isPeriodLocked ? `🔒 ${selectedFiscalYear} PERIOD LOCKED` : `🟢 ${selectedFiscalYear} PERIOD OPEN`}
+            </span>
           </div>
 
           {/* Quick Year Selector & Record Button */}

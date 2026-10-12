@@ -285,20 +285,11 @@ export default function BankReconTab({
       {/* HEADER BANNER */}
       <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                PFRS / PAS 7 & PAS 1 Cash Audit
-              </span>
-              <span className="text-xs text-zinc-400">Monthly Proof of Cash</span>
-            </div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2 mt-1`}>
-              <Landmark className="w-6 h-6 text-cyan-400" />
-              Bank Reconciliation & Proof of Cash
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Match Cash in Bank general ledger balances with official bank statements, identify Deposits in Transit (DIT), Outstanding Checks (OC), and post AJE book adjustments.
-            </p>
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+              PFRS / PAS 7 & PAS 1 Cash Audit
+            </span>
+            <span className="text-xs text-zinc-400">Monthly Proof of Cash</span>
           </div>
 
           {/* Action Trigger Buttons */}

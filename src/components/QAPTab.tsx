@@ -76,18 +76,12 @@ export default function QAPTab({
   };
 
   return (
-    <div className="space-y-6">
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <FileSpreadsheet className="w-6 h-6 text-cyan-400" />
-              Quarterly Alphalist of Payees (QAP) - BIR Form 1601-EQ
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Mandatory BIR attachment listing all vendors and payees subjected to Expanded Withholding Tax (EWT) for submission via BIR eSubmission tool.
-            </p>
-          </div>
+    <div className="space-y-4">
+      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            Quarterly Alphalist eSubmission
+          </span>
 
           <div className="flex items-center gap-3">
             <select

@@ -25,17 +25,7 @@ export default function CWTForProvidersTab({ certificates = [], expenses = [], p
   }));
 
   return (
-    <div className="space-y-6">
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-          <FileCheck className="w-6 h-6 text-cyan-400" />
-          BIR Form 2307 Certificates Issued to Service Providers
-        </h2>
-        <p className={`text-xs ${theme.textMuted} mt-1`}>
-          Certificates generated and issued to vendors/suppliers for expanded withholding tax deducted from expense vouchers. Remitted to BIR via monthly 0619-E.
-        </p>
-      </div>
-
+    <div className="space-y-4">
       <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm overflow-hidden`}>
         <div className={`p-4 border-b ${theme.borderCard} bg-zinc-500/5`}>
           <h3 className={`font-semibold text-sm ${theme.textTitle}`}>Expanded Tax Withheld Certificates Log ({provider2307List.length})</h3>

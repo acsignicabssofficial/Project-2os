@@ -46,17 +46,7 @@ export default function ChangesInEquityTab({
   }, [sales, expenses, ppeAssets, payrollRecords, specialEntries, companyName]);
 
   return (
-    <div className="space-y-6">
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-          <ShieldCheck className="w-6 h-6 text-purple-400" />
-          Statement of Changes in Equity
-        </h2>
-        <p className={`text-xs ${theme.textMuted} mt-1`}>
-          Reconciliation of opening capital stock, owner contributions, cumulative retained earnings, and ending stockholders' equity for {companyName}.
-        </p>
-      </div>
-
+    <div className="space-y-4">
       <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm p-6 space-y-4 max-w-3xl mx-auto`}>
         <div className="flex justify-between text-xs py-2 border-b border-zinc-800/30 font-semibold">
           <span className={theme.textTitle}>Capital Stock / Paid-in Capital (Beginning)</span>

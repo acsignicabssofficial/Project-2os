@@ -79,15 +79,12 @@ export default function RelatedPartiesTab({
   return (
     <div className="space-y-6">
       {/* Related Parties Sub-navigation Header */}
-      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-colors duration-200`}>
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20">
-            <Handshake className="w-6 h-6" />
+      <div className={`p-3 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3 transition-colors duration-200`}>
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20">
+            <Handshake className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className={`text-xl font-bold ${theme.textTitle}`}>Related Parties Masterlist</h2>
-            <p className={`text-xs ${theme.textMuted}`}>Manage profile records for Customers, Clients, Various Customers, and Service Providers</p>
-          </div>
+          <span className={`text-xs font-semibold ${theme.textMuted}`}>Select Directory Segment:</span>
         </div>
 
         <div className="flex items-center gap-2 bg-zinc-800/20 p-1.5 rounded-xl border border-zinc-700/30 w-full sm:w-auto">

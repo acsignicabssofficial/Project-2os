@@ -12,6 +12,7 @@ import {
   Settings as SettingsIcon
 } from 'lucide-react';
 import { Company, ThemeMode } from '../../types';
+import { RIBBON_CATEGORIES } from './2osTypes';
 import PeriodModal from './PeriodModal';
 
 interface TwoOSTopBarProps {
@@ -114,15 +115,27 @@ export default function TwoOSTopBar({
 
   // Formal Philippine Accounting & Tax Register Title
   const getFormalJournalTitle = (key: string): string => {
+    for (const cat of RIBBON_CATEGORIES) {
+      const match = cat.subTabs.find(st => st.key === key);
+      if (match) {
+        return match.label.toUpperCase();
+      }
+    }
     switch (key) {
       case 'sales':
-        return 'SALES JOURNAL / REVENUE REGISTER';
+        return 'SUBSIDIARY SALES & INVOICES REGISTER';
       case 'collections':
-        return 'CASH RECEIPTS BOOK / COLLECTIONS REGISTER';
+        return 'COLLECTIONS BOOK (CROSS-MATCHING)';
+      case 'cash_receipts':
+      case 'cash_receipt':
+        return 'CASH RECEIPTS BOOK (CASH-ONLY)';
       case 'expenses':
-        return 'PURCHASE BOOK / VENDOR EXPENSES REGISTER';
+        return 'SUBSIDIARY PURCHASES & EXPENSES BOOK';
       case 'payments':
-        return 'CASH DISBURSEMENTS BOOK / CHECK REGISTER';
+        return 'PAYMENTS BOOK (CROSS-MATCHING)';
+      case 'cash_disbursements':
+      case 'cash_disbursement':
+        return 'CASH DISBURSEMENTS BOOK (CASH-ONLY)';
       case 'general_journal':
         return 'GENERAL JOURNAL / VOUCHER REGISTER';
       case 'general_ledger':
@@ -131,6 +144,10 @@ export default function TwoOSTopBar({
         return 'SPECIAL LEDGER (T-ACCOUNTS & ENDING BALANCES)';
       case 'special_entries':
         return 'SPECIAL JOURNAL VOUCHERS (ADJUSTING & ACCRUAL ENTRIES)';
+      case 'sales_transaction':
+        return 'SALES TRANSACTION HUB (RECORD SALES & INVOICES)';
+      case 'purchase_transaction':
+        return 'PURCHASE & EXPENSE TRANSACTION HUB';
       case 'dashboard':
         return 'EXECUTIVE FINANCIAL MONITORING DASHBOARD';
       case 'activities':
@@ -176,8 +193,10 @@ export default function TwoOSTopBar({
         return 'BIR TAX COMPUTATION & COMPLIANCE SUITE';
       case 'reports':
         return 'REPORTING CENTER & AUDIT WORKBOOK EXPORT';
+      case 'fs_balance_sheet':
+        return 'TRIAL BALANCE & WORKSHEET (BALANCE SHEET)';
       case 'fs_position':
-        return 'STATEMENT OF FINANCIAL POSITION (BALANCE SHEET)';
+        return 'STATEMENT OF FINANCIAL POSITION';
       case 'fs_income':
         return 'STATEMENT OF COMPREHENSIVE INCOME (INCOME STATEMENT)';
       case 'fs_equity':
@@ -229,43 +248,44 @@ export default function TwoOSTopBar({
         </div>
 
         {/* ========================================================================= */}
-        {/* ROW 1 & 2, COL 2: CENTER STACK (SELECT ENTITY + TITLE + FOR THE MONTH OF) */}
+        {/* ROW 1 & 2, COL 2: CENTER STACK (ALWAYS IN THIS EXACT 4-LINE FORMAT):       */}
+        {/* 1. [TRADE NAME]                                                           */}
+        {/* 2. [ENTITY NAME]                                                          */}
+        {/* 3. [SELECTED TOOLBAR TRANSACTION]                                         */}
+        {/* 4. [SELECTED PERIOD]                                                      */}
         {/* ========================================================================= */}
-        <div className="row-span-2 flex flex-col items-center justify-center text-center justify-self-center px-2">
-          {/* 1. SELECT ENTITY + BRANCH BADGE */}
-          <div className="relative flex items-center justify-center gap-2 flex-wrap">
+        <div className="row-span-2 flex flex-col items-center justify-center text-center justify-self-center px-2 py-0.5 max-w-[540px]">
+          {/* 1. [TRADE NAME] */}
+          <div className={`text-[11px] font-black tracking-wide uppercase leading-tight truncate max-w-[480px] ${
+            isDark ? 'text-cyan-400' : 'text-[#0284c7]'
+          }`}>
+            {(activeCompany?.trade_name && activeCompany.trade_name.trim()) 
+              ? activeCompany.trade_name.toUpperCase() 
+              : (activeCompany?.company_name ? activeCompany.company_name.toUpperCase() : 'NO REGISTERED TRADE NAME')}
+          </div>
+
+          {/* 2. [ENTITY NAME] (CLICKABLE ENTITY SELECTOR DROPDOWN) */}
+          <div className="relative flex items-center justify-center">
             <button
               type="button"
               onClick={() => setShowCompanyMenu(!showCompanyMenu)}
-              className={`group inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg transition cursor-pointer ${
+              className={`group inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md transition cursor-pointer ${
                 isDark 
-                  ? 'hover:bg-white/10 text-cyan-200' 
-                  : 'hover:bg-sky-100/80 text-slate-900'
+                  ? 'hover:bg-white/10 text-white' 
+                  : 'hover:bg-sky-100/80 text-slate-950'
               }`}
-              title="Click to switch active taxpayer entity"
+              title="Click to switch active registered taxpayer entity"
             >
-              <Building2 className={`w-3.5 h-3.5 ${
-                isDark ? 'text-cyan-400' : 'text-[#0284c7]'
-              }`} />
-              <span className={`text-xs font-black tracking-tight uppercase leading-tight ${
-                isDark ? 'text-white' : 'text-slate-950 font-black'
-              }`}>
+              <Building2 className={`w-3 h-3 ${isDark ? 'text-cyan-400' : 'text-[#0284c7]'}`} />
+              <span className="text-xs font-black tracking-tight uppercase leading-tight truncate max-w-[380px]">
                 {activeCompany?.company_name ? activeCompany.company_name.toUpperCase() : 'SELECT ENTITY'}
               </span>
-              <ChevronDown className="w-3.5 h-3.5 text-[#0284c7] dark:text-cyan-400" />
+              <ChevronDown className="w-3 h-3 text-[#0284c7] dark:text-cyan-400" />
             </button>
-
-            <span className={`px-2.5 py-0.5 rounded text-[8.5px] font-mono font-bold tracking-wider uppercase border flex-shrink-0 ${
-              isDark
-                ? 'bg-[#0D1E45] text-cyan-300 border-cyan-500/40'
-                : 'bg-[#e0f2fe] text-[#0369a1] border-sky-300/80'
-            }`}>
-              {branchLabel}
-            </span>
 
             {/* ENTITY DROPDOWN */}
             {showCompanyMenu && (
-              <div className={`absolute top-full mt-2 z-50 w-72 rounded-xl border p-1.5 shadow-2xl text-left ${dropdownBg}`}>
+              <div className={`absolute top-full mt-1.5 z-50 w-72 rounded-xl border p-1.5 shadow-2xl text-left ${dropdownBg}`}>
                 <div className="text-[10px] uppercase font-bold px-2 py-1 text-cyan-700 dark:text-cyan-400">
                   Select Registered Tax Entity ({companies.length})
                 </div>
@@ -296,6 +316,9 @@ export default function TwoOSTopBar({
                         >
                           <div className="truncate pr-2">
                             <div className="font-bold truncate">{comp.company_name}</div>
+                            {comp.trade_name && comp.trade_name !== comp.company_name && (
+                              <div className="text-[10px] text-cyan-600 dark:text-cyan-400 truncate">Trade: {comp.trade_name}</div>
+                            )}
                             <div className="text-[10px] text-zinc-400 font-mono">TIN: {comp.company_tin || 'N/A'}</div>
                           </div>
                           {isSelected && <Check className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 flex-shrink-0" />}
@@ -308,21 +331,21 @@ export default function TwoOSTopBar({
             )}
           </div>
 
-          {/* 2. DYNAMIC TAB / JOURNAL TITLE */}
-          <h2 className={`text-[11px] font-extrabold tracking-wide uppercase text-center leading-tight mt-0.5 truncate max-w-[460px] ${
-            isDark ? 'text-cyan-400' : 'text-[#0369a1]'
+          {/* 3. [SELECTED TOOLBAR TRANSACTION] */}
+          <h2 className={`text-[11px] font-extrabold tracking-wide uppercase text-center leading-tight mt-0.5 truncate max-w-[480px] ${
+            isDark ? 'text-cyan-200' : 'text-[#0369a1]'
           }`}>
             {getFormalJournalTitle(activeTab || '')}
           </h2>
 
-          {/* 3. REPORTING PERIOD BUTTON (ALIGNED DIRECTLY UNDER SELECT ENTITY & TITLE) */}
-          <div className="mt-1 flex items-center justify-center">
+          {/* 4. [SELECTED PERIOD] */}
+          <div className="mt-0.5 flex items-center justify-center">
             <button
               type="button"
               onClick={() => setShowDatePicker(true)}
-              className={`group inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-semibold tracking-wider uppercase transition cursor-pointer ${
+              className={`group inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider uppercase transition cursor-pointer ${
                 isDark
-                  ? 'text-cyan-200/90 hover:bg-white/10'
+                  ? 'text-cyan-300/90 hover:bg-white/10'
                   : 'text-slate-700 hover:bg-sky-100/80'
               }`}
               title="Click to open reporting period configuration screen"
@@ -391,21 +414,16 @@ export default function TwoOSTopBar({
         </div>
 
         {/* ========================================================================= */}
-        {/* ROW 2, COL 1: CREATE ENTITY PROFILE (LEFT)                                */}
+        {/* ROW 2, COL 1: BRANCH BADGE: HEAD OFFICE - MAIN (00000) (LEFT)             */}
         {/* ========================================================================= */}
         <div className="flex items-center justify-self-start">
-          <button
-            onClick={() => {
-              if (onOpenNewEntryModal) {
-                onOpenNewEntryModal();
-              }
-            }}
-            className="px-3 py-1 text-xs font-bold rounded-md flex items-center gap-1.5 cursor-pointer transition bg-[#06b6d4] hover:bg-[#0891b2] text-slate-950 shadow-2xs"
-            title="Create Entity Profile"
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>Create Entity Profile</span>
-          </button>
+          <span className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-bold tracking-wider uppercase border flex-shrink-0 shadow-2xs ${
+            isDark
+              ? 'bg-[#0D1E45] text-cyan-300 border-cyan-500/40'
+              : 'bg-[#e0f2fe] text-[#0369a1] border-sky-300/80 shadow-2xs'
+          }`}>
+            {branchLabel}
+          </span>
         </div>
 
         {/* ========================================================================= */}

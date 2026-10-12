@@ -279,21 +279,13 @@ export default function ProvidersTab({
         {/* HEADER & CONTROLS */}
         <div className={`p-5 border-b ${theme.borderCard} flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-500/5`}>
           <div className="flex items-center gap-3">
-            <div className="bg-emerald-500/10 text-emerald-400 p-2.5 rounded-xl border border-emerald-500/20">
-              <Truck className="w-6 h-6" />
+            <div className="bg-emerald-500/10 text-emerald-400 p-2 rounded-xl border border-emerald-500/20">
+              <Truck className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className={`font-display font-bold text-lg ${theme.textTitle}`}>
-                  Service Providers & Vendors Directory
-                </h2>
-                <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/20 font-mono font-bold">
-                  {serviceProviders.length} {serviceProviders.length === 1 ? 'vendor' : 'vendors'}
-                </span>
-              </div>
-              <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                Master vendor database with 9-digit TIN, branch code, business tax type, and primary expense category.
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/20 font-mono font-bold">
+                {serviceProviders.length} {serviceProviders.length === 1 ? 'vendor' : 'vendors'} registered
+              </span>
             </div>
           </div>
 

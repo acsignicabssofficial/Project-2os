@@ -34,8 +34,8 @@ import {
 export type RibbonCategoryKey = 
   | 'HOME'
   | 'DIRECTORY'
+  | 'TRANSACTIONS'
   | 'BOOKS OF ACCOUNTS'
-  | 'OTHER TRANSACTIONS'
   | 'FINANCIAL STATEMENTS'
   | 'BIR COMPUTATIONS'
   | 'SETTINGS';
@@ -167,7 +167,70 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
     ]
   },
 
-  // 3. BOOKS OF ACCOUNTS
+  // 3. TRANSACTIONS
+  {
+    key: 'TRANSACTIONS',
+    label: 'Transactions',
+    icon: Layers,
+    subTabs: [
+      {
+        key: 'sales_transaction',
+        label: 'Sales Transaction Hub (Record Sales & Invoices)',
+        shortLabel: 'Sales\nTransaction',
+        icon: Receipt,
+        cellRef: 'TRX_SALES!A1',
+        description: 'Sales Transaction Hub: Primary recording of sales (Cash, On Account, or Partial). Automatically routes to Subsidiary Sales, Cash Receipts, and Collections.',
+        formula: '=SALES_TRANSACTION_HUB(CustomerName, InvoiceNo, SaleMode, TotalDue, DownPayment)'
+      },
+      {
+        key: 'purchase_transaction',
+        label: 'Purchase Transaction Hub (Record Purchases & Expenses)',
+        shortLabel: 'Purchase\nTransaction',
+        icon: DollarSign,
+        cellRef: 'TRX_PURCHASE!A1',
+        description: 'Purchase Transaction Hub: Primary recording of purchases (Cash, On Account, or Partial). Automatically routes to Subsidiary Purchases, Cash Disbursements, and Payments.',
+        formula: '=PURCHASE_TRANSACTION_HUB(ProviderName, VoucherNo, PurchaseMode, TotalDue, DownPayment)'
+      },
+      {
+        key: 'payroll',
+        label: 'Payroll Computation & Contribution Slips',
+        shortLabel: 'Payroll',
+        icon: DollarSign,
+        cellRef: 'PAYROLL!A1',
+        description: 'Payroll: Automated employee compensation computation, SSS, PhilHealth, Pag-IBIG contributions, and withholding tax on wages.',
+        formula: '=PAYROLL_COMPUTATIONS(EmployeeCode, BasicPay, Overtime, SSS, PhilHealth, PagIBIG, WithholdingTax, NetPay)'
+      },
+      {
+        key: 'ppe',
+        label: 'PPE Depreciation & Fixed Asset Register',
+        shortLabel: 'PPE\nDepreciation',
+        icon: TrendingUp,
+        cellRef: 'PPE!A1',
+        description: 'PPE Depreciation: Property, plant, and equipment asset tracking, straight-line depreciation schedules, accumulated depreciation, and net book value.',
+        formula: '=PPE_DEPRECIATION(AssetCode, Description, AcquisitionCost, UsefulLife, MonthlyDepreciation, NetBookValue)'
+      },
+      {
+        key: 'inventory_list',
+        label: 'Inventory List & Stock Valuation',
+        shortLabel: 'Inventory\nList',
+        icon: FolderKanban,
+        cellRef: 'INVENTORY_LIST!A1',
+        description: 'Inventory List: Periodic inventory register, beginning inventory, purchases, cost of goods sold, and ending valuation.',
+        formula: '=INVENTORY_LIST(ItemSKU, ItemName, QtyOnHand, UnitCost, TotalValuation)'
+      },
+      {
+        key: 'bank_recon',
+        label: 'Bank Reconciliation & Proof of Cash',
+        shortLabel: 'Bank\nRecon',
+        icon: Landmark,
+        cellRef: 'BANK_RECON!A1',
+        description: 'Bank Reconciliation: Monthly matching of Cash in Bank ledger vs. Bank Statement balance, Deposits in Transit (DIT), Outstanding Checks (OC), and reconciling adjusting entries.',
+        formula: '=BANK_RECONCILIATION(BankEndingBalance, BookEndingBalance, DepositsInTransit, OutstandingChecks, BankCharges, InterestEarned)'
+      }
+    ]
+  },
+
+  // 4. BOOKS OF ACCOUNTS
   {
     key: 'BOOKS OF ACCOUNTS',
     label: 'Books of Accounts',
@@ -272,69 +335,6 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
         cellRef: 'SPEC_LEDGER!A1',
         description: 'Special Ledger: Running ledger balances and T-Accounts for all Sales and Purchases transactions posted from Special Journal.',
         formula: '=SPECIAL_LEDGER(SubAccount, Debits, Credits, NetBalance)'
-      }
-    ]
-  },
-
-  // 4. OTHER TRANSACTIONS
-  {
-    key: 'OTHER TRANSACTIONS',
-    label: 'Other Transactions',
-    icon: Layers,
-    subTabs: [
-      {
-        key: 'sales_transaction',
-        label: 'Sales Transaction Hub (Record Sales & Invoices)',
-        shortLabel: 'Sales\nTransaction',
-        icon: Receipt,
-        cellRef: 'TRX_SALES!A1',
-        description: 'Sales Transaction Hub: Primary recording of sales (Cash, On Account, or Partial). Automatically routes to Subsidiary Sales, Cash Receipts, and Collections.',
-        formula: '=SALES_TRANSACTION_HUB(CustomerName, InvoiceNo, SaleMode, TotalDue, DownPayment)'
-      },
-      {
-        key: 'purchase_transaction',
-        label: 'Purchase Transaction Hub (Record Purchases & Expenses)',
-        shortLabel: 'Purchase\nTransaction',
-        icon: DollarSign,
-        cellRef: 'TRX_PURCHASE!A1',
-        description: 'Purchase Transaction Hub: Primary recording of purchases (Cash, On Account, or Partial). Automatically routes to Subsidiary Purchases, Cash Disbursements, and Payments.',
-        formula: '=PURCHASE_TRANSACTION_HUB(ProviderName, VoucherNo, PurchaseMode, TotalDue, DownPayment)'
-      },
-      {
-        key: 'payroll',
-        label: 'Payroll Computation & Contribution Slips',
-        shortLabel: 'Payroll',
-        icon: DollarSign,
-        cellRef: 'PAYROLL!A1',
-        description: 'Payroll: Automated employee compensation computation, SSS, PhilHealth, Pag-IBIG contributions, and withholding tax on wages.',
-        formula: '=PAYROLL_COMPUTATIONS(EmployeeCode, BasicPay, Overtime, SSS, PhilHealth, PagIBIG, WithholdingTax, NetPay)'
-      },
-      {
-        key: 'ppe',
-        label: 'PPE Depreciation & Fixed Asset Register',
-        shortLabel: 'PPE\nDepreciation',
-        icon: TrendingUp,
-        cellRef: 'PPE!A1',
-        description: 'PPE Depreciation: Property, plant, and equipment asset tracking, straight-line depreciation schedules, accumulated depreciation, and net book value.',
-        formula: '=PPE_DEPRECIATION(AssetCode, Description, AcquisitionCost, UsefulLife, MonthlyDepreciation, NetBookValue)'
-      },
-      {
-        key: 'inventory_list',
-        label: 'Inventory List & Stock Valuation',
-        shortLabel: 'Inventory\nList',
-        icon: FolderKanban,
-        cellRef: 'INVENTORY_LIST!A1',
-        description: 'Inventory List: Periodic inventory register, beginning inventory, purchases, cost of goods sold, and ending valuation.',
-        formula: '=INVENTORY_LIST(ItemSKU, ItemName, QtyOnHand, UnitCost, TotalValuation)'
-      },
-      {
-        key: 'bank_recon',
-        label: 'Bank Reconciliation & Proof of Cash',
-        shortLabel: 'Bank\nRecon',
-        icon: Landmark,
-        cellRef: 'BANK_RECON!A1',
-        description: 'Bank Reconciliation: Monthly matching of Cash in Bank ledger vs. Bank Statement balance, Deposits in Transit (DIT), Outstanding Checks (OC), and reconciling adjusting entries.',
-        formula: '=BANK_RECONCILIATION(BankEndingBalance, BookEndingBalance, DepositsInTransit, OutstandingChecks, BankCharges, InterestEarned)'
       }
     ]
   },
@@ -468,7 +468,7 @@ export function getCategoryForTab(tabKey: string): RibbonCategoryKey {
   if (['dashboard', 'reports', 'reports_turnovers', 'reports_horizontal', 'reports_vertical', 'reports_ratios', 'tax_calendar', 'about_app', 'activities', 'activity_lists', 'system_specs', 'account_titles'].includes(tabKey)) return 'HOME';
   if (['companies', 'customers', 'providers', 'employees', 'related_parties', 'inventory_services'].includes(tabKey)) return 'DIRECTORY';
   if (['sales', 'expenses', 'collections', 'payments', 'general_journal', 'special_entries', 'general_ledger', 'special_ledger'].includes(tabKey)) return 'BOOKS OF ACCOUNTS';
-  if (['payroll', 'ppe', 'inventory_list', 'bank_recon', 'contribution_tables'].includes(tabKey)) return 'OTHER TRANSACTIONS';
+  if (['sales_transaction', 'purchase_transaction', 'payroll', 'ppe', 'inventory_list', 'bank_recon', 'contribution_tables'].includes(tabKey)) return 'TRANSACTIONS';
   if (['fs_balance_sheet', 'fs_income', 'fs_position', 'fs_equity', 'fs_cashflows', 'fs_notes'].includes(tabKey)) return 'FINANCIAL STATEMENTS';
   if (['withholding_tax', 'business_tax', 'income_tax', 'wtx_compensation', 'wtx_expanded', 'wtx_alphalist', 'wtx_qap', 'btax_2550q', 'btax_2551q', 'btax_sales', 'btax_purchases', 'itax_1701', 'itax_1702rt', 'itax_1702ex', 'itax_sawt', 'tax_reports', 'cwt_customers', 'cwt_providers', 'bir_2316', 'bir_slsp', 'bir_qap', 'bir_sawt', 'bir_alphalist'].includes(tabKey)) return 'BIR COMPUTATIONS';
 

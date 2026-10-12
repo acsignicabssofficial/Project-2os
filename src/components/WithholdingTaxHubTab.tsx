@@ -395,28 +395,14 @@ function isSampleTransaction(record: any): boolean {
   return (
     <div className="space-y-5 select-none">
       
-      {/* 1. HEADER BANNER */}
-      <div className={`p-5 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-200`}>
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
-            <FileCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className={`text-xl font-bold font-display ${theme.textTitle}`}>
-                Withholding Tax Hub
-              </h1>
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 uppercase tracking-wider">
-                BIR TAX COMPLIANCE
-              </span>
-            </div>
-            <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-              Entity: <strong className={theme.textTitle}>{companyName}</strong> • TIN: <span className="font-mono font-bold">{companyTin}</span> • Branch: <span className="font-mono">{branchCode}</span>
-            </p>
-          </div>
+      {/* 1. CONTROLS BAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-2.5 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-wrap items-center justify-between gap-3 transition-colors duration-200`}>
+        <div className="flex items-center gap-2">
+          <span className="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 uppercase tracking-wider">
+            BIR WITHHOLDING TAX COMPLIANCE
+          </span>
         </div>
 
-        {/* Global actions */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => window.print()}

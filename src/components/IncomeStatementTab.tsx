@@ -68,21 +68,10 @@ export default function IncomeStatementTab({
   }, [sales, expenses, ppeAssets, specialEntries, payrollRecords, activeCompanyName]);
 
   return (
-    <div className="flex flex-col gap-6 w-full">
-      <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl shadow-sm p-5 transition-colors duration-200`}>
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-base font-bold ${theme.textTitle} font-display flex items-center gap-2`}>
-              <TrendingUp className="w-5 h-5 text-cyan-400" />
-              Statement of Profit or Loss and Other Comprehensive Income (PAS 1 / PFRS 18)
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Official PFRS/PAS financial report for <span className="text-cyan-400 font-bold">{activeCompanyName || 'Active Company'}</span> featuring PFRS 15 Contra-Revenue, PFRS 18 Operating Profit, and PAS 1.82A OCI classification.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-500/10 border border-zinc-700/30 text-xs">
+    <div className="flex flex-col gap-4 w-full">
+      <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl shadow-sm p-4 transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-500/10 border border-zinc-700/30 text-xs">
               <button
                 type="button"
                 onClick={() => setPresentationMode('single')}
@@ -111,7 +100,6 @@ export default function IncomeStatementTab({
             </div>
           </div>
         </div>
-      </div>
 
       {/* STATEMENT 1: PROFIT OR LOSS */}
       <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-6 shadow-sm space-y-4 max-w-4xl mx-auto w-full`}>

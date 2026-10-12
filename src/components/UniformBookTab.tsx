@@ -490,25 +490,18 @@ export default function UniformBookTab({
 
   return (
     <div className="flex flex-col gap-5 w-full">
-      {/* HEADER BANNER & SUMMARY KPI CARDS */}
-      <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-5 shadow-xs`}>
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-zinc-200/60 dark:border-zinc-800 pb-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${theme.accentBadge}`}>
-                Uniform Database Book
-              </span>
-              <span className="text-xs font-mono text-zinc-500">Table: {bookType}</span>
-            </div>
-            <h2 className={`text-xl font-bold tracking-tight mt-1 ${theme.textTitle}`}>{labels.title}</h2>
-            <p className={`text-xs mt-0.5 ${theme.textMuted}`}>{labels.subtitle}</p>
+      {/* ACTION CONTROLS & SUMMARY KPI CARDS (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-4 shadow-xs`}>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200/60 dark:border-zinc-800 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">Book Table: {bookType}</span>
           </div>
 
           {/* ACTION BUTTONS: Viewing Notice, Import CSV, Template, Export */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
               <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-              <span>Viewing & Audit Mode • Encode via <strong>Other Transactions</strong></span>
+              <span>Viewing & Audit Mode • Encode via <strong>Transactions</strong></span>
             </div>
 
             <button

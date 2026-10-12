@@ -163,36 +163,26 @@ export default function GeneralJournalTab({
   };
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <BookOpen className="w-6 h-6 text-cyan-400" />
-              {mode === 'GENERAL'
-                ? 'General Journal (Other Transactions, Adjusting Entries, Payroll, PPE — Posts to General Ledger Only)'
-                : 'Special Journal (All Sales & Purchases Transactions — Posts to Special Ledger Only)'}
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              {mode === 'GENERAL'
-                ? 'General Journal: Chronological double-entry recording of Adjusting Entries, Payroll, PPE Acquisition & Depreciation, Closing, Reversing, and Other Transactions — posting exclusively to the General Ledger.'
-                : 'Special Journal: Chronological double-entry recording of all Sales and Purchases transactions (Subsidiary Sales, Cash Receipts, Collections, Subsidiary Purchases, Cash Disbursements, and Payments) — posting exclusively to the Special Ledger.'}
-            </p>
-          </div>
+    <div className="space-y-4">
+      {/* FILTER & ENTRY CONTROLS (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-zinc-800/30">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            {mode === 'GENERAL' ? 'General Journal Ledger Audit' : 'Special Journal Transaction Audit'}
+          </span>
 
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-zinc-400">
-              {mode === 'GENERAL' ? 'General Journal Entries:' : 'Special Journal Entries:'}
+              Entries:
             </span>
             <span className="px-2.5 py-1 text-xs font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-lg">
-              {filteredEntries.length} Entries
+              {filteredEntries.length}
             </span>
           </div>
         </div>
 
         {/* COMPREHENSIVE FILTERING CONTROLS */}
-        <div className="mt-4 pt-4 border-t border-zinc-800/30 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
           {/* Filter Type */}
           <div>
             <label className={`block text-[11px] font-medium mb-1 ${theme.textMuted}`}>Specific Entry Type</label>

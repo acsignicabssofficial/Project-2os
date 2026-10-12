@@ -83,18 +83,13 @@ export default function CashFlowsTab({
   }, [sales, collections, cashReceipts, expenses, payments, cashDisbursements, ppeAssets, payrollRecords, specialEntries, accountTitles, companyName]);
 
   return (
-    <div className="space-y-6">
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <Activity className="w-6 h-6 text-teal-400" />
-              Statement of Cash Flows (PAS 7)
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              PAS 7 compliant statement of cash flows classified into Operating, Investing, and Financing activities under Direct &amp; Indirect methods for {activeCompany?.company_name || 'No Company Selected'}.
-            </p>
-          </div>
+    <div className="space-y-4">
+      {/* METHOD SELECTOR CONTROLS (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-3.5 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            Presentation Method
+          </span>
 
           <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-500/10 border border-zinc-700/30 text-xs">
             <button

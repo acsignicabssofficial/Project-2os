@@ -748,87 +748,64 @@ export default function PurchaseTransactionTab({
   }
 
   return (
-    <div className="flex flex-col gap-5 w-full">
-      {/* HEADER BANNER */}
-      <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-5 shadow-xs`}>
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
-              <ShoppingBag className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className={`text-xl font-bold tracking-tight ${theme.textTitle}`}>
-                  Purchase & Expense Transaction Hub
-                </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-500/15 text-purple-400 border border-purple-500/30">
-                  Primary Encoding Tool
-                </span>
-              </div>
-              <p className={`text-xs mt-0.5 ${theme.textMuted}`}>
-                Record new vendor purchases & expenses. Routes automatically to <strong>Subsidiary Purchases</strong>, <strong>Cash Disbursements</strong> (Cash only), and <strong>Payments</strong>.
-              </p>
-            </div>
-          </div>
-
-          {/* QUICK LINKS TO BOOKS */}
-          <div className="flex items-center gap-2 text-xs">
-            {onNavigateToTab && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onNavigateToTab('expenses')}
-                  className="px-3 py-1.5 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <FileText className="w-3.5 h-3.5 text-purple-400" />
-                  <span>View Subsidiary Purchases</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onNavigateToTab('payments')}
-                  className="px-3 py-1.5 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <DollarSign className="w-3.5 h-3.5 text-rose-400" />
-                  <span>View Cash Disbursements</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
+    <div className="flex flex-col gap-4 w-full">
+      {/* FUNCTIONAL CONTROLS: SUB-TABS & JUMP LINKS (REDUNDANT TITLE BANNER REMOVED PER REQ 4) */}
+      <div className={`${theme.bgCard} border ${theme.borderCard} rounded-xl px-4 py-2.5 shadow-2xs flex flex-wrap items-center justify-between gap-3`}>
         {/* SUB-TABS: Record Purchase vs Disburse Payment */}
-        <div className="flex gap-2 mt-5 pt-3 border-t border-zinc-800">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setHubTab('new_purchase')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               hubTab === 'new_purchase'
-                ? 'bg-purple-600 text-white shadow-sm'
+                ? 'bg-purple-600 text-white shadow-xs'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
             }`}
           >
-            <PlusCircle className="w-4 h-4" />
+            <PlusCircle className="w-3.5 h-3.5" />
             <span>1. Record New Purchase / Expense</span>
           </button>
 
           <button
             type="button"
             onClick={() => setHubTab('disburse_open')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               hubTab === 'disburse_open'
-                ? 'bg-rose-600 text-white shadow-sm'
+                ? 'bg-rose-600 text-white shadow-xs'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
             }`}
           >
-            <DollarSign className="w-4 h-4" />
+            <DollarSign className="w-3.5 h-3.5" />
             <span>2. Disburse Payment for Existing Payables</span>
             {openPayables.length > 0 && (
-              <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                 {openPayables.length} open
               </span>
             )}
           </button>
         </div>
+
+        {/* QUICK LINKS TO BOOKS */}
+        {onNavigateToTab && (
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => onNavigateToTab('expenses')}
+              className="px-2.5 py-1 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1.5 cursor-pointer text-[11px]"
+            >
+              <FileText className="w-3 h-3 text-purple-400" />
+              <span>Subsidiary Purchases</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateToTab('payments')}
+              className="px-2.5 py-1 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition flex items-center gap-1.5 cursor-pointer text-[11px]"
+            >
+              <DollarSign className="w-3 h-3 text-rose-400" />
+              <span>Cash Disbursements</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ========================================================================= */}

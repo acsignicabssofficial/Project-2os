@@ -137,10 +137,10 @@ export async function generate2OSPitchDeck(options: GeneratePptxOptions = {}): P
     frameOpts: FrameOptions
   ) {
     const {
-      activeCategory = 'OTHER TRANSACTIONS',
+      activeCategory = 'TRANSACTIONS',
       activeToolKey = 'payroll',
       categoryTools = [],
-      categoryToolsGroupLabel = 'OTHER TRANSACTIONS TOOLS',
+      categoryToolsGroupLabel = 'TRANSACTIONS TOOLS',
       selectedEntity = 'CONSOLIDATED (ALL BRANCHES)',
       journalTitle = 'PAYROLL REGISTER & STATUTORY REMITTANCES',
       periodLabel = 'FOR THE MONTH OF AUGUST 2026'
@@ -310,8 +310,8 @@ export async function generate2OSPitchDeck(options: GeneratePptxOptions = {}): P
     const ribbonTabs = [
       { key: 'HOME', label: 'Home', icon: '⏱️' },
       { key: 'DIRECTORY', label: 'Directory', icon: '🏢' },
+      { key: 'TRANSACTIONS', label: 'Transactions', icon: '📑' },
       { key: 'BOOKS OF ACCOUNTS', label: 'Books of Accounts', icon: '📖' },
-      { key: 'OTHER TRANSACTIONS', label: 'Other Transactions', icon: '📑' },
       { key: 'FINANCIAL STATEMENTS', label: 'Financial Statements', icon: '🏛️' },
       { key: 'BIR COMPUTATIONS', label: 'BIR Computations', icon: '🛡️' }
     ];
@@ -1187,14 +1187,14 @@ export async function generate2OSPitchDeck(options: GeneratePptxOptions = {}): P
   }
 
   // 6. Other Transactions Ribbon (EXACT APP SCREENSHOT MATCH)
-  options.onProgress?.('Generating Slide 6: Other Transactions / Payroll...');
+  options.onProgress?.('Generating Slide 6: Transactions / Payroll...');
   {
     const slide = pptx.addSlide();
     slide.background = { color: C.canvasBg };
-    addSlideHeading(slide, '05. Ribbon Module', 'OTHER TRANSACTIONS Ribbon: Statutory Payroll & Fixed Assets', 'Automated SSS, PhilHealth, Pag-IBIG & Withholding tax on compensation, PPE depreciation, and Bank Reconciliation.');
+    addSlideHeading(slide, '05. Ribbon Module', 'TRANSACTIONS Ribbon: Statutory Payroll & Fixed Assets', 'Automated SSS, PhilHealth, Pag-IBIG & Withholding tax on compensation, PPE depreciation, and Bank Reconciliation.');
 
     const layout = renderAuthentic2OSFrame(slide, {
-      activeCategory: 'OTHER TRANSACTIONS',
+      activeCategory: 'TRANSACTIONS',
       activeToolKey: 'payroll',
       categoryTools: [
         { key: 'payroll', label: 'Payroll', icon: '$' },
@@ -1202,7 +1202,7 @@ export async function generate2OSPitchDeck(options: GeneratePptxOptions = {}): P
         { key: 'inventory_list', label: 'Inventory\nList', icon: '📦' },
         { key: 'bank_recon', label: 'Bank\nRecon', icon: '🏛️' }
       ],
-      categoryToolsGroupLabel: 'OTHER TRANSACTIONS TOOLS',
+      categoryToolsGroupLabel: 'TRANSACTIONS TOOLS',
       selectedEntity: 'CONSOLIDATED (ALL BRANCHES)',
       journalTitle: 'PAYROLL REGISTER & STATUTORY REMITTANCES',
       periodLabel: 'FOR THE MONTH OF AUGUST 2026'

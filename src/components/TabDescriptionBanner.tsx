@@ -373,12 +373,12 @@ export const TAB_DESCRIPTIONS: Record<string, TabDescriptionItem> = {
     ]
   },
 
-  // 4. OTHER TRANSACTIONS
+  // 3. TRANSACTIONS
   payroll: {
     key: 'payroll',
     title: 'Payroll Management & Register',
-    groupName: 'OTHER TRANSACTIONS',
-    groupNumber: 'Main Menu 4',
+    groupName: 'TRANSACTIONS',
+    groupNumber: 'Main Menu 3',
     icon: FileSpreadsheet,
     accentColor: 'text-amber-400',
     borderAccent: 'border-amber-500/30',
@@ -392,8 +392,8 @@ export const TAB_DESCRIPTIONS: Record<string, TabDescriptionItem> = {
   bir_2316: {
     key: 'bir_2316',
     title: 'BIR Form 2316 (Certificate of Compensation)',
-    groupName: 'OTHER TRANSACTIONS',
-    groupNumber: 'Main Menu 4',
+    groupName: 'TRANSACTIONS',
+    groupNumber: 'Main Menu 3',
     icon: FileText,
     accentColor: 'text-cyan-400',
     borderAccent: 'border-cyan-500/30',
@@ -407,8 +407,8 @@ export const TAB_DESCRIPTIONS: Record<string, TabDescriptionItem> = {
   contribution_tables: {
     key: 'contribution_tables',
     title: 'Statutory Contribution & Tax Tables',
-    groupName: 'OTHER TRANSACTIONS',
-    groupNumber: 'Main Menu 4',
+    groupName: 'TRANSACTIONS',
+    groupNumber: 'Main Menu 3',
     icon: Table,
     accentColor: 'text-rose-400',
     borderAccent: 'border-rose-500/30',
@@ -422,8 +422,8 @@ export const TAB_DESCRIPTIONS: Record<string, TabDescriptionItem> = {
   ppe: {
     key: 'ppe',
     title: 'Property, Plant & Equipment (PPE) & Depreciation Schedule',
-    groupName: 'OTHER TRANSACTIONS',
-    groupNumber: 'Main Menu 4',
+    groupName: 'TRANSACTIONS',
+    groupNumber: 'Main Menu 3',
     icon: Building2,
     accentColor: 'text-blue-400',
     borderAccent: 'border-blue-500/30',

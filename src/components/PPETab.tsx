@@ -185,16 +185,6 @@ export default function PPETab({
 
   return (
     <div className="space-y-6">
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-          <Landmark className="w-6 h-6 text-cyan-400" />
-          Property, Plant & Equipment (PPE) Asset Management
-        </h2>
-        <p className={`text-xs ${theme.textMuted} mt-1`}>
-          Track fixed assets, capitalization thresholds, straight-line depreciation schedules, and carrying book values.
-        </p>
-      </div>
-
       {/* PPE ASSETS REGISTER TABLE */}
       <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm overflow-hidden`}>
         <div className={`p-4 border-b ${theme.borderCard} flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-zinc-500/5`}>

@@ -35,6 +35,8 @@ interface CompaniesTabProps {
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
+  autoOpenRegisterModal?: boolean;
+  onClearAutoOpenModal?: () => void;
 }
 
 // Helper to determine if an entity type represents an Individual (Sole Proprietor or Professional)
@@ -58,7 +60,9 @@ export default function CompaniesTab({
   onSelectBranch,
   theme,
   triggerAlert,
-  globalSearch = ''
+  globalSearch = '',
+  autoOpenRegisterModal,
+  onClearAutoOpenModal
 }: CompaniesTabProps) {
   // Modal visibility state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -210,6 +214,13 @@ export default function CompaniesTab({
     resetForm();
     setIsModalOpen(true);
   };
+
+  React.useEffect(() => {
+    if (autoOpenRegisterModal) {
+      openNewCompanyModal();
+      onClearAutoOpenModal?.();
+    }
+  }, [autoOpenRegisterModal, onClearAutoOpenModal]);
 
   const handleSaveCompany = (e: React.FormEvent) => {
     e.preventDefault();
@@ -515,21 +526,13 @@ export default function CompaniesTab({
         {/* HEADER & CONTROLS */}
         <div className={`p-5 border-b ${theme.borderCard} flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-500/5`}>
           <div className="flex items-center gap-3">
-            <div className="bg-pink-500/10 text-pink-400 p-2.5 rounded-xl border border-pink-500/20">
-              <Building2 className="w-6 h-6" />
+            <div className="bg-pink-500/10 text-pink-400 p-2 rounded-xl border border-pink-500/20">
+              <Building2 className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className={`font-display font-bold text-lg ${theme.textTitle}`}>
-                  Entity Profiles & Registration Database
-                </h2>
-                <span className="text-xs bg-pink-500/10 text-pink-400 px-2.5 py-0.5 rounded-full border border-pink-500/20 font-mono font-bold">
-                  {companies.length} {companies.length === 1 ? 'entity' : 'entities'}
-                </span>
-              </div>
-              <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                Official registered taxpayer entity profiles, legal classifications, contact information, and BIR 2303 tax obligations.
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-pink-500/10 text-pink-400 px-2.5 py-0.5 rounded-full border border-pink-500/20 font-mono font-bold">
+                {companies.length} {companies.length === 1 ? 'entity' : 'entities'} registered
+              </span>
             </div>
           </div>
 

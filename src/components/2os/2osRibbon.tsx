@@ -349,8 +349,25 @@ export default function TwoOSRibbon({
           })}
         </div>
 
-        {/* RIGHT SIDE: COLLAPSE / EXPAND TOOLS ARROW BUTTON (DIRECTLY BELOW PRINT BUTTON) */}
-        <div className="flex items-center flex-shrink-0 pb-1 pl-2">
+        {/* RIGHT SIDE: +REGISTER ENTITY PROFILE BUTTON + COLLAPSE / EXPAND TOOLS ARROW BUTTON */}
+        <div className="flex items-center flex-shrink-0 gap-2 pb-1 pl-2">
+          {/* REGISTER ENTITY PROFILE */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenNewEntryModal) {
+                onOpenNewEntryModal();
+              } else if (onSelectTab) {
+                onSelectTab('companies');
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs rounded-md shadow-xs transition cursor-pointer whitespace-nowrap"
+            title="Register Entity Profile"
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Register Entity Profile</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setIsToolsCollapsed(prev => !prev)}

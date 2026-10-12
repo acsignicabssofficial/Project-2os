@@ -226,23 +226,13 @@ export default function GeneralLedgerTab({
   }, [activeAccountsWithTransactions, selectedAccount, searchTerm]);
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200 space-y-4`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <Book className="w-6 h-6 text-cyan-400" />
-              {mode === 'GENERAL'
-                ? 'General Ledger (Other Transactions, Adjusting Entries, Payroll, PPE — Posted from General Journal)'
-                : 'Special Ledger (All Sales & Purchases Transactions — Posted from Special Journal)'}
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              {mode === 'GENERAL'
-                ? 'General Ledger: T-Accounts and running balances posted exclusively from the General Journal (Adjusting Entries, Payroll, PPE Acquisition & Depreciation, Closing, Reversing, and Other Transactions).'
-                : 'Special Ledger: T-Accounts and running balances posted exclusively from the Special Journal (Subsidiary Sales, Cash Receipts, Collections, Subsidiary Purchases, Cash Disbursements, and Payments).'}
-            </p>
-          </div>
+    <div className="space-y-4">
+      {/* FILTER & SEARCH TOOLBAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            {mode === 'GENERAL' ? 'General Ledger Accounts & Balances' : 'Special Ledger Accounts & Balances'}
+          </span>
 
           <div className="flex items-center gap-3 flex-wrap">
             <div className="relative w-48 sm:w-64">

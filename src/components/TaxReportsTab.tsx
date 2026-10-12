@@ -243,19 +243,13 @@ export default function TaxReportsTab({
   };
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <FileSpreadsheet className="w-6 h-6 text-cyan-400" />
-              BIR Official Tax Reports Suite
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Generate BIR Forms 1701Q/1702Q (Income Tax Return), 2550Q (VAT Return), and 1601-EQ directly from your transaction ledgers.
-            </p>
-          </div>
+    <div className="space-y-4">
+      {/* FORM SELECTOR TOOLBAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-3.5 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            Official Return Generators
+          </span>
 
           {/* Form Selector Sub-navigation */}
           <div className="flex items-center gap-2 bg-zinc-800/40 p-1.5 rounded-xl border border-zinc-700/30">

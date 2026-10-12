@@ -1247,7 +1247,7 @@ export default function TwoOSMobileView({
       )}
 
       {/* ========================================================================= */}
-      {/* SCREEN 5: OTHER TRANSACTIONS (INVOICES, BILLS, JV, ADJUSTMENTS)           */}
+      {/* SCREEN 5: TRANSACTIONS (INVOICES, BILLS, JV, ADJUSTMENTS)                 */}
       {/* ========================================================================= */}
       {currentScreen === 'other' && (
         <div className="px-3 space-y-3.5">

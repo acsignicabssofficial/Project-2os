@@ -389,19 +389,13 @@ export default function FinancialPositionTab({
 
   return (
     <div className="space-y-6">
-      {/* HEADER */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <Landmark className="w-6 h-6 text-cyan-400" />
-              {isBalanceSheetMode ? 'Trial Balance & Adjusting Entries Worksheet' : 'Statement of Financial Position (Card Summary)'}
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              {isBalanceSheetMode
-                ? `Tabulated Trial Balance featuring Unadjusted-Adjustments-Adjusted Worksheet, Debit-Credit View, and Chart of Accounts Summary for ${companyName}.`
-                : `Official Statement of Financial Position presenting Assets, Liabilities, and Equity in Card Summary format for ${companyName}.`}
-            </p>
+      {/* TOOLBAR CONTROLS (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-2xs transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+              {isBalanceSheetMode ? 'Trial Balance Worksheet' : 'Financial Position Summary'}
+            </span>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">

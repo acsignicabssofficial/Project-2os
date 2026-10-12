@@ -207,18 +207,12 @@ export default function AccountTitlesTab({
 
   return (
     <div className="space-y-6">
-      {/* HEADER */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <FileText className="w-6 h-6 text-cyan-400" />
-              Account Titles & Chart of Accounts
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Manage expense account titles, custom financial accounts, and monitor real-time ledger balances by date, month, quarter, or year.
-            </p>
-          </div>
+      {/* CONTROLS TOOLBAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            Ledger Balances & Scope
+          </span>
 
           {/* PERIOD FILTER CONTROLS */}
           <div className="flex flex-wrap items-center gap-2 bg-zinc-500/10 p-2 rounded-xl border border-zinc-700/20">

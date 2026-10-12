@@ -39,17 +39,7 @@ export default function NotesToFSTab({
   const ppeDepr = ppeAssets.reduce((sum, a) => sum + a.accumulated_depreciation, 0);
 
   return (
-    <div className="space-y-6">
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-          <FileText className="w-6 h-6 text-cyan-400" />
-          Notes to Financial Statements & Statutory Disclosures
-        </h2>
-        <p className={`text-xs ${theme.textMuted} mt-1`}>
-          Integral part of the financial statements providing qualitative accounting policies and mandatory BIR RR 15-2010 tax disclosures.
-        </p>
-      </div>
-
+    <div className="space-y-4">
       <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm p-6 space-y-6`}>
         {/* Note 1: Corporate Information */}
         <section className="space-y-2">

@@ -277,25 +277,21 @@ export default function ReportsTab({
       {/* 1. COMPACT COMMAND BAR (MONTH/YEAR SYNC + SUBTABS + PRIVACY) */}
       <div className={`p-3 border ${theme.borderCard} ${theme.bgCard} rounded-xl shadow-xs space-y-2.5`}>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 border-b border-black/5 dark:border-white/5 pb-2.5">
-          {/* Title & Active Company Pill */}
+          {/* Active Company & Period Badges */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400">
               <Calculator className="w-4 h-4" />
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className={`text-sm font-black font-display tracking-tight ${theme.textTitle}`}>
-                  Financial Reports & Analytical Insights
-                </h2>
-                {activeCompany && (
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 font-bold">
-                    {activeCompany.company_name}
-                  </span>
-                )}
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold">
-                  {periodFilterMode === 'month' ? `${MONTH_NAMES[currentMonthIdx]} ${currentYear}` : `Full Year ${currentYear}`}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Reports Filter:</span>
+              {activeCompany && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 font-bold">
+                  {activeCompany.company_name}
                 </span>
-              </div>
+              )}
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold">
+                {periodFilterMode === 'month' ? `${MONTH_NAMES[currentMonthIdx]} ${currentYear}` : `Full Year ${currentYear}`}
+              </span>
             </div>
           </div>
 

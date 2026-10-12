@@ -15,20 +15,14 @@ export default function SLSPTab({ sales, expenses, activeCompany, theme }: SLSPT
   const [activeSubTab, setActiveSubTab] = useState<'sales' | 'purchases'>('sales');
 
   return (
-    <div className="space-y-6">
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <FileSpreadsheet className="w-6 h-6 text-cyan-400" />
-              SLSP - Summary List of Sales & Purchases (BIR eSubmission)
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Quarterly summary list required for VAT compliance under BIR RELIEF format.
-            </p>
-          </div>
+    <div className="space-y-4">
+      <div className={`p-3.5 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            Quarterly VAT Relief Schedules
+          </span>
 
-          <div className="flex items-center gap-2 bg-zinc-500/10 p-1.5 rounded-xl border border-zinc-700/20">
+          <div className="flex items-center gap-2 bg-zinc-500/10 p-1 rounded-xl border border-zinc-700/20">
             <button
               onClick={() => setActiveSubTab('sales')}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${

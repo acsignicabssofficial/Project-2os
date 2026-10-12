@@ -877,6 +877,7 @@ export default function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [showNewEntryPromptModal, setShowNewEntryPromptModal] = useState(false);
+  const [autoOpenCompanyModal, setAutoOpenCompanyModal] = useState(false);
   const [isSettingsCategoryOpen, setIsSettingsCategoryOpen] = useState(false);
   const [importDefaultType, setImportDefaultType] = useState<ImportableDataType>('sales');
 
@@ -1598,6 +1599,7 @@ export default function App() {
           onOpenExportModal={handleOpenExportModal}
           onOpenNewEntryModal={() => {
             setActiveTab('companies');
+            setAutoOpenCompanyModal(true);
           }}
           onOpenInfinityFreeModal={() => setIsInfinityFreeModalOpen(true)}
           onOpenAuditTrail={() => setIsAuditModalOpen(true)}
@@ -1633,6 +1635,10 @@ export default function App() {
           onExportAllSheets={handleOpenExportModal}
           onOpenImportModal={handleOpenImportModal}
           onOpenExportModal={handleOpenExportModal}
+          onOpenNewEntryModal={() => {
+            setActiveTab('companies');
+            setAutoOpenCompanyModal(true);
+          }}
           showPromptModal={showNewEntryPromptModal}
           setShowPromptModal={setShowNewEntryPromptModal}
           isSettingsCategoryOpen={isSettingsCategoryOpen}
@@ -1958,6 +1964,8 @@ export default function App() {
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
+                  autoOpenRegisterModal={autoOpenCompanyModal}
+                  onClearAutoOpenModal={() => setAutoOpenCompanyModal(false)}
                 />
               )}
 

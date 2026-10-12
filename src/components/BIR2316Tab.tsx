@@ -233,18 +233,12 @@ export default function BIR2316Tab({
 
   return (
     <div className="space-y-6">
-      {/* HEADER CONTROLS */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <FileText className="w-6 h-6 text-cyan-400" />
-              BIR Form 2316 Certificate Preview (September 2021 ENCS Replica)
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Certificate of Compensation Payment / Tax Withheld. Built as an <strong>exact 1:1 replica</strong> of the official BIR Form 2316.
-            </p>
-          </div>
+      {/* CONTROLS (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            Certificate Controls
+          </span>
 
           <div className="flex flex-wrap items-center gap-3">
             <button

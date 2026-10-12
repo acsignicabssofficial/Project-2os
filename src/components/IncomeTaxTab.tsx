@@ -199,29 +199,7 @@ export default function IncomeTaxTab({
   };
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm transition-colors duration-200`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <Calculator className="w-6 h-6 text-cyan-400" />
-              Income Tax Computation & Provision Engine
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Computes Net Income Before Tax from books, applies BIR entity-specific tax regimes (Graduated Individual, 8% Flat, RCIT 20%/25%, MCIT 2%, OSD vs Itemized), and posts balanced special tax entries.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-zinc-400">Selected Company:</span>
-            <span className="px-2.5 py-1 text-xs font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-lg">
-              {companyName}
-            </span>
-          </div>
-        </div>
-      </div>
-
+    <div className="space-y-4">
       {/* TAX COMPUTATION FORM & LIVE BREAKDOWN */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 1 Col: Parameters & Configuration */}

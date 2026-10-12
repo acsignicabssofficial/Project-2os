@@ -509,21 +509,13 @@ export default function CustomersTab({
         {/* HEADER & CONTROLS */}
         <div className={`p-5 border-b ${theme.borderCard} flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-500/5`}>
           <div className="flex items-center gap-3">
-            <div className="bg-blue-500/10 text-blue-400 p-2.5 rounded-xl border border-blue-500/20">
-              <Users className="w-6 h-6" />
+            <div className="bg-blue-500/10 text-blue-400 p-2 rounded-xl border border-blue-500/20">
+              <Users className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className={`font-display font-bold text-lg ${theme.textTitle}`}>
-                  Registered Customers Database
-                </h2>
-                <span className="text-xs bg-blue-500/10 text-blue-400 px-2.5 py-0.5 rounded-full border border-blue-500/20 font-mono font-bold">
-                  {companyCustomers.length} {companyCustomers.length === 1 ? 'customer' : 'customers'}
-                </span>
-              </div>
-              <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                Customer master directory with integrated subsidiary ledger, live sales invoicing, and collection tracking.
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-blue-500/10 text-blue-400 px-2.5 py-0.5 rounded-full border border-blue-500/20 font-mono font-bold">
+                {companyCustomers.length} {companyCustomers.length === 1 ? 'customer' : 'customers'} registered
+              </span>
             </div>
           </div>
 

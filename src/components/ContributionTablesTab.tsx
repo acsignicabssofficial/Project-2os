@@ -128,19 +128,13 @@ export default function ContributionTablesTab({
   const sampleNetTakeHome = calcSalary - totalSampleDeductions;
 
   return (
-    <div className="space-y-6">
-      {/* HEADER CARD */}
-      <div className={`p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className={`text-xl font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              <Table className="w-6 h-6 text-cyan-400" />
-              Statutory Contribution & Tax Tables Management
-            </h2>
-            <p className={`text-xs ${theme.textMuted} mt-1`}>
-              Customize official Philippine SSS, PhilHealth, Pag-IBIG, and BIR Income Tax withholding bracket tables used for automatic payroll computations.
-            </p>
-          </div>
+    <div className="space-y-4">
+      {/* CALCULATOR TOOLBAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className={`p-4 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-sm`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <span className="text-xs font-mono font-bold text-zinc-500 uppercase tracking-wider">
+            Statutory Rates & Brackets
+          </span>
 
           <div className="flex items-center gap-2">
             <div className={`p-2.5 px-4 rounded-xl border ${theme.borderCard} ${theme.isLight ? 'bg-slate-100' : 'bg-zinc-800/60'} flex items-center gap-3 text-xs`}>

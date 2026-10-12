@@ -205,18 +205,13 @@ export default function TaxCalendarTab({ activeCompany, theme, triggerAlert }: T
 
   return (
     <div className="space-y-4">
-      {/* COMPACT HEADER BANNER */}
+      {/* STATUS LEGEND TOOLBAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
       <div className={`px-4 py-3 border ${theme.borderCard} ${theme.bgCard} rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3`}>
         <div className="flex items-center gap-2">
-          <Calendar className="w-5 h-5 text-cyan-400 shrink-0" />
-          <div>
-            <h2 className={`text-sm font-bold font-display ${theme.textTitle} flex items-center gap-2`}>
-              BIR Tax Calendar & Filing Compliance Matrix
-            </h2>
-            <p className={`text-[11px] ${theme.textMuted}`}>
-              Active Entity: <strong className="text-cyan-400">{companyName} ({companyTin})</strong> • <span className="text-cyan-400 font-semibold">Glowing cards = Due this month</span>. Click any card to toggle status.
-            </p>
-          </div>
+          <Calendar className="w-4 h-4 text-cyan-400 shrink-0" />
+          <span className={`text-xs ${theme.textMuted}`}>
+            Click any deadline card below to toggle compliance status (<strong className="text-cyan-400 font-semibold">Glowing cards = Due this month</strong>).
+          </span>
         </div>
 
         <div className="flex items-center gap-2 text-xs font-mono">

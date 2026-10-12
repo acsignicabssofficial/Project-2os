@@ -528,21 +528,11 @@ export default function PayrollTab({
   });
 
   return (
-    <div className="space-y-6">
-      {/* TOP HEADER */}
-      <div className="p-6 bg-white border border-slate-200 rounded-2xl shadow-sm transition-colors duration-200">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-bold font-display text-slate-900 flex items-center gap-2">
-              <DollarSign className="w-6 h-6 text-blue-600" />
-              Payroll Management & Register (BIR Form 2316 Fillable Structure)
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Fillable payroll records for Jan to Dec. Follows the <strong>EXACT structure & line numbers of BIR Form 2316 (September 2021 ENCS)</strong>. Every record feeds into <strong>6. BIR Attachments → BIR 2316 Certificate</strong>.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
+    <div className="space-y-4">
+      {/* ACTION TOOLBAR (REDUNDANT TITLE REMOVED PER REQ 4) */}
+      <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-2xs flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-wider">BIR Form 2316 Structure</span>
+        <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleLoadModelImageValues}
@@ -576,7 +566,6 @@ export default function PayrollTab({
             </button>
           </div>
         </div>
-      </div>
 
       {/* SUBTAB 1: EXACT FILLABLE BIR 2316 FORM (LIGHT THEME) */}
       {activeSubTab === 'entry' && (

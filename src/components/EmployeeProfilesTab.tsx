@@ -140,21 +140,13 @@ export default function EmployeeProfilesTab({
         {/* HEADER & CONTROLS */}
         <div className={`p-5 border-b ${theme.borderCard} flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-500/5`}>
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-500/10 text-indigo-400 p-2.5 rounded-xl border border-indigo-500/20">
-              <Users className="w-6 h-6" />
+            <div className="bg-indigo-500/10 text-indigo-400 p-2 rounded-xl border border-indigo-500/20">
+              <Users className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className={`font-display font-bold text-lg ${theme.textTitle}`}>
-                  Employee Masterlist & Profiles
-                </h2>
-                <span className="text-xs bg-indigo-500/10 text-indigo-400 px-2.5 py-0.5 rounded-full border border-indigo-500/20 font-mono font-bold">
-                  {employees.length} {employees.length === 1 ? 'employee' : 'employees'}
-                </span>
-              </div>
-              <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                Manage personnel master records, TIN, salary rates, and mandatory government contributions.
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-indigo-500/10 text-indigo-400 px-2.5 py-0.5 rounded-full border border-indigo-500/20 font-mono font-bold">
+                {employees.length} {employees.length === 1 ? 'employee' : 'employees'} registered
+              </span>
             </div>
           </div>
 
