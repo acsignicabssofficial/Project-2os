@@ -118,7 +118,7 @@ export default function IncomeTaxTab({
   // 3. Post / Save Income Tax Transaction as Special Journal Entry
   const handleRecordIncomeTax = () => {
     if (!activeCompany) {
-      triggerAlert('Please select or create a Company Profile first in the Companies tab!', 'error');
+      triggerAlert('Please select or create an Entity Profile first in the Entity Profiles tab!', 'error');
       return;
     }
 

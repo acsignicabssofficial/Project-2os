@@ -164,7 +164,7 @@ export default function CollectionsTab({
   const handleSaveCollection = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCompany) {
-      triggerAlert("Please select or create a Company Profile first in the Companies tab!", "error");
+      triggerAlert("Please select or create an Entity Profile first in the Entity Profiles tab!", "error");
       return;
     }
     if (!collTin || !collInvNo || !collDate || (!collAmt && parseFloat(collAmt) <= 0)) {

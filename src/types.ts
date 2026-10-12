@@ -23,6 +23,11 @@ export interface Company {
   company_address?: string;
   company_email?: string;
   company_contact?: string;
+  entity_name?: string;
+  entity_address?: string;
+  entity_email?: string;
+  entity_contact?: string;
+  entity_tin?: string;
   client_status?: string;
   date_of_entry?: string;
   // Compatibility properties

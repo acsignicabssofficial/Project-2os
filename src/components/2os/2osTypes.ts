@@ -121,12 +121,12 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
     subTabs: [
       {
         key: 'companies',
-        label: 'Entity Profiles & Branches (formerly Companies)',
-        shortLabel: 'Entity',
+        label: 'Entity Profiles & Branches',
+        shortLabel: 'Entity\nProfile',
         icon: Building2,
         cellRef: 'ENTITY!A1',
-        description: 'Entity: Registered taxpayer legal entity profiles, branch codes (00000 Head Office, 00001 Branch 1), registered address, and RDO.',
-        formula: '=ENTITY_PROFILES(CompanyName, TIN, BranchCode, RDO, VatStatus)'
+        description: 'Entity Profile: Registered taxpayer legal entity profiles, branch codes (00000 Head Office, 00001 Branch 1), registered address, and RDO.',
+        formula: '=ENTITY_PROFILES(EntityName, TIN, BranchCode, RDO, VatStatus)'
       },
       {
         key: 'customers',

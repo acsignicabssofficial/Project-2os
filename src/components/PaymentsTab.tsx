@@ -161,7 +161,7 @@ export default function PaymentsTab({
   const handleSavePayment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCompany) {
-      triggerAlert("Please select or create a Company Profile first in the Companies tab!", "error");
+      triggerAlert("Please select or create an Entity Profile first in the Entity Profiles tab!", "error");
       return;
     }
     if (!payTin || !voucherNo || !paymentDate || !amountPaid) {

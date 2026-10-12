@@ -125,10 +125,10 @@ export default function ModalPromptEntry({
     },
     {
       key: 'companies',
-      title: 'Company Entity Profile',
+      title: 'Entity Profile',
       category: 'Directory',
       icon: Building2,
-      desc: 'Register or update company details, branches, TIN, RDO, and VAT classification.'
+      desc: 'Register or update entity details, branches, TIN, RDO, and VAT classification.'
     },
     {
       key: 'account_titles',

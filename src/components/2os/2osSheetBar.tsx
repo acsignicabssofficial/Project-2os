@@ -287,10 +287,10 @@ export default function TwoOSSheetBar({
                 ? 'bg-violet-100 text-violet-950 hover:bg-violet-200 border border-violet-300'
                 : 'bg-[#0D214D] hover:bg-[#142A5C] text-cyan-300 border border-cyan-500/40'
             }`}
-            title="Manage Company Profiles & Branches"
+            title="Manage Entity Profiles & Branches"
           >
             <Building2 className="w-3 h-3" />
-            <span>Manage Branches</span>
+            <span>Manage Entities</span>
           </button>
         </div>
 

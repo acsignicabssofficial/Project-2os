@@ -1,5 +1,28 @@
 import React, { useState, useMemo } from 'react';
-import { Building2, Landmark, Check, Info, Pencil, Trash2, Plus, X, Search, CheckCircle2, ShieldCheck, Mail, Phone, Calendar, MapPin, FolderTree, Folder, AlertTriangle, ChevronRight, ChevronDown, GitBranch } from 'lucide-react';
+import { 
+  Building2, 
+  Landmark, 
+  Check, 
+  Info, 
+  Pencil, 
+  Trash2, 
+  Plus, 
+  X, 
+  Search, 
+  CheckCircle2, 
+  ShieldCheck, 
+  Mail, 
+  Phone, 
+  Calendar, 
+  MapPin, 
+  FolderTree, 
+  Folder, 
+  AlertTriangle, 
+  ChevronRight, 
+  ChevronDown, 
+  GitBranch,
+  User
+} from 'lucide-react';
 import { Company } from '../types';
 
 interface CompaniesTabProps {
@@ -13,6 +36,18 @@ interface CompaniesTabProps {
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
 }
+
+// Helper to determine if an entity type represents an Individual (Sole Proprietor or Professional)
+export const isIndividualEntity = (type?: string): boolean => {
+  if (!type) return false;
+  const t = type.toUpperCase();
+  return (
+    t.includes('SOLE') || 
+    t.includes('PROP') || 
+    t.includes('PROFESSIONAL') || 
+    t.includes('INDIVIDUAL')
+  );
+};
 
 export default function CompaniesTab({
   companies,
@@ -32,19 +67,31 @@ export default function CompaniesTab({
   const [localSearch, setLocalSearch] = useState('');
   const [expandedMainTins, setExpandedMainTins] = useState<Record<string, boolean>>({});
 
-  // 2 Clean Sub-tabs: 'company' (Profile / Information) and 'bir' (BIR 2303 Tax Obligations)
-  const [formSubTab, setFormSubTab] = useState<'company' | 'bir'>('company');
+  // 2 Clean Sub-tabs: 'entity' (Profile / Information) and 'bir' (BIR 2303 Tax Obligations)
+  const [formSubTab, setFormSubTab] = useState<'entity' | 'bir'>('entity');
 
-  // Fields strictly aligned with Table Company
-  const [companyName, setCompanyName] = useState('');
+  // Classification & Naming fields
+  const [entityType, setEntityType] = useState('CORPORATION');
+  
+  // Non-Individual name field
+  const [entityName, setEntityName] = useState('');
+
+  // Individual name fields (Last Name, First Name, Middle Name, Suffix)
+  const [lastName, setLastName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [suffix, setSuffix] = useState('');
+
+  // Trade Name / Business Style
   const [tradeName, setTradeName] = useState('');
   const [sameTradeName, setSameTradeName] = useState(false);
-  const [entityType, setEntityType] = useState('CORPORATION');
-  const [companyTin, setCompanyTin] = useState('');
+
+  // General Entity fields
+  const [entityTin, setEntityTin] = useState('');
   const [tinBranchCode, setTinBranchCode] = useState('00000');
-  const [companyAddress, setCompanyAddress] = useState('');
-  const [companyEmail, setCompanyEmail] = useState('');
-  const [companyContact, setCompanyContact] = useState('');
+  const [entityAddress, setEntityAddress] = useState('');
+  const [entityEmail, setEntityEmail] = useState('');
+  const [entityContact, setEntityContact] = useState('');
   const [incorporationDate, setIncorporationDate] = useState('');
   const [rdo, setRdo] = useState('');
   const [lineOfBusiness, setLineOfBusiness] = useState('');
@@ -62,9 +109,37 @@ export default function CompaniesTab({
 
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
 
+  // Helper to format individual registered name
+  const getComputedIndividualName = (
+    l: string = lastName, 
+    f: string = firstName, 
+    m: string = middleName, 
+    s: string = suffix
+  ): string => {
+    const lTrim = l.trim();
+    const fTrim = f.trim();
+    const mTrim = m.trim();
+    const sTrim = s.trim();
+
+    if (!lTrim && !fTrim) return '';
+
+    const firstParts: string[] = [];
+    if (fTrim) firstParts.push(fTrim);
+    if (mTrim) firstParts.push(mTrim);
+    if (sTrim) firstParts.push(sTrim);
+
+    if (lTrim && firstParts.length > 0) {
+      return `${lTrim}, ${firstParts.join(' ')}`;
+    } else if (lTrim) {
+      return lTrim;
+    } else {
+      return firstParts.join(' ');
+    }
+  };
+
   // Extract 9-digit TIN base and 5-digit branch code
   const extractBaseTin9 = (c: Company): string => {
-    const raw = (c.company_tin || '').replace(/\D/g, '');
+    const raw = (c.company_tin || c.entity_tin || '').replace(/\D/g, '');
     return raw.slice(0, 9);
   };
 
@@ -72,7 +147,7 @@ export default function CompaniesTab({
     if (c.tin_branch_code && c.tin_branch_code.trim()) {
       return c.tin_branch_code.replace(/\D/g, '').padStart(5, '0').slice(0, 5);
     }
-    const raw = (c.company_tin || '').replace(/\D/g, '');
+    const raw = (c.company_tin || c.entity_tin || '').replace(/\D/g, '');
     if (raw.length > 9) {
       return raw.slice(9, 14).padStart(5, '0').slice(0, 5);
     }
@@ -93,7 +168,7 @@ export default function CompaniesTab({
     if (digits.length > 0) formatted += digits.slice(0, 3);
     if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
     if (digits.length > 6) formatted += '-' + digits.slice(6, 9);
-    setCompanyTin(formatted);
+    setEntityTin(formatted);
   };
 
   const handleBranchCodeChange = (val: string) => {
@@ -103,16 +178,20 @@ export default function CompaniesTab({
 
   const resetForm = () => {
     setEditingCompanyId(null);
-    setFormSubTab('company');
-    setCompanyName('');
+    setFormSubTab('entity');
+    setEntityType('CORPORATION');
+    setEntityName('');
+    setLastName('');
+    setFirstName('');
+    setMiddleName('');
+    setSuffix('');
     setTradeName('');
     setSameTradeName(false);
-    setEntityType('CORPORATION');
-    setCompanyTin('');
+    setEntityTin('');
     setTinBranchCode('00000');
-    setCompanyAddress('');
-    setCompanyEmail('');
-    setCompanyContact('');
+    setEntityAddress('');
+    setEntityEmail('');
+    setEntityContact('');
     setIncorporationDate('');
     setRdo('');
     setLineOfBusiness('');
@@ -135,18 +214,34 @@ export default function CompaniesTab({
   const handleSaveCompany = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const finalCompName = companyName.trim();
-    const finalTradeName = (sameTradeName ? finalCompName : tradeName.trim());
-    const cleanTinDigits = companyTin.replace(/\D/g, '');
+    const isIndiv = isIndividualEntity(entityType);
+    let finalEntityName = '';
+
+    if (isIndiv) {
+      if (!lastName.trim()) {
+        triggerAlert('Last Name is required for individual entities.', 'error');
+        return;
+      }
+      if (!firstName.trim()) {
+        triggerAlert('First Name is required for individual entities.', 'error');
+        return;
+      }
+      finalEntityName = getComputedIndividualName();
+    } else {
+      if (!entityName.trim()) {
+        triggerAlert('Entity Name is required.', 'error');
+        return;
+      }
+      finalEntityName = entityName.trim();
+    }
+
+    const finalTradeName = (sameTradeName ? finalEntityName : tradeName.trim());
+    const cleanTinDigits = entityTin.replace(/\D/g, '');
     const rawBranchDigits = tinBranchCode.replace(/\D/g, '');
     const cleanBranch = rawBranchDigits ? rawBranchDigits.padStart(5, '0').slice(0, 5) : '';
 
-    if (!finalCompName) {
-      triggerAlert('Company Name is required.', 'error');
-      return;
-    }
     if (!finalTradeName) {
-      triggerAlert('Trade Name is required (or check "Same with Company Name").', 'error');
+      triggerAlert('Trade Name is required (or check "Same with Entity Name").', 'error');
       return;
     }
     if (!entityType) {
@@ -154,7 +249,7 @@ export default function CompaniesTab({
       return;
     }
     if (cleanTinDigits.length !== 9) {
-      triggerAlert('Company TIN (9 Digits) is required.', 'error');
+      triggerAlert('Entity TIN (9 Digits) is required.', 'error');
       return;
     }
     if (!cleanBranch) {
@@ -175,15 +270,24 @@ export default function CompaniesTab({
 
     const savedCompany: Company = {
       id: editingCompanyId !== null ? editingCompanyId : Date.now(),
-      company_name: finalCompName,
+      company_name: finalEntityName,
+      entity_name: finalEntityName,
+      last_name: isIndiv ? lastName.trim() : undefined,
+      first_name: isIndiv ? firstName.trim() : undefined,
+      middle_name: isIndiv ? middleName.trim() : undefined,
+      suffix: isIndiv ? suffix.trim() : undefined,
       trade_name: finalTradeName,
       entity_type: entityType,
       company_tin: formattedFullTin,
+      entity_tin: formattedFullTin,
       tin_branch_code: cleanBranch,
-      company_address: companyAddress.trim(),
-      registered_address: companyAddress.trim(),
-      company_email: companyEmail.trim(),
-      company_contact: companyContact.trim(),
+      company_address: entityAddress.trim(),
+      entity_address: entityAddress.trim(),
+      registered_address: entityAddress.trim(),
+      company_email: entityEmail.trim(),
+      entity_email: entityEmail.trim(),
+      company_contact: entityContact.trim(),
+      entity_contact: entityContact.trim(),
       birthday_or_incorporation_date: incorporationDate,
       rdo: rdo.trim(),
       rdo_code: rdo.trim(),
@@ -205,7 +309,7 @@ export default function CompaniesTab({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        company_name: finalCompName,
+        company_name: finalEntityName,
         branch_code: cleanBranch,
         year: createdYear
       })
@@ -232,14 +336,14 @@ export default function CompaniesTab({
         }
         return c;
       }));
-      triggerAlert(`Entity profile "${finalCompName}" (${formatBranchRoleLabel(cleanBranch)}) updated!`, 'success');
+      triggerAlert(`Entity profile "${finalEntityName}" (${formatBranchRoleLabel(cleanBranch)}) updated successfully!`, 'success');
       resetForm();
       setIsModalOpen(false);
     } else {
       setCompanies(prev => [...prev, savedCompany]);
       setActiveCompany(savedCompany);
       if (onSelectBranch) onSelectBranch(cleanBranch);
-      triggerAlert(`Entity profile "${finalCompName}" (${formatBranchRoleLabel(cleanBranch)}) registered!`, 'success');
+      triggerAlert(`Entity profile "${finalEntityName}" (${formatBranchRoleLabel(cleanBranch)}) registered successfully!`, 'success');
       resetForm();
       setIsModalOpen(false);
     }
@@ -264,33 +368,73 @@ export default function CompaniesTab({
     if (selectedDirectoryCompany && selectedDirectoryCompany.id === id) {
       setSelectedDirectoryCompany(null);
     }
-    triggerAlert(`Deleted Company profile "${company_name || 'Entity'}" successfully!`, 'info');
+    triggerAlert(`Deleted Entity profile "${company_name || 'Entity'}" successfully!`, 'info');
     setCompanyToDelete(null);
   };
 
   const handleEditClick = (c: Company) => {
     setEditingCompanyId(c.id);
-    setFormSubTab('company');
-    const cName = c.company_name || '';
+    setFormSubTab('entity');
+    const cName = c.company_name || c.entity_name || '';
     const tName = c.trade_name || cName;
-    setCompanyName(cName);
+    const currentEntityType = c.entity_type || 'CORPORATION';
+    const isIndiv = isIndividualEntity(currentEntityType);
+
+    setEntityType(currentEntityType);
+
+    if (isIndiv) {
+      if (c.last_name || c.first_name) {
+        setLastName(c.last_name || '');
+        setFirstName(c.first_name || '');
+        setMiddleName(c.middle_name || '');
+        setSuffix(c.suffix || '');
+      } else if (cName) {
+        // Attempt to parse "Last, First Middle" format
+        if (cName.includes(',')) {
+          const [lPart, ...rest] = cName.split(',');
+          setLastName(lPart.trim());
+          const fParts = rest.join(',').trim().split(/\s+/);
+          setFirstName(fParts[0] || '');
+          setMiddleName(fParts.slice(1).join(' ') || '');
+          setSuffix('');
+        } else {
+          const parts = cName.trim().split(/\s+/);
+          if (parts.length >= 2) {
+            setLastName(parts[parts.length - 1]);
+            setFirstName(parts.slice(0, parts.length - 1).join(' '));
+          } else {
+            setLastName(cName);
+            setFirstName('');
+          }
+          setMiddleName('');
+          setSuffix('');
+        }
+      }
+      setEntityName('');
+    } else {
+      setEntityName(cName);
+      setLastName('');
+      setFirstName('');
+      setMiddleName('');
+      setSuffix('');
+    }
+
     setTradeName(tName);
     setSameTradeName(Boolean(cName && tName && cName === tName));
-    setEntityType(c.entity_type || 'CORPORATION');
     
-    const tinStr = (c.company_tin || '');
+    const tinStr = (c.company_tin || c.entity_tin || '');
     const splitIndex = tinStr.lastIndexOf('-');
     if (splitIndex !== -1 && splitIndex > 5) {
-      setCompanyTin(tinStr.slice(0, splitIndex));
+      setEntityTin(tinStr.slice(0, splitIndex));
       setTinBranchCode(tinStr.slice(splitIndex + 1));
     } else {
-      setCompanyTin(tinStr);
+      setEntityTin(tinStr);
       setTinBranchCode(c.tin_branch_code || '00000');
     }
 
-    setCompanyAddress(c.company_address || c.registered_address || '');
-    setCompanyEmail(c.company_email || '');
-    setCompanyContact(c.company_contact || '');
+    setEntityAddress(c.company_address || c.registered_address || c.entity_address || '');
+    setEntityEmail(c.company_email || c.entity_email || '');
+    setEntityContact(c.company_contact || c.entity_contact || '');
     setIncorporationDate(c.birthday_or_incorporation_date || '');
     setRdo(c.rdo || c.rdo_code || '');
     setLineOfBusiness(c.line_of_business || '');
@@ -321,7 +465,7 @@ export default function CompaniesTab({
     );
   });
 
-  // Group entities by 9-digit TIN so Main (00000) is the parent row with a collapse/expand arrow for its branches (00001, 00009, etc.)
+  // Group entities by 9-digit TIN so Main (00000) is the parent row with a collapse/expand arrow for its branches
   const groupedEntityHierarchy = useMemo(() => {
     const groupsMap = new Map<string, { main: Company | null; branches: Company[]; tinKey: string }>();
 
@@ -339,7 +483,6 @@ export default function CompaniesTab({
       }
     });
 
-    // Sort branches numerically by branch code (00001 -> Branch 1, 00009 -> Branch 9, etc.)
     const result: Array<{ parent: Company; children: Company[]; tinKey: string }> = [];
     groupsMap.forEach((grp) => {
       const sortedBranches = [...grp.branches].sort((a, b) => {
@@ -354,7 +497,6 @@ export default function CompaniesTab({
           tinKey: grp.tinKey
         });
       } else if (sortedBranches.length > 0) {
-        // Fallback if a branch exists before a 00000 main is created
         result.push({
           parent: sortedBranches[0],
           children: sortedBranches.slice(1),
@@ -368,7 +510,7 @@ export default function CompaniesTab({
 
   return (
     <div className="flex flex-col gap-6 w-full">
-      {/* REGISTERED COMPANIES MASTERLIST DATABASE */}
+      {/* REGISTERED ENTITIES MASTERLIST DATABASE */}
       <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl shadow-sm overflow-hidden flex flex-col`}>
         {/* HEADER & CONTROLS */}
         <div className={`p-5 border-b ${theme.borderCard} flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-500/5`}>
@@ -379,14 +521,14 @@ export default function CompaniesTab({
             <div>
               <div className="flex items-center gap-2.5">
                 <h2 className={`font-display font-bold text-lg ${theme.textTitle}`}>
-                  Company Profiles & Registration Database
+                  Entity Profiles & Registration Database
                 </h2>
                 <span className="text-xs bg-pink-500/10 text-pink-400 px-2.5 py-0.5 rounded-full border border-pink-500/20 font-mono font-bold">
                   {companies.length} {companies.length === 1 ? 'entity' : 'entities'}
                 </span>
               </div>
               <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                Official registered companies, entity classification, contact information, and BIR 2303 tax obligations.
+                Official registered taxpayer entity profiles, legal classifications, contact information, and BIR 2303 tax obligations.
               </p>
             </div>
           </div>
@@ -397,21 +539,21 @@ export default function CompaniesTab({
               <Search className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
               <input
                 type="text"
-                placeholder="Search company, TIN, or RDO..."
+                placeholder="Search entity, TIN, or RDO..."
                 value={localSearch}
                 onChange={(e) => setLocalSearch(e.target.value)}
                 className={`pl-8 pr-3 py-2 text-xs rounded-xl border bg-transparent w-56 font-sans ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
               />
             </div>
 
-            {/* REGISTER COMPANY BUTTON (OPENS POPUP MODAL) */}
+            {/* REGISTER ENTITY BUTTON (OPENS POPUP MODAL) */}
             <button
               type="button"
               onClick={openNewCompanyModal}
               className="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
-              Register Company Profile / Entity
+              Register Entity Profile
             </button>
           </div>
         </div>
@@ -421,8 +563,8 @@ export default function CompaniesTab({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className={`bg-zinc-500/5 ${theme.textMuted} uppercase font-bold tracking-wider border-b ${theme.borderCard}`}>
-                <th className="p-3.5">Company TIN & Role</th>
-                <th className="p-3.5">Company Name</th>
+                <th className="p-3.5">Entity TIN & Branch Role</th>
+                <th className="p-3.5">Entity Name / Registered Taxpayer</th>
                 <th className="p-3.5">Trade Name</th>
                 <th className="p-3.5">Entity Type</th>
                 <th className="p-3.5">RDO Code</th>
@@ -435,8 +577,8 @@ export default function CompaniesTab({
                 <tr>
                   <td colSpan={7} className="p-12 text-center text-zinc-500">
                     <Building2 className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                    <p className="font-semibold text-sm">No Company Entities Found</p>
-                    <p className="text-xs mt-1">Click "Register Company Profile / Entity" above to register your first workspace.</p>
+                    <p className="font-semibold text-sm">No Entity Profiles Found</p>
+                    <p className="text-xs mt-1">Click "Register Entity Profile" above to register your first workspace.</p>
                   </td>
                 </tr>
               ) : (
@@ -474,7 +616,7 @@ export default function CompaniesTab({
                               <span className="w-5 inline-block" />
                             )}
                             <div className="flex flex-col">
-                              <span className="text-cyan-600 dark:text-cyan-400">{c.company_tin}</span>
+                              <span className="text-cyan-600 dark:text-cyan-400">{c.company_tin || c.entity_tin}</span>
                               <div className="flex items-center gap-1.5 mt-0.5">
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-sans font-bold uppercase ${
                                   isMainEntity
@@ -508,7 +650,11 @@ export default function CompaniesTab({
                           </span>
                         </td>
                         <td className="p-3.5">
-                          <span className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-bold text-[11px]">
+                          <span className={`px-2.5 py-1 rounded-lg border font-bold text-[11px] ${
+                            isIndividualEntity(c.entity_type)
+                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                              : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20'
+                          }`}>
                             {c.entity_type || 'CORPORATION'}
                           </span>
                         </td>
@@ -590,7 +736,7 @@ export default function CompaniesTab({
       </div>
 
       {/* ========================================================================= */}
-      {/* POPUP MODAL: REGISTER / EDIT COMPANY PROFILE ENTITY                       */}
+      {/* POPUP MODAL: REGISTER / EDIT ENTITY PROFILE                               */}
       {/* ========================================================================= */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-fadeIn">
@@ -606,7 +752,7 @@ export default function CompaniesTab({
                 </div>
                 <div>
                   <h3 className={`font-display font-bold text-base ${theme.textTitle}`}>
-                    {editingCompanyId !== null ? "Update Company Profile" : "Register Company Profile / Entity"}
+                    {editingCompanyId !== null ? "Update Entity Profile" : "Register Entity Profile"}
                   </h3>
                   <p className={`text-xs ${theme.textMuted} mt-0.5`}>
                     Branch code <span className="font-mono font-bold text-emerald-500">00000</span> = Main (Head Office). Any non-00000 branch code (<span className="font-mono font-bold text-sky-500">00001</span> = Branch 1, <span className="font-mono font-bold text-sky-500">00009</span> = Branch 9) is a Branch under the same TIN.
@@ -633,19 +779,19 @@ export default function CompaniesTab({
               </div>
             </div>
 
-            {/* 2 CLEAN MODAL SUB-TABS: Company Information & BIR 2303 */}
+            {/* 2 CLEAN MODAL SUB-TABS: Entity Information & BIR 2303 */}
             <div className="flex gap-2 px-6 pt-4 pb-2 border-b border-zinc-800/40 bg-zinc-500/5">
               <button
                 type="button"
-                onClick={() => setFormSubTab('company')}
+                onClick={() => setFormSubTab('entity')}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  formSubTab === 'company'
+                  formSubTab === 'entity'
                     ? 'bg-pink-600 text-white shadow-sm'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                 }`}
               >
                 <Building2 className="w-4 h-4" />
-                1. Company Profile & Tax Details
+                1. Entity Profile & Tax Details
               </button>
               <button
                 type="button"
@@ -663,19 +809,160 @@ export default function CompaniesTab({
 
             {/* MODAL SCROLLABLE BODY (FORM) */}
             <form onSubmit={handleSaveCompany} className="flex flex-col flex-1 overflow-y-auto p-6">
-              {/* TAB 1: COMPANY INFORMATION */}
-              {formSubTab === 'company' && (
+              {/* TAB 1: ENTITY INFORMATION */}
+              {formSubTab === 'entity' && (
                 <div className="flex flex-col gap-4 animate-fadeIn">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
+                  {/* Entity Classification & Type Selector */}
+                  <div>
+                    <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>
+                      Entity Classification & Type *
+                    </label>
+                    <select
+                      value={entityType}
+                      onChange={(e) => {
+                        const newType = e.target.value;
+                        setEntityType(newType);
+                        if (sameTradeName) {
+                          if (isIndividualEntity(newType)) {
+                            setTradeName(getComputedIndividualName());
+                          } else {
+                            setTradeName(entityName);
+                          }
+                        }
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
+                      required
+                    >
+                      <optgroup label="Individual Entities (Asks Last Name, First Name, Middle Name)">
+                        <option value="SOLE PROPRIETORSHIP" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
+                          Sole Proprietor / Sole Proprietorship (Individual)
+                        </option>
+                        <option value="PROFESSIONAL" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
+                          Professional / Practitioner / Freelancer (Individual)
+                        </option>
+                      </optgroup>
+                      <optgroup label="Non-Individual Entities (Asks Entity Name)">
+                        <option value="CORPORATION" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
+                          Corporation (Non-Individual)
+                        </option>
+                        <option value="OPC" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
+                          One Person Corporation - OPC (Non-Individual)
+                        </option>
+                        <option value="PARTNERSHIP" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
+                          Partnership (Non-Individual)
+                        </option>
+                        <option value="GENERAL PROFESSIONAL PARTNERSHIP (GPP)" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
+                          General Professional Partnership - GPP (Non-Individual)
+                        </option>
+                        <option value="COOPERATIVE" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
+                          Cooperative (Non-Individual)
+                        </option>
+                        <option value="NON-PROFIT / FOUNDATION" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
+                          Non-Profit / Foundation / Tax-Exempt (Non-Individual)
+                        </option>
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  {/* CONDITIONAL NAME INPUTS: INDIVIDUAL VS NON-INDIVIDUAL */}
+                  {isIndividualEntity(entityType) ? (
+                    <div className="p-4 rounded-xl border border-pink-500/20 bg-pink-500/5 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-bold text-pink-400">
+                        <User className="w-4 h-4" />
+                        <span>Individual Taxpayer Identity (As requested on BIR Form 1901 & 2303)</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                          <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Last Name *</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Dela Cruz"
+                            value={lastName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setLastName(val);
+                              if (sameTradeName) {
+                                setTradeName(getComputedIndividualName(val, firstName, middleName, suffix));
+                              }
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>First Name *</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Juan"
+                            value={firstName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setFirstName(val);
+                              if (sameTradeName) {
+                                setTradeName(getComputedIndividualName(lastName, val, middleName, suffix));
+                              }
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Middle Name</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Santos"
+                            value={middleName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setMiddleName(val);
+                              if (sameTradeName) {
+                                setTradeName(getComputedIndividualName(lastName, firstName, val, suffix));
+                              }
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
+                          />
+                        </div>
+
+                        <div>
+                          <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Suffix (Optional)</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Jr., III"
+                            value={suffix}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSuffix(val);
+                              if (sameTradeName) {
+                                setTradeName(getComputedIndividualName(lastName, firstName, middleName, val));
+                              }
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Computed Registered Name Display */}
+                      <div className="px-3.5 py-2 rounded-xl bg-black/10 dark:bg-white/5 border border-pink-500/20 text-xs flex items-center justify-between">
+                        <span className={`text-[11px] ${theme.textMuted}`}>Official Taxpayer Full Name:</span>
+                        <span className="font-bold font-mono text-pink-400">
+                          {getComputedIndividualName(lastName, firstName, middleName, suffix) || '(Please enter Last Name and First Name)'}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
                     <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Name *</label>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Entity Name *</label>
                       <input
                         type="text"
-                        placeholder="e.g. ABC Corporation"
-                        value={companyName}
+                        placeholder="e.g. ABC Corporation / Acme Tech Solutions Inc."
+                        value={entityName}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setCompanyName(val);
+                          setEntityName(val);
                           if (sameTradeName) {
                             setTradeName(val);
                           }
@@ -684,64 +971,52 @@ export default function CompaniesTab({
                         required
                       />
                     </div>
+                  )}
 
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className={`block text-xs font-bold ${theme.textMuted}`}>Trade Name *</label>
-                        <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-pink-500 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={sameTradeName}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setSameTradeName(checked);
-                              if (checked) {
-                                setTradeName(companyName);
-                              }
-                            }}
-                            className="w-3.5 h-3.5 rounded accent-pink-600 cursor-pointer"
-                          />
-                          <span>Same with Company Name</span>
-                        </label>
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="e.g. ABC Store / Brand Name"
-                        value={sameTradeName ? companyName : tradeName}
-                        onChange={(e) => {
-                          setSameTradeName(false);
-                          setTradeName(e.target.value);
-                        }}
-                        className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
-                        required
-                      />
+                  {/* Trade Name / Business Style */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className={`block text-xs font-bold ${theme.textMuted}`}>Trade Name / Business Name *</label>
+                      <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-pink-500 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={sameTradeName}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setSameTradeName(checked);
+                            if (checked) {
+                              const currentVal = isIndividualEntity(entityType)
+                                ? getComputedIndividualName(lastName, firstName, middleName, suffix)
+                                : entityName;
+                              setTradeName(currentVal);
+                            }
+                          }}
+                          className="w-3.5 h-3.5 rounded accent-pink-600 cursor-pointer"
+                        />
+                        <span>Same with {isIndividualEntity(entityType) ? 'Registered Name' : 'Entity Name'}</span>
+                      </label>
                     </div>
+                    <input
+                      type="text"
+                      placeholder={isIndividualEntity(entityType) ? "e.g. Dela Cruz Clinic / Brand Store" : "e.g. ABC Store / Brand Name"}
+                      value={sameTradeName ? (isIndividualEntity(entityType) ? getComputedIndividualName(lastName, firstName, middleName, suffix) : entityName) : tradeName}
+                      onChange={(e) => {
+                        setSameTradeName(false);
+                        setTradeName(e.target.value);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-bold ${theme.borderInput} ${theme.textMain} focus:outline-hidden focus:ring-1 focus:ring-pink-500`}
+                      required
+                    />
                   </div>
 
+                  {/* Entity TIN, Branch Code & Birthday / Incorp Date */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Entity Type *</label>
-                      <select
-                        value={entityType}
-                        onChange={(e) => setEntityType(e.target.value)}
-                        className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium cursor-pointer ${theme.borderInput} ${theme.textMain}`}
-                        required
-                      >
-                        <option value="SOLE PROPRIETORSHIP" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Sole Proprietorship</option>
-                        <option value="PARTNERSHIP" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Partnership</option>
-                        <option value="CORPORATION" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Corporation</option>
-                        <option value="OPC" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>One Person Corporation (OPC)</option>
-                        <option value="COOPERATIVE" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Cooperative</option>
-                        <option value="NON-PROFIT / FOUNDATION" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Non-Profit / Foundation</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company TIN (9 Digits) *</label>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Entity TIN (9 Digits) *</label>
                       <input
                         type="text"
                         placeholder="111-111-111"
-                        value={companyTin}
+                        value={entityTin}
                         onChange={(e) => handleTinChange(e.target.value)}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-mono font-bold ${theme.borderInput} ${theme.textMain}`}
                         required
@@ -768,11 +1043,11 @@ export default function CompaniesTab({
                         required
                       />
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Birthday / Incorporation Date *</label>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>
+                        {isIndividualEntity(entityType) ? 'Birthday *' : 'Incorporation Date *'}
+                      </label>
                       <input
                         type="date"
                         value={incorporationDate}
@@ -781,7 +1056,10 @@ export default function CompaniesTab({
                         required
                       />
                     </div>
+                  </div>
 
+                  {/* RDO Code & Line of Business */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>RDO Code / District *</label>
                       <input
@@ -793,53 +1071,56 @@ export default function CompaniesTab({
                         required
                       />
                     </div>
-                  </div>
-
-                  <div>
-                    <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Address (Optional)</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 15F Tower 1, Ayala Avenue, Makati City, Metro Manila"
-                      value={companyAddress}
-                      onChange={(e) => setCompanyAddress(e.target.value)}
-                      className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Email (Optional)</label>
-                      <input
-                        type="email"
-                        placeholder="accounting@company.com"
-                        value={companyEmail}
-                        onChange={(e) => setCompanyEmail(e.target.value)}
-                        className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
-                      />
-                    </div>
-
-                    <div>
-                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Company Contact (Optional)</label>
-                      <input
-                        type="text"
-                        placeholder="0917-123-4567"
-                        value={companyContact}
-                        onChange={(e) => setCompanyContact(e.target.value)}
-                        className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
-                      />
-                    </div>
 
                     <div>
                       <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Line of Business (Optional)</label>
                       <input
                         type="text"
-                        placeholder="e.g. General Wholesale & IT Consulting"
+                        placeholder="e.g. Medical Services / General Merchandise"
                         value={lineOfBusiness}
                         onChange={(e) => setLineOfBusiness(e.target.value)}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
                       />
                     </div>
                   </div>
+
+                  {/* Entity Address */}
+                  <div>
+                    <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Entity Address (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 15F Tower 1, Ayala Avenue, Makati City, Metro Manila"
+                      value={entityAddress}
+                      onChange={(e) => setEntityAddress(e.target.value)}
+                      className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
+                    />
+                  </div>
+
+                  {/* Entity Email & Contact */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Entity Email (Optional)</label>
+                      <input
+                        type="email"
+                        placeholder="taxpayer@domain.com"
+                        value={entityEmail}
+                        onChange={(e) => setEntityEmail(e.target.value)}
+                        className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
+                      />
+                    </div>
+
+                    <div>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Entity Contact (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="0917-123-4567"
+                        value={entityContact}
+                        onChange={(e) => setEntityContact(e.target.value)}
+                        className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-mono ${theme.borderInput} ${theme.textMain}`}
+                      />
+                    </div>
+                  </div>
+
                 </div>
               )}
 
@@ -954,7 +1235,7 @@ export default function CompaniesTab({
                       {/* 4. Expanded Withholding Tax */}
                       <div className="p-3 rounded-xl border border-zinc-700/50 bg-zinc-900/30 flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-xs font-bold text-slate-900 dark:text-zinc-200">Expanded Withholding Tax</p>
+                          <p className="text-xs font-bold text-slate-900 dark:text-zinc-200">Expanded Withholding Tax (EWT)</p>
                           <p className="text-[10px] text-zinc-500">BIR 0619E / 1601EQ</p>
                         </div>
                         <div className="flex rounded-lg overflow-hidden border border-zinc-700 p-0.5 bg-zinc-900">
@@ -983,7 +1264,7 @@ export default function CompaniesTab({
                       <div className="p-3 rounded-xl border border-zinc-700/50 bg-zinc-900/30 flex items-center justify-between gap-3">
                         <div>
                           <p className="text-xs font-bold text-slate-900 dark:text-zinc-200">Withholding on Compensation</p>
-                          <p className="text-[10px] text-zinc-500">BIR 1601-C (Payroll Tax)</p>
+                          <p className="text-[10px] text-zinc-500">BIR Form 1601C</p>
                         </div>
                         <div className="flex rounded-lg overflow-hidden border border-zinc-700 p-0.5 bg-zinc-900">
                           <button
@@ -1011,7 +1292,7 @@ export default function CompaniesTab({
                       <div className="p-3 rounded-xl border border-zinc-700/50 bg-zinc-900/30 flex items-center justify-between gap-3">
                         <div>
                           <p className="text-xs font-bold text-slate-900 dark:text-zinc-200">Fringe Benefits Tax</p>
-                          <p className="text-[10px] text-zinc-500">BIR 1603Q</p>
+                          <p className="text-[10px] text-zinc-500">BIR Form 1603Q</p>
                         </div>
                         <div className="flex rounded-lg overflow-hidden border border-zinc-700 p-0.5 bg-zinc-900">
                           <button
@@ -1063,11 +1344,11 @@ export default function CompaniesTab({
                         </div>
                       </div>
 
-                      {/* 8. Monthly Documentary Stamp */}
+                      {/* 8. Monthly Documentary Stamp Tax */}
                       <div className="p-3 rounded-xl border border-zinc-700/50 bg-zinc-900/30 flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-xs font-bold text-slate-900 dark:text-zinc-200">Monthly Documentary Stamp</p>
-                          <p className="text-[10px] text-zinc-500">BIR Form 2000 / 2000-OT</p>
+                          <p className="text-xs font-bold text-slate-900 dark:text-zinc-200">Monthly Documentary Stamp Tax</p>
+                          <p className="text-[10px] text-zinc-500">BIR Form 2000</p>
                         </div>
                         <div className="flex rounded-lg overflow-hidden border border-zinc-700 p-0.5 bg-zinc-900">
                           <button
@@ -1095,8 +1376,8 @@ export default function CompaniesTab({
                 </div>
               )}
 
-              {/* MODAL FOOTER CONTROLS */}
-              <div className={`mt-6 pt-4 border-t ${theme.borderCard} flex items-center justify-between`}>
+              {/* MODAL FOOTER BUTTONS */}
+              <div className={`mt-6 pt-4 border-t ${theme.borderCard} flex items-center justify-between gap-3`}>
                 <button
                   type="button"
                   onClick={() => {
@@ -1114,7 +1395,7 @@ export default function CompaniesTab({
                     className="flex items-center gap-2 px-6 py-2.5 bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
                   >
                     <Check className="w-4 h-4" />
-                    {editingCompanyId !== null ? "Update Company Profile" : "Register Company Profile"}
+                    {editingCompanyId !== null ? "Update Entity Profile" : "Register Entity Profile"}
                   </button>
                 </div>
               </div>
@@ -1122,6 +1403,7 @@ export default function CompaniesTab({
           </div>
         </div>
       )}
+
       {/* ========================================================================= */}
       {/* POPUP MODAL: VIEW ENTITY DIRECTORY TREE STRUCTURE                         */}
       {/* ========================================================================= */}
@@ -1235,7 +1517,7 @@ export default function CompaniesTab({
       )}
 
       {/* ========================================================================= */}
-      {/* POPUP MODAL: DELETE COMPANY WARNING & CONFIRMATION                        */}
+      {/* POPUP MODAL: DELETE ENTITY PROFILE WARNING & CONFIRMATION                 */}
       {/* ========================================================================= */}
       {companyToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-fadeIn">
@@ -1250,10 +1532,10 @@ export default function CompaniesTab({
                 </div>
                 <div>
                   <h3 className={`font-display font-bold text-base ${theme.textTitle}`}>
-                    Warning: Delete Company Profile?
+                    Warning: Delete Entity Profile?
                   </h3>
                   <p className="text-xs text-rose-400 font-medium mt-0.5">
-                    This action will remove the entity from your masterlist.
+                    This action will remove the entity profile from your masterlist.
                   </p>
                 </div>
               </div>
@@ -1283,7 +1565,7 @@ export default function CompaniesTab({
               </div>
 
               <p className={`text-xs ${theme.textMuted} leading-relaxed`}>
-                Are you sure you want to permanently delete this company profile? Please confirm to proceed.
+                Are you sure you want to permanently delete this entity profile? Please confirm to proceed.
               </p>
             </div>
 
@@ -1301,7 +1583,7 @@ export default function CompaniesTab({
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-500 text-white shadow-md transition cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                Yes, Delete Company
+                Yes, Delete Entity
               </button>
             </div>
           </div>

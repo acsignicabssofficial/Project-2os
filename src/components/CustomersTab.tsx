@@ -63,7 +63,7 @@ export default function CustomersTab({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!activeCompany) {
-      triggerAlert("Please select or create a Company Profile first in the Companies tab!", "error");
+      triggerAlert("Please select or create an Entity Profile first in the Entity Profiles tab!", "error");
       e.target.value = '';
       return;
     }

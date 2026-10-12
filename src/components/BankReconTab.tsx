@@ -205,7 +205,7 @@ export default function BankReconTab({
   // Generate Bank Recon Adjusting Entry directly into Special Journal
   const handleGenerateBankAJE = () => {
     if (!activeCompany) {
-      triggerAlert('Please select an active Company Profile first!', 'error');
+      triggerAlert('Please select an active Entity Profile first!', 'error');
       return;
     }
 

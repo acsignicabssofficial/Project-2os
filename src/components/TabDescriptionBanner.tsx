@@ -143,7 +143,7 @@ export const TAB_DESCRIPTIONS: Record<string, TabDescriptionItem> = {
   // 2. DIRECTORY
   companies: {
     key: 'companies',
-    title: 'Company Profiles & Settings',
+    title: 'Entity Profiles & Settings',
     groupName: 'DIRECTORY',
     groupNumber: 'Main Menu 2',
     icon: Building2,
@@ -152,9 +152,9 @@ export const TAB_DESCRIPTIONS: Record<string, TabDescriptionItem> = {
     badgeBg: 'bg-pink-500/10',
     badgeText: 'text-pink-400',
     tagColor: 'bg-pink-950/60 border-pink-700/40 text-pink-300',
-    description: 'Company Profiles: Multi-entity company register, business names, TIN, RDO, VAT classification (VAT / Non-VAT), tax types, and active entity selection.',
-    details: 'Manage multiple companies with isolated ledgers, tax configurations, line of business codes, and BIR registration details.',
-    keyFeatures: ['Multi-Entity Management', 'TIN & RDO Registration', 'VAT vs. Non-VAT Settings', 'Active Company Switcher']
+    description: 'Entity Profiles: Multi-entity register, business names, TIN, RDO, VAT classification (VAT / Non-VAT), tax types, and active entity selection.',
+    details: 'Manage multiple registered taxpayer entities with isolated ledgers, tax configurations, line of business codes, and BIR registration details.',
+    keyFeatures: ['Multi-Entity Management', 'TIN & RDO Registration', 'VAT vs. Non-VAT Settings', 'Active Entity Switcher']
   },
   customers: {
     key: 'customers',

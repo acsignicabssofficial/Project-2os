@@ -1582,7 +1582,7 @@ export default function App() {
             setActiveCompany(c);
             const bCode = extractCompanyBranch5(c);
             setActiveBranchCode(bCode);
-            triggerAlert(`Active Company switched to: ${c.company_name} (${bCode === '00000' ? 'Head Office - Main' : `Branch ${parseInt(bCode, 10) || bCode}`})`, 'success');
+            triggerAlert(`Active Entity switched to: ${c.company_name} (${bCode === '00000' ? 'Head Office - Main' : `Branch ${parseInt(bCode, 10) || bCode}`})`, 'success');
           }}
           activeBranchCode={activeBranchCode}
           selectedMonthIdx={selectedMonthIdx}
@@ -1627,7 +1627,7 @@ export default function App() {
             setActiveCompany(c);
             const bCode = extractCompanyBranch5(c);
             setActiveBranchCode(bCode);
-            triggerAlert(`Active Company switched to: ${c.company_name} (${bCode === '00000' ? 'Head Office - Main' : `Branch ${parseInt(bCode, 10) || bCode}`})`, 'success');
+            triggerAlert(`Active Entity switched to: ${c.company_name} (${bCode === '00000' ? 'Head Office - Main' : `Branch ${parseInt(bCode, 10) || bCode}`})`, 'success');
           }}
           onExportActiveSheet={handleOpenExportModal}
           onExportAllSheets={handleOpenExportModal}
@@ -2317,7 +2317,7 @@ export default function App() {
             </div>
 
             <p className={`text-xs ${activeTheme.textMuted} leading-relaxed`}>
-              Customer TIN <span className="font-mono font-bold text-cyan-400">{showAddCustomerPrompt.tin}</span> is not yet registered under <span className="font-bold">{activeCompanyName || 'Active Company'}</span>. Enter the details below to add them to Customer Details now:
+              Customer TIN <span className="font-mono font-bold text-cyan-400">{showAddCustomerPrompt.tin}</span> is not yet registered under <span className="font-bold">{activeCompanyName || 'Active Entity'}</span>. Enter the details below to add them to Customer Details now:
             </p>
 
             <form onSubmit={(e) => {
@@ -2411,7 +2411,7 @@ export default function App() {
             </div>
 
             <p className={`text-xs ${activeTheme.textMuted} leading-relaxed`}>
-              Provider TIN <span className="font-mono font-bold text-cyan-400">{showAddProviderPrompt.tin}</span> is not registered under <span className="font-bold">{activeCompanyName || 'Active Company'}</span>. Enter vendor details to register now:
+              Provider TIN <span className="font-mono font-bold text-cyan-400">{showAddProviderPrompt.tin}</span> is not registered under <span className="font-bold">{activeCompanyName || 'Active Entity'}</span>. Enter vendor details to register now:
             </p>
 
             <form onSubmit={(e) => {
@@ -2523,7 +2523,7 @@ export default function App() {
       <ImportModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
-        activeCompanyName={activeCompanyName || 'Company'}
+        activeCompanyName={activeCompanyName || 'Entity'}
         defaultType={importDefaultType}
         onConfirmImport={handleConfirmImport}
       />
@@ -2534,7 +2534,7 @@ export default function App() {
         onClose={() => setIsExportModalOpen(false)}
         activeTab={activeTab}
         activeTabLabel={getTabLabel(activeTab)}
-        activeCompanyName={activeCompanyName || 'Company'}
+        activeCompanyName={activeCompanyName || 'Entity'}
         data={{
           sales: companySales,
           expenses: companyExpenses,
