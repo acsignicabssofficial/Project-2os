@@ -188,9 +188,7 @@ export function generateUniformCsvTemplate(bookType: UniformBookType, companyNam
   };
 
   const rows = [
-    UNIFORM_BOOK_HEADERS as unknown as string[],
-    UNIFORM_BOOK_HEADERS.map(h => sample1[h] ?? ''),
-    UNIFORM_BOOK_HEADERS.map(h => sample2[h] ?? '')
+    UNIFORM_BOOK_HEADERS as unknown as string[]
   ];
 
   const csvContent = rows

@@ -212,7 +212,7 @@ export default function FinancialPositionTab({
     });
 
     // Populate Unadjusted balances from unadjustedSummaries.accountMap
-    Object.values(unadjustedSummaries.accountMap).forEach(acc => {
+    Object.values(unadjustedSummaries.accountMap).forEach((acc: any) => {
       if (!map[acc.code]) {
         map[acc.code] = {
           code: acc.code,

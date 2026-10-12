@@ -419,12 +419,12 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
       },
       {
         key: 'business_tax',
-        label: 'Business Tax (2551Q, Summary of Sales, Summary of Purchases)',
+        label: 'Business Tax (2550Q-VAT, 2551Q-PERCENTAGE TAX, SUMMARY LIST OF SALES, SUMMARY LIST OF PURCHASES)',
         shortLabel: 'Business\nTax',
         icon: ShieldCheck,
         cellRef: 'BUSINESS_TAX!A1',
-        description: 'Business Tax: Contains tabs for 2551Q, Summary of Sales, and Summary of Purchases.',
-        formula: '=BUSINESS_TAX(Form2551Q, SummaryOfSales, SummaryOfPurchases)'
+        description: 'Business Tax: Contains tabs for 2550Q-VAT, 2551Q-PERCENTAGE TAX, SUMMARY LIST OF SALES, and SUMMARY LIST OF PURCHASES.',
+        formula: '=BUSINESS_TAX(Form2550Q_VAT, Form2551Q_PercentageTax, SummaryListOfSales, SummaryListOfPurchases)'
       },
       {
         key: 'income_tax',
@@ -470,7 +470,7 @@ export function getCategoryForTab(tabKey: string): RibbonCategoryKey {
   if (['sales', 'expenses', 'collections', 'payments', 'general_journal', 'special_entries', 'general_ledger', 'special_ledger'].includes(tabKey)) return 'BOOKS OF ACCOUNTS';
   if (['payroll', 'ppe', 'inventory_list', 'bank_recon', 'contribution_tables'].includes(tabKey)) return 'OTHER TRANSACTIONS';
   if (['fs_balance_sheet', 'fs_income', 'fs_position', 'fs_equity', 'fs_cashflows', 'fs_notes'].includes(tabKey)) return 'FINANCIAL STATEMENTS';
-  if (['withholding_tax', 'business_tax', 'tax_reports', 'income_tax', 'cwt_customers', 'cwt_providers', 'bir_2316', 'bir_slsp', 'bir_qap', 'bir_sawt', 'bir_alphalist'].includes(tabKey)) return 'BIR COMPUTATIONS';
+  if (['withholding_tax', 'business_tax', 'income_tax', 'wtx_compensation', 'wtx_expanded', 'wtx_alphalist', 'wtx_qap', 'btax_2550q', 'btax_2551q', 'btax_sales', 'btax_purchases', 'itax_1701', 'itax_1702rt', 'itax_1702ex', 'itax_sawt', 'tax_reports', 'cwt_customers', 'cwt_providers', 'bir_2316', 'bir_slsp', 'bir_qap', 'bir_sawt', 'bir_alphalist'].includes(tabKey)) return 'BIR COMPUTATIONS';
 
   return 'HOME';
 }

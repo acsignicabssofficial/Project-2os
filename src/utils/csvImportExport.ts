@@ -259,8 +259,7 @@ export function downloadCsvTemplate(type: ImportableDataType) {
   };
 
   const headerLine = tmpl.headers.map(escapeCell).join(',');
-  const rowLines = tmpl.sampleRows.map(row => row.map(escapeCell).join(',')).join('\n');
-  const csvContent = '\uFEFF' + headerLine + '\n' + rowLines; // UTF-8 BOM for Excel compatibility
+  const csvContent = '\uFEFF' + headerLine + '\n'; // UTF-8 BOM for Excel compatibility (clean headers only)
 
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);

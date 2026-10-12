@@ -109,6 +109,9 @@ import BIR2316Tab from './components/BIR2316Tab';
 import SLSPTab from './components/SLSPTab';
 import QAPTab from './components/QAPTab';
 import SAWTTab from './components/SAWTTab';
+import WithholdingTaxHubTab from './components/WithholdingTaxHubTab';
+import BusinessTaxHubTab from './components/BusinessTaxHubTab';
+import IncomeTaxHubTab, { isIndividualEntity } from './components/IncomeTaxHubTab';
 import SpecialEntriesTab from './components/SpecialEntriesTab';
 import BankReconTab from './components/BankReconTab';
 import RelatedPartiesTab from './components/RelatedPartiesTab';
@@ -1109,7 +1112,11 @@ export default function App() {
     // Financial Statements Tools
     'fs_balance_sheet', 'fs_income', 'fs_position', 'fs_position_pfrs', 'fs_equity', 'fs_cashflows', 'fs_notes',
     // BIR Computations Tools
-    'bir_2316', 'cwt_providers', 'tax_reports', 'income_tax', 'bir_slsp', 'bir_sawt', 'bir_qap', 'bir_alphalist', 'cwt_customers'
+    'withholding_tax', 'business_tax', 'income_tax',
+    'wtx_compensation', 'wtx_expanded', 'wtx_alphalist', 'wtx_qap',
+    'btax_2550q', 'btax_2551q', 'btax_sales', 'btax_purchases',
+    'itax_1701', 'itax_1702rt', 'itax_1702ex', 'itax_sawt',
+    'bir_2316', 'cwt_providers', 'tax_reports', 'bir_slsp', 'bir_sawt', 'bir_qap', 'bir_alphalist', 'cwt_customers'
   ];
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
@@ -1319,6 +1326,12 @@ export default function App() {
       case 'ppe': return 'Property, Plant & Equipment';
       case 'employees': return 'Employee Profiles';
       case 'payroll': return 'Payroll Register';
+      case 'withholding_tax': return 'Withholding Tax';
+      case 'business_tax': return 'Business Tax';
+      case 'btax_2550q': return '2550Q-VAT';
+      case 'btax_2551q': return '2551Q-PERCENTAGE TAX';
+      case 'btax_sales': return 'Summary List of Sales';
+      case 'btax_purchases': return 'Summary List of Purchases';
       case 'income_tax': return 'Income Tax';
       case 'dashboard': return 'Executive Dashboard';
       default: return tab.toUpperCase().replace(/_/g, ' ');
@@ -2145,8 +2158,70 @@ export default function App() {
                 />
               )}
 
-              {['bir_2316', 'cwt_providers', 'tax_reports', 'income_tax', 'bir_slsp', 'bir_sawt', 'bir_qap', 'bir_alphalist', 'cwt_customers'].includes(activeTab) && (
-                <div className={`min-h-[60vh] w-full rounded-2xl border ${activeTheme.borderCard} ${activeTheme.bgCard} p-6 shadow-xs`} />
+              {/* BIR COMPUTATIONS TOOLS */}
+              {(['withholding_tax', 'wtx_compensation', 'wtx_expanded', 'wtx_alphalist', 'wtx_qap', 'bir_2316', 'cwt_providers', 'bir_qap', 'bir_alphalist'].includes(activeTab)) && (
+                <WithholdingTaxHubTab 
+                  payrollRecords={companyPayrollRecords}
+                  employees={companyEmployees}
+                  expenses={companyExpenses}
+                  payments={companyPayments}
+                  serviceProviders={contractors as any}
+                  activeCompany={activeCompany}
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                  initialSubTab={
+                    activeTab === 'wtx_expanded' || activeTab === 'cwt_providers' ? 'wtx_expanded' :
+                    activeTab === 'wtx_alphalist' || activeTab === 'bir_2316' || activeTab === 'bir_alphalist' ? 'wtx_alphalist' :
+                    activeTab === 'wtx_qap' || activeTab === 'bir_qap' ? 'wtx_qap' :
+                    'wtx_compensation'
+                  }
+                />
+              )}
+
+              {(['business_tax', 'btax_2550q', 'btax_2551q', 'btax_sales', 'btax_purchases', 'bir_slsp'].includes(activeTab)) && (
+                <BusinessTaxHubTab 
+                  sales={companySales}
+                  collections={companyCollections}
+                  expenses={companyExpenses}
+                  payments={companyPayments}
+                  customers={customers}
+                  contractors={contractors}
+                  activeCompany={activeCompany}
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                  initialSubTab={
+                    activeTab === 'btax_2551q' ? 'btax_2551q' :
+                    activeTab === 'btax_sales' ? 'btax_sales' :
+                    activeTab === 'btax_purchases' || activeTab === 'bir_slsp' ? 'btax_purchases' :
+                    'btax_2550q'
+                  }
+                  onUpdateSales={handleUpdateSubsidiarySales}
+                  onUpdateExpenses={handleUpdateSubsidiaryPurchases}
+                />
+              )}
+
+              {(['income_tax', 'itax_1701', 'itax_1702rt', 'itax_1702ex', 'itax_sawt', 'tax_reports', 'bir_sawt', 'cwt_customers'].includes(activeTab)) && (
+                <IncomeTaxHubTab 
+                  sales={companySales}
+                  expenses={companyExpenses}
+                  ppeAssets={companyPpeAssets}
+                  specialEntries={companySpecialEntries}
+                  incomeTaxRecords={companyIncomeTaxRecords}
+                  setIncomeTaxRecords={setIncomeTaxRecords}
+                  setSpecialEntries={setSpecialEntries}
+                  activeCompany={activeCompany}
+                  accountTitles={accountTitles}
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                  initialSubTab={
+                    activeTab === 'itax_1702rt' ? 'itax_1702rt' :
+                    activeTab === 'itax_1702ex' ? 'itax_1702ex' :
+                    activeTab === 'itax_sawt' || activeTab === 'bir_sawt' || activeTab === 'cwt_customers' ? 'itax_sawt' :
+                    activeTab === 'itax_1701' ? 'itax_1701' :
+                    activeCompany?.entity_type && !isIndividualEntity(activeCompany?.entity_type) ? 'itax_1702rt' :
+                    'itax_1701'
+                  }
+                />
               )}
 
               {(activeTab === 'reports' || activeTab === 'reports_turnovers' || activeTab === 'reports_horizontal' || activeTab === 'reports_vertical' || activeTab === 'reports_ratios') && (

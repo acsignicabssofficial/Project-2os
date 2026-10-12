@@ -23,23 +23,43 @@ export default function QAPTab({
   const [year, setYear] = useState('2026');
 
   // Aggregate Quarterly Alphalist of Payees (QAP) data for Form 1601-EQ
-  const qapRows = expenses.filter(e => e.withholding_2307_2306 > 0).map(e => ({
-    id: e.id,
-    tin: e.sp_tin,
-    branch: '00000',
-    payeeName: e.service_provider_name,
-    atc: 'WC120',
-    gross: e.expense_invoice_amount,
-    taxRate: '1%',
-    taxWithheld: e.withholding_2307_2306
-  }));
+  const isSampleTransaction = (record: any): boolean => {
+    if (!record) return true;
+    if (record.is_sample || record.isSample) return true;
+    const name = String(record.payeeName || record.service_provider_name || record.supplier_name || record.registered_name || record.name || '').toLowerCase().trim();
+    const desc = String(record.particulars || record.description || record.expense_type || '').toLowerCase().trim();
+    if (/^(sample|demo|test)(\s|$)/i.test(name)) return true;
+    if (/sample\s*transaction|demo\s*transaction|test\s*transaction/i.test(name)) return true;
+    if (/sample\s*transaction|demo\s*transaction|test\s*transaction/i.test(desc)) return true;
+    if (name === 'vendor / contractor' || name === 'sample vendor') return true;
+    return false;
+  };
+
+  const qapRows = expenses
+    .filter(e => !isSampleTransaction(e))
+    .filter(e => e.withholding_2307_2306 > 0)
+    .map(e => ({
+      id: e.id,
+      tin: e.sp_tin,
+      branch: '00000',
+      payeeName: e.service_provider_name,
+      atc: 'WC120',
+      gross: e.expense_invoice_amount,
+      taxRate: '1%',
+      taxWithheld: e.withholding_2307_2306
+    }));
 
   const totalGross = qapRows.reduce((sum, r) => sum + r.gross, 0);
   const totalTaxWithheld = qapRows.reduce((sum, r) => sum + r.taxWithheld, 0);
 
   const handleDownloadDAT = () => {
+    const validRows = qapRows.filter(r => !isSampleTransaction(r));
+    if (validRows.length === 0) {
+      triggerAlert(`Cannot generate QAP .DAT: No real expanded withholding tax transactions recorded for ${quarter} ${year}. BIR eSubmission prohibits sample or mock data.`, 'error');
+      return;
+    }
     const header = `H1601EQ,${activeCompany?.company_tin || '000000000000'},${year},${quarter}\n`;
-    const details = qapRows.map(r => `D1601EQ,${r.tin},${r.branch},"${r.payeeName}",${r.atc},${r.gross.toFixed(2)},${r.taxWithheld.toFixed(2)}`).join('\n');
+    const details = validRows.map(r => `D1601EQ,${r.tin},${r.branch},"${r.payeeName}",${r.atc},${r.gross.toFixed(2)},${r.taxWithheld.toFixed(2)}`).join('\n');
     const content = header + details;
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });

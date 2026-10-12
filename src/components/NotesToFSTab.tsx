@@ -136,7 +136,7 @@ export default function NotesToFSTab({
                   <td className="p-3 font-mono text-amber-400">BIR Form 0619-E / 1601-EQ</td>
                   <td className="p-3 text-right font-mono text-zinc-300">₱{grossExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="p-3 text-right font-mono font-bold text-purple-400">
-                    ₱{expenses.reduce((s, e) => s + (Number(e.withholding_2307_2306 ?? e.tax_withheld) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    ₱{expenses.reduce((s, e) => s + (Number(e.withholding_2307_2306 ?? (e as any).tax_withheld) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
                 </tr>
               </tbody>
