@@ -28,55 +28,103 @@ export default function NotesToFSTab({
   const rdo = activeCompany?.rdo || 'RDO 050';
   const address = activeCompany?.business_address || 'Metro Manila, Philippines';
 
-  const grossSales = sales.reduce((sum, s) => {
-    const amt = safeNum(s.invoice_amount) || safeNum((s as any).total_amount_vat_inclusive) || safeNum((s as any).amount) || safeNum((s as any).total_amount_due);
-    return sum + amt;
+  const formatPeso = (val: any) => {
+    const n = safeNum(val);
+    if (isNaN(n) || !isFinite(n)) return '₱0.00';
+    return '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const cleanSales = (sales || []).filter(s => s && !s.is_cancelled);
+  const cleanExpenses = (expenses || []).filter(e => e && !e.is_cancelled);
+  const cleanPpeAssets = (ppeAssets || []).filter(a => a);
+
+  const getSaleGross = (s: any): number => {
+    if (!s) return 0;
+    const vInc = safeNum(s.total_amount_vat_inclusive) || safeNum(s.total_sale_vat_inclusive);
+    if (vInc > 0) return vInc;
+    const invAmt = safeNum(s.invoice_amount);
+    if (invAmt > 0) return invAmt;
+    const amt = safeNum(s.amount);
+    if (amt > 0) return amt;
+    const due = safeNum(s.total_amount_due);
+    if (due > 0) return due;
+    const vatable = safeNum(s.vatable_amount) || safeNum(s.vatable_sales);
+    const vat = safeNum(s.output_vat) || safeNum(s.vat_amount) || safeNum(s.add_vat);
+    if (vatable > 0 || vat > 0) return vatable + vat;
+    return 0;
+  };
+
+  const grossSales = cleanSales.reduce((sum, s) => {
+    const val = getSaleGross(s);
+    return (isNaN(sum) ? 0 : sum) + (isNaN(val) ? 0 : val);
   }, 0);
 
-  const vatSales = sales.reduce((sum, s) => {
+  const vatSales = cleanSales.reduce((sum, s) => {
     const vatable = safeNum(s.vatable_amount) || safeNum((s as any).vatable_sales);
-    if (vatable > 0) return sum + vatable;
-    const gross = safeNum(s.invoice_amount) || safeNum((s as any).total_amount_vat_inclusive) || safeNum((s as any).amount) || safeNum((s as any).total_amount_due);
+    if (vatable > 0) return (isNaN(sum) ? 0 : sum) + vatable;
+    const gross = getSaleGross(s);
     const vat = safeNum(s.output_vat) || safeNum((s as any).vat_amount) || safeNum((s as any).add_vat);
     const isVat = s.nonvat_or_vat === 'VAT' || (s as any).vat_or_nonvat === 'VAT' || vat > 0;
-    return sum + (isVat && gross > 0 ? Math.round((gross / 1.12) * 100) / 100 : (gross > 0 ? gross : 0));
+    const calc = isVat && gross > 0 ? Math.round((gross / 1.12) * 100) / 100 : (gross > 0 ? gross : 0);
+    return (isNaN(sum) ? 0 : sum) + (isNaN(calc) ? 0 : calc);
   }, 0);
 
-  const exemptSales = sales.reduce((sum, s) => sum + (safeNum(s.vat_exempt_amount) || safeNum((s as any).vat_exempt)), 0);
+  const exemptSales = cleanSales.reduce((sum, s) => {
+    const ex = safeNum(s.vat_exempt_amount) || safeNum((s as any).vat_exempt);
+    return (isNaN(sum) ? 0 : sum) + (isNaN(ex) ? 0 : ex);
+  }, 0);
 
-  const outputVat = sales.reduce((sum, s) => {
+  const outputVat = cleanSales.reduce((sum, s) => {
     const vat = safeNum(s.output_vat) || safeNum((s as any).vat_amount) || safeNum((s as any).add_vat);
-    if (vat > 0) return sum + vat;
-    const gross = safeNum(s.invoice_amount) || safeNum((s as any).total_amount_vat_inclusive) || safeNum((s as any).amount) || safeNum((s as any).total_amount_due);
+    if (vat > 0) return (isNaN(sum) ? 0 : sum) + vat;
+    const gross = getSaleGross(s);
     const isVat = s.nonvat_or_vat === 'VAT' || (s as any).vat_or_nonvat === 'VAT';
-    return sum + (isVat && gross > 0 ? Math.round((gross - (gross / 1.12)) * 100) / 100 : 0);
+    const calc = isVat && gross > 0 ? Math.round((gross - (gross / 1.12)) * 100) / 100 : 0;
+    return (isNaN(sum) ? 0 : sum) + (isNaN(calc) ? 0 : calc);
   }, 0);
 
-  const grossExpenses = expenses.reduce((sum, e) => {
-    const amt = safeNum(e.expense_invoice_amount) || safeNum((e as any).total_amount_vat_inclusive) || safeNum((e as any).amount) || safeNum((e as any).total_amount_due);
-    return sum + amt;
+  const getExpenseGross = (e: any): number => {
+    if (!e) return 0;
+    const vInc = safeNum(e.total_amount_vat_inclusive) || safeNum((e as any).total_expenses_vat_inclusive);
+    if (vInc > 0) return vInc;
+    const invAmt = safeNum(e.expense_invoice_amount);
+    if (invAmt > 0) return invAmt;
+    const amt = safeNum(e.amount);
+    if (amt > 0) return amt;
+    const due = safeNum(e.total_amount_due);
+    if (due > 0) return due;
+    const vatable = safeNum(e.vatable_amount) || safeNum((e as any).vatable_expense);
+    const vat = safeNum(e.vat_input_amount) || safeNum((e as any).vat_amount);
+    if (vatable > 0 || vat > 0) return vatable + vat;
+    return 0;
+  };
+
+  const grossExpenses = cleanExpenses.reduce((sum, e) => {
+    const val = getExpenseGross(e);
+    return (isNaN(sum) ? 0 : sum) + (isNaN(val) ? 0 : val);
   }, 0);
 
-  const inputVat = expenses.reduce((sum, e) => {
+  const inputVat = cleanExpenses.reduce((sum, e) => {
     const inVat = safeNum(e.vat_input_amount) || safeNum((e as any).vat_amount) || safeNum((e as any).add_vat);
-    if (inVat > 0) return sum + inVat;
-    const gross = safeNum(e.expense_invoice_amount) || safeNum((e as any).total_amount_vat_inclusive) || safeNum((e as any).amount) || safeNum((e as any).total_amount_due);
-    const isVat = (e as any).vat_or_nonvat === 'VAT' || e.vat_status === 'VAT';
-    return sum + (isVat && gross > 0 ? Math.round((gross - (gross / 1.12)) * 100) / 100 : 0);
+    if (inVat > 0) return (isNaN(sum) ? 0 : sum) + inVat;
+    const gross = getExpenseGross(e);
+    const isVat = (e as any).vat_or_nonvat === 'VAT' || (e as any).vat_status === 'VAT' || (e as any).nonvat_or_vat === 'VAT';
+    const calc = isVat && gross > 0 ? Math.round((gross - (gross / 1.12)) * 100) / 100 : 0;
+    return (isNaN(sum) ? 0 : sum) + (isNaN(calc) ? 0 : calc);
   }, 0);
 
-  const cwtWithheldByClients = sales.reduce((sum, s) => {
+  const cwtWithheldByClients = cleanSales.reduce((sum, s) => {
     const cwt = safeNum((s as any).tax_withheld) || safeNum((s as any).less_withholding_tax) || safeNum((s as any).withholding_2307) || safeNum((s as any).amount_withheld_2307) || safeNum(s.ewt_amount);
-    return sum + cwt;
+    return (isNaN(sum) ? 0 : sum) + (isNaN(cwt) ? 0 : cwt);
   }, 0);
 
-  const ewtPaidToVendors = expenses.reduce((s, e) => {
+  const ewtPaidToVendors = cleanExpenses.reduce((s, e) => {
     const ewt = safeNum(e.withholding_2307_2306) || safeNum((e as any).tax_withheld) || safeNum((e as any).less_withholding_tax) || safeNum((e as any).withholding_2307);
-    return s + ewt;
+    return (isNaN(s) ? 0 : s) + (isNaN(ewt) ? 0 : ewt);
   }, 0);
 
-  const ppeCost = ppeAssets.reduce((sum, a) => sum + a.acquisition_cost, 0);
-  const ppeDepr = ppeAssets.reduce((sum, a) => sum + a.accumulated_depreciation, 0);
+  const ppeCost = cleanPpeAssets.reduce((sum, a) => sum + (safeNum(a.acquisition_cost)), 0);
+  const ppeDepr = cleanPpeAssets.reduce((sum, a) => sum + (safeNum(a.accumulated_depreciation)), 0);
 
   return (
     <div className="space-y-4">
@@ -115,15 +163,15 @@ export default function NotesToFSTab({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono pt-1">
             <div className="p-3 rounded-xl bg-zinc-500/5 border border-zinc-700/30">
               <span className="text-zinc-400 block text-[10px]">VATABLE SALES (12%)</span>
-              <span className="text-cyan-400 font-bold text-sm">₱{vatSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              <span className="text-cyan-400 font-bold text-sm">{formatPeso(vatSales)}</span>
             </div>
             <div className="p-3 rounded-xl bg-zinc-500/5 border border-zinc-700/30">
               <span className="text-zinc-400 block text-[10px]">VAT-EXEMPT SALES</span>
-              <span className="text-emerald-400 font-bold text-sm">₱{exemptSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              <span className="text-emerald-400 font-bold text-sm">{formatPeso(exemptSales)}</span>
             </div>
             <div className="p-3 rounded-xl bg-zinc-500/5 border border-zinc-700/30">
               <span className="text-zinc-400 block text-[10px]">TOTAL GROSS SALES</span>
-              <span className="text-cyan-300 font-bold text-sm">₱{grossSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              <span className="text-cyan-300 font-bold text-sm">{formatPeso(grossSales)}</span>
             </div>
           </div>
         </section>
@@ -152,29 +200,29 @@ export default function NotesToFSTab({
                 <tr>
                   <td className={`p-3 font-semibold ${theme.textTitle}`}>Output Value-Added Tax (12%)</td>
                   <td className="p-3 font-mono text-cyan-400">BIR Form 2550Q</td>
-                  <td className="p-3 text-right font-mono text-zinc-300">₱{vatSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  <td className="p-3 text-right font-mono font-bold text-cyan-400">₱{outputVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="p-3 text-right font-mono text-zinc-300">{formatPeso(vatSales)}</td>
+                  <td className="p-3 text-right font-mono font-bold text-cyan-400">{formatPeso(outputVat)}</td>
                 </tr>
                 <tr>
                   <td className={`p-3 font-semibold ${theme.textTitle}`}>Creditable Input VAT (12%)</td>
                   <td className="p-3 font-mono text-cyan-400">BIR Form 2550Q</td>
-                  <td className="p-3 text-right font-mono text-zinc-300">₱{grossExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  <td className="p-3 text-right font-mono font-bold text-emerald-400">₱{inputVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="p-3 text-right font-mono text-zinc-300">{formatPeso(grossExpenses)}</td>
+                  <td className="p-3 text-right font-mono font-bold text-emerald-400">{formatPeso(inputVat)}</td>
                 </tr>
                 <tr>
                   <td className={`p-3 font-semibold ${theme.textTitle}`}>Expanded Withholding Tax (EWT)</td>
                   <td className="p-3 font-mono text-amber-400">BIR Form 0619-E / 1601-EQ</td>
-                  <td className="p-3 text-right font-mono text-zinc-300">₱{grossExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="p-3 text-right font-mono text-zinc-300">{formatPeso(grossExpenses)}</td>
                   <td className="p-3 text-right font-mono font-bold text-purple-400">
-                    ₱{ewtPaidToVendors.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatPeso(ewtPaidToVendors)}
                   </td>
                 </tr>
                 <tr>
                   <td className={`p-3 font-semibold ${theme.textTitle}`}>Creditable Withholding Tax Withheld by Clients (BIR 2307)</td>
                   <td className="p-3 font-mono text-violet-400">BIR Form 1701 / 1702 (SAWT)</td>
-                  <td className="p-3 text-right font-mono text-zinc-300">₱{vatSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="p-3 text-right font-mono text-zinc-300">{formatPeso(vatSales)}</td>
                   <td className="p-3 text-right font-mono font-bold text-violet-400">
-                    ₱{cwtWithheldByClients.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatPeso(cwtWithheldByClients)}
                   </td>
                 </tr>
               </tbody>
@@ -216,7 +264,7 @@ export default function NotesToFSTab({
             </div>
             <div className="p-3 rounded-xl bg-purple-500/5 border border-purple-500/20">
               <span className="text-zinc-400 block text-[10px]">CAPITAL DEPLOYED TOWARD CLIMATE RESILIENCE</span>
-              <span className="text-purple-400 font-bold text-sm">₱{ppeCost.toLocaleString(undefined, { minimumFractionDigits: 2 })} Gross PPE</span>
+              <span className="text-purple-400 font-bold text-sm">{formatPeso(ppeCost)} Gross PPE</span>
             </div>
           </div>
         </section>

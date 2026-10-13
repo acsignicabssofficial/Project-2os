@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { FileText, Printer, Info, Layers, Sparkles } from 'lucide-react';
-import { PayrollRecord, Employee, Company } from '../types';
+import { FileText, Printer, Info, Layers } from 'lucide-react';
+import { PayrollRecord, Employee, Company, TaxBracket } from '../types';
+import { translatePayrollRecords, build2316 } from '../utils/payroll2316';
 import AutoSuggestInput from './AutoSuggestInput';
 
 interface BIR2316TabProps {
@@ -9,6 +10,10 @@ interface BIR2316TabProps {
   activeCompany: Company | null;
   theme: any;
   triggerAlert?: any;
+  initialEmployeeId?: string;
+  initialYear?: string;
+  taxBrackets?: TaxBracket[];
+  onClose?: () => void;
 }
 
 export default function BIR2316Tab({
@@ -16,11 +21,25 @@ export default function BIR2316Tab({
   employees = [],
   activeCompany,
   theme,
-  triggerAlert
+  triggerAlert,
+  initialEmployeeId,
+  initialYear,
+  taxBrackets,
+  onClose
 }: BIR2316TabProps) {
-  const [selectedEmpId, setSelectedEmpId] = useState<string>(employees[0]?.employee_id || '');
-  const [empSearchName, setEmpSearchName] = useState<string>(employees[0]?.full_name || '');
-  const [taxYear, setTaxYear] = useState<string>('2024');
+  const [selectedEmpId, setSelectedEmpId] = useState<string>(initialEmployeeId || employees[0]?.employee_id || '');
+  const [empSearchName, setEmpSearchName] = useState<string>('');
+  const [taxYear, setTaxYear] = useState<string>(initialYear || '2024');
+
+  useEffect(() => {
+    if (initialYear) setTaxYear(initialYear);
+  }, [initialYear]);
+
+  useEffect(() => {
+    if (initialEmployeeId) {
+      setSelectedEmpId(initialEmployeeId);
+    }
+  }, [initialEmployeeId]);
 
   useEffect(() => {
     const found = employees.find(e => e.employee_id === selectedEmpId);
@@ -28,209 +47,62 @@ export default function BIR2316Tab({
       setEmpSearchName(found.full_name);
     }
   }, [selectedEmpId, employees]);
-  const [periodFrom, setPeriodFrom] = useState<string>('01/01');
-  const [periodTo, setPeriodTo] = useState<string>('05/08');
-  const [useModelDefaults, setUseModelDefaults] = useState<boolean>(payrollRecords.length === 0);
-
   const selectedEmp = useMemo(() => {
     return employees.find(e => e.employee_id === selectedEmpId) || employees[0] || null;
   }, [employees, selectedEmpId]);
 
-  // Aggregate payroll records for the employee in the chosen tax year
+  // Payroll -> 2316 translation (shared engine: same lines feed 1601-C and the Alphalist)
+  const translated = useMemo(() => translatePayrollRecords(payrollRecords), [payrollRecords]);
+
+  const form = useMemo(() => {
+    if (!selectedEmp) return null;
+    return build2316(selectedEmp.employee_id as any, taxYear, translated, taxBrackets);
+  }, [selectedEmp, taxYear, translated, taxBrackets]);
+
   const empPayroll = useMemo(() => {
     if (!selectedEmp) return [];
-    return payrollRecords.filter(p => 
-      p.employee_id === selectedEmp.employee_id && 
-      (p.tax_year === taxYear || p.payroll_period.startsWith(taxYear))
-    );
-  }, [payrollRecords, selectedEmp, taxYear]);
+    return translated.filter(t => t.employeeId === String(selectedEmp.employee_id) && t.year === taxYear).map(t => t.record);
+  }, [translated, selectedEmp, taxYear]);
 
-  // Calculate BIR 2316 Exact Values
+  const periodFrom = form?.periodFrom || '01/01';
+  const periodTo = form?.periodTo || '12/31';
+
+  // Additional payroll deductions are informational only (not part of the 2316 computation)
+  const sumRec = (k: string) => empPayroll.reduce((a, r: any) => a + (Number(r[k]) || 0), 0);
+
   const comp = useMemo(() => {
-    // If toggle model defaults is active, use the exact image model numbers!
-    if (useModelDefaults) {
-      return {
-        recordCount: empPayroll.length,
-        isModelDefault: true,
-        // Part IV-B Non-Taxable
-        item29_basicExempt: 0.00,
-        item30_holidayPay: 0.00,
-        item31_overtimeExempt: 0.00,
-        item32_nightDiff: 0.00,
-        item33_hazardPay: 0.00,
-        item34_13thMonthExempt: 90000.00,
-        item35_deMinimis: 0.00,
-        item36_statDeductions: 12010.00,
-        item37_otherNonTaxable: 0.00,
-        item38_totalNonTaxable: 102010.00,
-
-        // Part IV-B Taxable Regular & Supplementary
-        item39_basicTaxable: 155697.54,
-        item40_representation: 0.00,
-        item41_transportation: 0.00,
-        item42_cola: 0.00,
-        item43_housingAllowance: 0.00,
-        item44a_label: '',
-        item44a_val: 0.00,
-        item44b_label: '',
-        item44b_val: 0.00,
-
-        item45_commission: 0.00,
-        item46_profitSharing: 0.00,
-        item47_directorsFees: 0.00,
-        item48_taxable13thMonth: 54432.08,
-        item49_hazardPayTaxable: 0.00,
-        item50_overtimeTaxable: -80.84,
-        item51a_label: '',
-        item51a_val: 0.00,
-        item51b_label: 'Adjustments',
-        item51b_val: 13631.83,
-        item52_totalTaxable: 223680.61,
-
-        // Part IVA Summary
-        item19_grossCompensation: 325690.61,
-        item20_nonTaxable: 102010.00,
-        item21_taxablePresent: 223680.61,
-        item22_taxablePrev: 0.00,
-        item23_grossTaxable: 223680.61,
-        item24_taxDue: 0.00,
-        item25a_withheldPresent: 0.00,
-        item25b_withheldPrev: 0.00,
-        item26_totalWithheldAdjusted: 0.00,
-        item27_peraTaxCredit: 0.00,
-        item28_totalTaxesWithheld: 0.00,
-
-        // Additional Deductions
-        advances: 0.00,
-        absentsTardiness: 0.00,
-        sssLoan: 0.00,
-        pagibigLoan: 0.00,
-        otherSalaryDeductions: 0.00,
-        totalSalaryDeductions: 0.00,
-        totalAllDeductions: 12010.00,
-        netPayReceived: 313680.61
-      };
-    }
-
-    // Otherwise aggregate from logged payroll records
-    const recordCount = empPayroll.length;
-
-    const item29_basicExempt = empPayroll.reduce((sum, r) => sum + (Number(r.basic_pay) || 0), 0);
-    const item30_holidayPay = empPayroll.reduce((sum, r) => sum + (Number(r.holiday_pay) || 0), 0);
-    const item31_overtimeExempt = empPayroll.reduce((sum, r) => sum + (Number(r.overtime_pay) || 0), 0);
-    const item32_nightDiff = empPayroll.reduce((sum, r) => sum + (Number(r.night_differential) || 0), 0);
-    const item33_hazardPay = empPayroll.reduce((sum, r) => sum + (Number(r.hazard_pay) || 0), 0);
-    const item34_13thMonthExempt = empPayroll.reduce((sum, r) => sum + (Number(r.thirteenth_month_pay) || 0), 0);
-    const item35_deMinimis = empPayroll.reduce((sum, r) => sum + (Number(r.de_minimis_benefits) || 0), 0);
-    
-    const sss = empPayroll.reduce((sum, r) => sum + (Number(r.sss_deduction) || 0), 0);
-    const phic = empPayroll.reduce((sum, r) => sum + (Number(r.philhealth_deduction) || 0), 0);
-    const hdmf = empPayroll.reduce((sum, r) => sum + (Number(r.pagibig_deduction) || 0), 0);
-    const item36_statDeductions = sss + phic + hdmf;
-    const item37_otherNonTaxable = empPayroll.reduce((sum, r) => sum + (Number(r.other_non_taxable) || 0), 0);
-
-    const item38_totalNonTaxable = item29_basicExempt + item30_holidayPay + item31_overtimeExempt + item32_nightDiff + item33_hazardPay + item34_13thMonthExempt + item35_deMinimis + item36_statDeductions + item37_otherNonTaxable;
-
-    const item39_basicTaxable = empPayroll.reduce((sum, r) => sum + (Number(r.taxable_basic) || 0), 0);
-    const item40_representation = empPayroll.reduce((sum, r) => sum + (Number(r.representation) || 0), 0);
-    const item41_transportation = empPayroll.reduce((sum, r) => sum + (Number(r.transportation) || 0), 0);
-    const item42_cola = empPayroll.reduce((sum, r) => sum + (Number(r.cola) || 0), 0);
-    const item43_housingAllowance = empPayroll.reduce((sum, r) => sum + (Number(r.housing_allowance) || 0), 0);
-    
-    const item44a_val = empPayroll.reduce((sum, r) => sum + (Number(r.item44a_val) || 0), 0);
-    const item44b_val = empPayroll.reduce((sum, r) => sum + (Number(r.item44b_val) || 0), 0);
-
-    const item45_commission = empPayroll.reduce((sum, r) => sum + (Number(r.commission) || 0), 0);
-    const item46_profitSharing = empPayroll.reduce((sum, r) => sum + (Number(r.profit_sharing) || 0), 0);
-    const item47_directorsFees = empPayroll.reduce((sum, r) => sum + (Number(r.directors_fees) || 0), 0);
-    const item48_taxable13thMonth = empPayroll.reduce((sum, r) => sum + (Number(r.taxable_thirteenth_month) || 0), 0);
-    const item49_hazardPayTaxable = empPayroll.reduce((sum, r) => sum + (Number(r.item49_hazard_pay_taxable) || 0), 0);
-    const item50_overtimeTaxable = empPayroll.reduce((sum, r) => sum + (Number(r.taxable_overtime) || 0), 0);
-    const item51a_val = empPayroll.reduce((sum, r) => sum + (Number(r.item51a_val) || 0), 0);
-    const item51b_val = empPayroll.reduce((sum, r) => sum + (Number(r.item51b_val) || 0), 0);
-
-    const item52_totalTaxable = item39_basicTaxable + item40_representation + item41_transportation + item42_cola + item43_housingAllowance + item44a_val + item44b_val + item45_commission + item46_profitSharing + item47_directorsFees + item48_taxable13thMonth + item49_hazardPayTaxable + item50_overtimeTaxable + item51a_val + item51b_val;
-
-    const item19_grossCompensation = item38_totalNonTaxable + item52_totalTaxable;
-    const item20_nonTaxable = item38_totalNonTaxable;
-    const item21_taxablePresent = item52_totalTaxable;
-
-    const item22_taxablePrev = empPayroll.reduce((sum, r) => sum + (Number(r.item22_taxable_prev_employer) || 0), 0);
-    const item23_grossTaxable = item21_taxablePresent + item22_taxablePrev;
-
-    const item25a_withheldPresent = empPayroll.reduce((sum, r) => sum + (Number(r.withholding_tax) || 0), 0);
-    const item25b_withheldPrev = 0.00;
-    const item26_totalWithheldAdjusted = item25a_withheldPresent + item25b_withheldPrev;
-    const item27_peraTaxCredit = empPayroll.reduce((sum, r) => sum + (Number(r.item27_pera_tax_credit) || 0), 0);
-    const item28_totalTaxesWithheld = item26_totalWithheldAdjusted + item27_peraTaxCredit;
-
-    const advances = empPayroll.reduce((sum, r) => sum + (Number(r.advances) || 0), 0);
-    const absentsTardiness = empPayroll.reduce((sum, r) => sum + (Number(r.absents_tardiness) || 0), 0);
-    const sssLoan = empPayroll.reduce((sum, r) => sum + (Number(r.sss_loan) || 0), 0);
-    const pagibigLoan = empPayroll.reduce((sum, r) => sum + (Number(r.pagibig_loan) || 0), 0);
-    const otherSalaryDeductions = empPayroll.reduce((sum, r) => sum + (Number(r.other_salary_deductions) || 0), 0);
+    const f: any = form || build2316('', taxYear, [], taxBrackets);
+    const advances = sumRec('advances');
+    const absentsTardiness = sumRec('absents_tardiness');
+    const sssLoan = sumRec('sss_loan');
+    const pagibigLoan = sumRec('pagibig_loan');
+    const otherSalaryDeductions = sumRec('other_salary_deductions');
     const totalSalaryDeductions = advances + absentsTardiness + sssLoan + pagibigLoan + otherSalaryDeductions;
-    const totalAllDeductions = item36_statDeductions + item28_totalTaxesWithheld + totalSalaryDeductions;
-    const netPayReceived = item19_grossCompensation - totalAllDeductions;
-
+    const totalAllDeductions = f.i36 + f.item28 + totalSalaryDeductions;
     return {
-      recordCount,
+      recordCount: f.recordCount,
       isModelDefault: false,
-      item29_basicExempt,
-      item30_holidayPay,
-      item31_overtimeExempt,
-      item32_nightDiff,
-      item33_hazardPay,
-      item34_13thMonthExempt,
-      item35_deMinimis,
-      item36_statDeductions,
-      item37_otherNonTaxable,
-      item38_totalNonTaxable,
-
-      item39_basicTaxable,
-      item40_representation,
-      item41_transportation,
-      item42_cola,
-      item43_housingAllowance,
-      item44a_label: empPayroll[0]?.item44a_label || '',
-      item44a_val,
-      item44b_label: empPayroll[0]?.item44b_label || '',
-      item44b_val,
-
-      item45_commission,
-      item46_profitSharing,
-      item47_directorsFees,
-      item48_taxable13thMonth,
-      item49_hazardPayTaxable,
-      item50_overtimeTaxable,
-      item51a_label: empPayroll[0]?.item51a_label || '',
-      item51a_val,
-      item51b_label: empPayroll[0]?.item51b_label || '',
-      item51b_val,
-      item52_totalTaxable,
-
-      item19_grossCompensation,
-      item20_nonTaxable,
-      item21_taxablePresent,
-      item22_taxablePrev,
-      item23_grossTaxable,
-      item24_taxDue: item28_totalTaxesWithheld,
-      item25a_withheldPresent,
-      item25b_withheldPrev,
-      item26_totalWithheldAdjusted,
-      item27_peraTaxCredit,
-      item28_totalTaxesWithheld,
-
-      advances,
-      absentsTardiness,
-      sssLoan,
-      pagibigLoan,
-      otherSalaryDeductions,
-      totalSalaryDeductions,
-      totalAllDeductions,
-      netPayReceived
+      item29_basicExempt: f.i29, item30_holidayPay: f.i30, item31_overtimeExempt: f.i31,
+      item32_nightDiff: f.i32, item33_hazardPay: f.i33, item34_13thMonthExempt: f.i34,
+      item35_deMinimis: f.i35, item36_statDeductions: f.i36, item37_otherNonTaxable: f.i37,
+      item38_totalNonTaxable: f.item38,
+      item39_basicTaxable: f.i39, item40_representation: f.i40, item41_transportation: f.i41,
+      item42_cola: f.i42, item43_housingAllowance: f.i43,
+      item44a_label: f.labels.i44a, item44a_val: f.i44a, item44b_label: f.labels.i44b, item44b_val: f.i44b,
+      item45_commission: f.i45, item46_profitSharing: f.i46, item47_directorsFees: f.i47,
+      item48_taxable13thMonth: f.i48, item49_hazardPayTaxable: f.i49, item50_overtimeTaxable: f.i50,
+      item51a_label: f.labels.i51a, item51a_val: f.i51a, item51b_label: f.labels.i51b, item51b_val: f.i51b,
+      item52_totalTaxable: f.item52,
+      item19_grossCompensation: f.item19, item20_nonTaxable: f.item20, item21_taxablePresent: f.item21,
+      item22_taxablePrev: f.i22, item23_grossTaxable: f.item23, item24_taxDue: f.item24,
+      item25a_withheldPresent: f.i25a, item25b_withheldPrev: f.item25b,
+      item26_totalWithheldAdjusted: f.item26, item27_peraTaxCredit: f.i27, item28_totalTaxesWithheld: f.item28,
+      taxOverUnder: f.taxOverUnder,
+      advances, absentsTardiness, sssLoan, pagibigLoan, otherSalaryDeductions,
+      totalSalaryDeductions, totalAllDeductions,
+      netPayReceived: f.item19 - totalAllDeductions
     };
-  }, [empPayroll, taxYear, useModelDefaults]);
+  }, [form, empPayroll, taxYear, taxBrackets]);
 
   const fmt = (val: number) => {
     return val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -250,18 +122,6 @@ export default function BIR2316Tab({
           </span>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => setUseModelDefaults(!useModelDefaults)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition flex items-center gap-1.5 cursor-pointer ${
-                useModelDefaults 
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
-                  : 'bg-zinc-800 text-zinc-300 border-zinc-700'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              {useModelDefaults ? 'Viewing Exact Image Model Data' : 'View Image Model Data'}
-            </button>
-
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-zinc-400">Year:</span>
               <select
@@ -322,22 +182,28 @@ export default function BIR2316Tab({
               <Printer className="w-4 h-4" />
               Print BIR 2316 Form
             </button>
+
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="py-2 px-3 text-xs font-semibold rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition cursor-pointer"
+              >
+                Back to Schedule
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* SUMMARY BANNER */}
       <div className={`p-4 border rounded-xl flex items-center justify-between text-xs font-mono ${
-        comp.isModelDefault 
-          ? 'bg-amber-950/40 border-amber-500/40 text-amber-200' 
-          : 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+        'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
       }`}>
         <div className="flex items-center gap-2">
-          {comp.isModelDefault ? <Sparkles className="w-4 h-4 text-amber-400" /> : <Layers className="w-4 h-4 text-emerald-400" />}
+          <Layers className="w-4 h-4 text-emerald-400" />
           <span>
-            {comp.isModelDefault 
-              ? `Displaying EXACT model values from the BIR 2316 image (Gross: ₱${fmt(comp.item19_grossCompensation)} | Non-Taxable: ₱${fmt(comp.item38_totalNonTaxable)} | Taxable: ₱${fmt(comp.item52_totalTaxable)}).`
-              : `Summarizing ${comp.recordCount} logged payroll record(s) for ${selectedEmp?.full_name || 'Selected Employee'}. Gross: ₱${fmt(comp.item19_grossCompensation)} | Non-Taxable: ₱${fmt(comp.item38_totalNonTaxable)} | Taxable: ₱${fmt(comp.item52_totalTaxable)}.`}
+            {`Auto-summarized from ${comp.recordCount} payroll record(s) for ${selectedEmp?.full_name || 'Selected Employee'} — feeds BIR 1601-C (monthly) and the Alphalist (annual). Gross: ₱${fmt(comp.item19_grossCompensation)} | Non-Taxable: ₱${fmt(comp.item38_totalNonTaxable)} | Taxable: ₱${fmt(comp.item52_totalTaxable)} | Tax Due: ₱${fmt(comp.item24_taxDue)}.`}
           </span>
         </div>
         <span className="font-bold bg-zinc-900 px-2.5 py-1 rounded border border-zinc-700">
@@ -813,7 +679,7 @@ export default function BIR2316Tab({
           </div>
 
           <div className="flex justify-between items-center text-[10px] bg-emerald-100 p-2 border border-emerald-600 rounded font-bold font-mono">
-            <span>Tax Compensated / Withheld (Item 28): ₱{fmt(comp.item28_totalTaxesWithheld)}</span>
+            <span>Tax Due (Item 24): ₱{fmt(comp.item24_taxDue)} | Withheld (Item 28): ₱{fmt(comp.item28_totalTaxesWithheld)} | {comp.taxOverUnder >= 0 ? 'Still to withhold' : 'Refundable'}: ₱{fmt(Math.abs(comp.taxOverUnder))}</span>
             <span>Total Deductions & Taxes: (₱{fmt(comp.totalAllDeductions)})</span>
             <span className="text-emerald-900 text-xs font-extrabold">NET PAY RECEIVED: ₱{fmt(comp.netPayReceived)}</span>
           </div>

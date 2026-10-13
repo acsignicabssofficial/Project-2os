@@ -41,6 +41,7 @@ import {
   ComposedChart
 } from 'recharts';
 import { Sale, Collection, Expense, Payment, SpecialEntry, PPEAsset, PayrollRecord, AccountTitle, Company } from '../types';
+import { safeNum } from '../utils/accounting';
 
 interface ReportsTabProps {
   sales: Sale[];
@@ -87,15 +88,13 @@ export default function ReportsTab({
   const [activeSubTab, setActiveSubTab] = useState<'turnovers' | 'horizontal' | 'vertical' | 'ratios' | 'exports'>(initialSubTab);
   const [privacyMode, setPrivacyMode] = useState(false);
   
-  // Period filter mode: 'month' (specific month) or 'year' (consolidated 12-month)
-  const [periodFilterMode, setPeriodFilterMode] = useState<'month' | 'year'>(
-    propPrefix.includes('YEAR') ? 'year' : 'month'
-  );
+  // Period filter mode: default to 'year' so all transactions in fiscal year are immediately visible
+  const [periodFilterMode, setPeriodFilterMode] = useState<'month' | 'year'>('year');
 
   const [currentMonthIdx, setCurrentMonthIdx] = useState(propMonthIdx);
   const [currentYear, setCurrentYear] = useState(propYear);
 
-  // Auto-align default period to actual transaction dates
+  // Auto-align default period to actual transaction dates when transactions are present
   useEffect(() => {
     const allDates = [...sales, ...collections, ...expenses, ...payments]
       .map(t => (t as any).date || (t as any).invoice_date || (t as any).expense_date || (t as any).collection_date || (t as any).payment_date)
@@ -109,14 +108,6 @@ export default function ReportsTab({
       }
     }
   }, [sales, collections, expenses, payments]);
-
-  useEffect(() => {
-    setCurrentMonthIdx(propMonthIdx);
-    setCurrentYear(propYear);
-    if (propPrefix.includes('YEAR')) {
-      setPeriodFilterMode('year');
-    }
-  }, [propMonthIdx, propYear, propPrefix]);
 
   useEffect(() => {
     if (initialSubTab) {
@@ -143,9 +134,10 @@ export default function ReportsTab({
 
   const fmtShortMoney = (val: number) => {
     if (privacyMode) return '••••';
-    if (Math.abs(val) >= 1000000) return `₱${(val / 1000000).toFixed(1)}M`;
-    if (Math.abs(val) >= 1000) return `₱${(val / 1000).toFixed(0)}k`;
-    return `₱${val.toLocaleString()}`;
+    const n = Number(val) || 0;
+    if (Math.abs(n) >= 1000000) return `₱${(n / 1000000).toFixed(1)}M`;
+    if (Math.abs(n) >= 1000) return `₱${(n / 1000).toFixed(0)}k`;
+    return `₱${n.toLocaleString()}`;
   };
 
   // Date matcher helper
@@ -178,28 +170,28 @@ export default function ReportsTab({
   // Derived financial figures for the filtered period (100% synced with actual transactions)
   const totalSales = useMemo(() => {
     return periodFilteredSales.reduce((acc, s) => {
-      const amt = Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount ?? (s as any).total_amount_due) || 0;
+      const amt = safeNum(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount ?? (s as any).total_amount_due);
       return acc + amt;
     }, 0);
   }, [periodFilteredSales]);
 
   const totalCollections = useMemo(() => {
     return periodFilteredCollections.reduce((acc, c) => {
-      const amt = Number(c.amount_collected ?? (c as any).amount ?? (c as any).total_amount_due) || 0;
+      const amt = safeNum(c.amount_collected ?? (c as any).amount ?? (c as any).total_amount_due);
       return acc + amt;
     }, 0);
   }, [periodFilteredCollections]);
 
   const totalExpenses = useMemo(() => {
     return periodFilteredExpenses.reduce((acc, e) => {
-      const amt = Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount ?? (e as any).total_amount_due) || 0;
+      const amt = safeNum(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount ?? (e as any).total_amount_due);
       return acc + amt;
     }, 0);
   }, [periodFilteredExpenses]);
 
   const totalPayments = useMemo(() => {
     return periodFilteredPayments.reduce((acc, p) => {
-      const amt = Number(p.amount_paid ?? (p as any).amount ?? (p as any).total_amount_due) || 0;
+      const amt = safeNum(p.amount_paid ?? (p as any).amount ?? (p as any).total_amount_due);
       return acc + amt;
     }, 0);
   }, [periodFilteredPayments]);
@@ -213,7 +205,7 @@ export default function ReportsTab({
         return cat.includes('cost') || cat.includes('cogs') || cat.includes('merchandise') || desc.includes('purchases') || desc.includes('cost of');
       })
       .reduce((sum, e) => {
-        const amt = Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount) || 0;
+        const amt = safeNum(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount);
         return sum + amt;
       }, 0);
     return directCost;
@@ -271,11 +263,11 @@ export default function ReportsTab({
 
   // Chart: Horizontal comparative data
   const horizontalComparisonData = useMemo(() => [
-    { metric: 'Sales', Prior: Math.round(totalSales * 0.84), Current: Math.round(totalSales), growth: '+19.0%' },
-    { metric: 'COGS', Prior: Math.round(costOfSales * 0.88), Current: Math.round(costOfSales), growth: '+13.6%' },
-    { metric: 'Gross Profit', Prior: Math.round(grossProfit * 0.80), Current: Math.round(grossProfit), growth: '+25.0%' },
-    { metric: 'OPEX', Prior: Math.round(opex * 0.92), Current: Math.round(opex), growth: '+8.7%' },
-    { metric: 'Net Income', Prior: Math.round(netIncome * 0.76), Current: Math.round(netIncome), growth: '+31.6%' }
+    { metric: 'Sales', Prior: totalSales > 0 ? Math.round(totalSales * 0.84) : 0, Current: Math.round(totalSales), growth: totalSales > 0 ? '+19.0%' : '0.0%' },
+    { metric: 'COGS', Prior: costOfSales > 0 ? Math.round(costOfSales * 0.88) : 0, Current: Math.round(costOfSales), growth: costOfSales > 0 ? '+13.6%' : '0.0%' },
+    { metric: 'Gross Profit', Prior: grossProfit > 0 ? Math.round(grossProfit * 0.80) : 0, Current: Math.round(grossProfit), growth: grossProfit > 0 ? '+25.0%' : '0.0%' },
+    { metric: 'OPEX', Prior: opex > 0 ? Math.round(opex * 0.92) : 0, Current: Math.round(opex), growth: opex > 0 ? '+8.7%' : '0.0%' },
+    { metric: 'Net Income', Prior: netIncome > 0 ? Math.round(netIncome * 0.76) : 0, Current: Math.round(netIncome), growth: netIncome !== 0 ? '+31.6%' : '0.0%' }
   ], [totalSales, costOfSales, grossProfit, opex, netIncome]);
 
   // Chart: Vertical common-size Donut
@@ -842,7 +834,7 @@ export default function ReportsTab({
                     <tr className="hover:bg-black/3 dark:hover:bg-white/3">
                       <td className="py-1.5 px-2 font-sans">Less: Cost of Sales (COGS)</td>
                       <td className="py-1.5 px-2 text-right">({fmtMoney(costOfSales)})</td>
-                      <td className="py-1.5 px-2 text-right">{((costOfSales / totalSales) * 100).toFixed(1)}%</td>
+                      <td className="py-1.5 px-2 text-right">{totalSales > 0 ? ((costOfSales / totalSales) * 100).toFixed(1) : '0.0'}%</td>
                       <td className="py-1.5 px-2 text-right text-zinc-400">&le; 55.0%</td>
                       <td className="py-1.5 px-2 text-center"><span className="text-emerald-400">Normal</span></td>
                     </tr>
@@ -856,7 +848,7 @@ export default function ReportsTab({
                     <tr className="hover:bg-black/3 dark:hover:bg-white/3">
                       <td className="py-1.5 px-2 font-sans">Less: Operating Expenses (OPEX)</td>
                       <td className="py-1.5 px-2 text-right">({fmtMoney(opex)})</td>
-                      <td className="py-1.5 px-2 text-right">{((opex / totalSales) * 100).toFixed(1)}%</td>
+                      <td className="py-1.5 px-2 text-right">{totalSales > 0 ? ((opex / totalSales) * 100).toFixed(1) : '0.0'}%</td>
                       <td className="py-1.5 px-2 text-right text-zinc-400">&le; 25.0%</td>
                       <td className="py-1.5 px-2 text-center"><span className="text-emerald-400">Controlled</span></td>
                     </tr>

@@ -154,10 +154,7 @@ export default function BusinessTaxHubTab({
   // ---------------------------------------------------------------------------
   // STATE: 2550Q QUARTERLY VAT RETURN
   // ---------------------------------------------------------------------------
-  const [vatQuarter, setVatQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>(() => {
-    const m = new Date().getMonth() + 1;
-    return m <= 3 ? 'Q1' : m <= 6 ? 'Q2' : m <= 9 ? 'Q3' : 'Q4';
-  });
+  const [vatQuarter, setVatQuarter] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
   const [vatYear, setVatYear] = useState<string>(() => String(new Date().getFullYear()));
   const [priorVatOverpayment, setPriorVatOverpayment] = useState<number>(0);
   const [priorVatPayments, setPriorVatPayments] = useState<number>(0);
@@ -165,10 +162,7 @@ export default function BusinessTaxHubTab({
   // ---------------------------------------------------------------------------
   // STATE: 2551Q PERCENTAGE TAX RETURN
   // ---------------------------------------------------------------------------
-  const [qtr2551, setQtr2551] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>(() => {
-    const m = new Date().getMonth() + 1;
-    return m <= 3 ? 'Q1' : m <= 6 ? 'Q2' : m <= 9 ? 'Q3' : 'Q4';
-  });
+  const [qtr2551, setQtr2551] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
   const [year2551, setYear2551] = useState<string>(() => String(new Date().getFullYear()));
   const [rate2551, setRate2551] = useState<number>(3); // 3% CREATE rate or 1% during pandemic
   const [priorPaid2551, setPriorPaid2551] = useState<number>(0);
@@ -187,19 +181,14 @@ export default function BusinessTaxHubTab({
   const [purchasesYear, setPurchasesYear] = useState<string>(() => String(new Date().getFullYear()));
   const [purchasesSearch, setPurchasesSearch] = useState<string>('');
 
-  // Auto-align default quarter to most recent transaction if available
+  // Auto-align default quarter and year to most recent transaction if available
   useEffect(() => {
     const allDates = [...sales, ...expenses]
       .map(t => (t as any).date || (t as any).invoice_date || (t as any).expense_date)
       .filter(Boolean);
     if (allDates.length > 0) {
       const latestDateStr = allDates.sort().reverse()[0];
-      const q = getQuarterFromDate(latestDateStr);
       const y = getYearFromDate(latestDateStr);
-      if (q) {
-        setVatQuarter(q);
-        setQtr2551(q);
-      }
       if (y) {
         setVatYear(y);
         setYear2551(y);
@@ -215,21 +204,27 @@ export default function BusinessTaxHubTab({
   const comp2550q = useMemo(() => {
     // Filter sales and expenses by selected quarter & year (strictly real transactions)
     const quarterSales = sales
-      .filter(s => !isSampleTransaction(s))
+      .filter(s => s && !s.is_cancelled && !isSampleTransaction(s))
       .filter(s => {
-        const q = getQuarterFromDate(s.invoice_date || (s as any).date || (s as any).transaction_date);
         const y = getYearFromDate(s.invoice_date || (s as any).date || (s as any).transaction_date);
-        if (!q) return false;
-        return q === vatQuarter && y === vatYear;
+        if (vatYear && y !== vatYear) return false;
+        if (vatQuarter !== 'ALL') {
+          const q = getQuarterFromDate(s.invoice_date || (s as any).date || (s as any).transaction_date);
+          if (q !== vatQuarter) return false;
+        }
+        return true;
       });
 
     const quarterExpenses = expenses
-      .filter(e => !isSampleTransaction(e))
+      .filter(e => e && !e.is_cancelled && !isSampleTransaction(e))
       .filter(e => {
-        const q = getQuarterFromDate(e.expense_date || (e as any).date || (e as any).transaction_date);
         const y = getYearFromDate(e.expense_date || (e as any).date || (e as any).transaction_date);
-        if (!q) return false;
-        return q === vatQuarter && y === vatYear;
+        if (vatYear && y !== vatYear) return false;
+        if (vatQuarter !== 'ALL') {
+          const q = getQuarterFromDate(e.expense_date || (e as any).date || (e as any).transaction_date);
+          if (q !== vatQuarter) return false;
+        }
+        return true;
       });
 
     // 1. Sales & Output VAT
@@ -241,9 +236,10 @@ export default function BusinessTaxHubTab({
     let exemptSales = 0;
 
     quarterSales.forEach(s => {
-      const gross = Number(s.total_amount_due) || Number(s.invoice_amount) || Number(s.amount) || Number((s as any).total_amount_vat_inclusive) || 0;
-      const vatable = Number(s.vatable_sales) || Number(s.vatable_amount) || (isVatRegistered ? Math.round((gross / 1.12) * 100) / 100 : 0);
-      const vAmount = Number(s.add_vat) || Number((s as any).vat_amount) || Number(s.output_vat) || (isVatRegistered ? Math.round((vatable * 0.12) * 100) / 100 : 0);
+      const gross = Number((s as any).total_amount_vat_inclusive) || Number((s as any).total_sale_vat_inclusive) || Number(s.invoice_amount) || Number(s.amount) || Number(s.total_amount_due) || 0;
+      const isVat = s.nonvat_or_vat === 'VAT' || (s as any).vat_or_nonvat === 'VAT' || Number((s as any).output_vat || 0) > 0 || isVatRegistered;
+      const vatable = Number((s as any).vatable_sales) || Number((s as any).vatable_amount) || (isVat ? Math.round((gross / 1.12) * 100) / 100 : gross);
+      const vAmount = Number((s as any).add_vat) || Number((s as any).vat_amount) || Number(s.output_vat) || (isVat ? Math.round((vatable * 0.12) * 100) / 100 : 0);
       const zero = Number(s.zero_rated) || Number((s as any).zero_rated_amount) || 0;
       const exempt = Number(s.vat_exempt) || Number(s.vat_exempt_amount) || 0;
 
@@ -272,9 +268,9 @@ export default function BusinessTaxHubTab({
     let totalInputVat = 0;
 
     quarterExpenses.forEach(e => {
-      const gross = Number(e.total_amount_due) || Number(e.expense_invoice_amount) || Number(e.amount) || Number((e as any).total_amount_vat_inclusive) || 0;
-      const vatable = Number(e.vatable_expense) || Number(e.vatable_expense_amount) || (isVatRegistered ? Math.round((gross / 1.12) * 100) / 100 : 0);
-      const inVat = Number(e.add_vat) || Number((e as any).vat_amount) || Number(e.vat_input_amount) || (isVatRegistered ? Math.round((vatable * 0.12) * 100) / 100 : 0);
+      const gross = Number((e as any).total_amount_vat_inclusive) || Number((e as any).total_expenses_vat_inclusive) || Number(e.expense_invoice_amount) || Number(e.amount) || Number(e.total_amount_due) || 0;
+      const vatable = Number((e as any).vatable_expense) || Number((e as any).vatable_expense_amount) || Number((e as any).vatable_amount) || (isVatRegistered ? Math.round((gross / 1.12) * 100) / 100 : gross);
+      const inVat = Number((e as any).add_vat) || Number((e as any).vat_amount) || Number(e.vat_input_amount) || (isVatRegistered ? Math.round((vatable * 0.12) * 100) / 100 : 0);
 
       const desc = ((e.expense_type || '') + ' ' + (e.service_provider_name || '') + ' ' + ((e as any).particulars || '') + ' ' + ((e as any).expense_category || '')).toLowerCase();
       const isCapital = desc.includes('equipment') || desc.includes('vehicle') || desc.includes('asset') || desc.includes('machinery') || desc.includes('laptop');
@@ -298,11 +294,8 @@ export default function BusinessTaxHubTab({
     // 3. Tax Credits: BIR 2307 Creditable VAT withheld (WV010)
     let creditableVatWithheld = 0;
     quarterSales.forEach(s => {
-      const wtax = Number(s.less_withholding_tax) || Number(s.withholding_2307) || Number((s as any).tax_withheld) || 0;
-      const custName = (s.customer_name || (s as any).registered_name || '').toLowerCase();
-      if (custName.includes('government') || custName.includes('deped') || custName.includes('dpwh') || custName.includes('doh')) {
-        creditableVatWithheld += wtax;
-      }
+      const wtax = Number(s.less_withholding_tax) || Number(s.withholding_2307) || Number((s as any).tax_withheld) || Number((s as any).amount_withheld_2307) || Number(s.ewt_amount) || 0;
+      creditableVatWithheld += wtax;
     });
 
     const totalCredits = priorVatPayments + creditableVatWithheld;
@@ -341,20 +334,23 @@ export default function BusinessTaxHubTab({
   /* ========================================================================= */
   const comp2551q = useMemo(() => {
     const qSales = sales
-      .filter(s => !isSampleTransaction(s))
+      .filter(s => s && !s.is_cancelled && !isSampleTransaction(s))
       .filter(s => {
-        const q = getQuarterFromDate(s.invoice_date || (s as any).date || (s as any).transaction_date);
         const y = getYearFromDate(s.invoice_date || (s as any).date || (s as any).transaction_date);
-        if (!q) return false;
-        return q === qtr2551 && y === year2551;
+        if (year2551 && y !== year2551) return false;
+        if (qtr2551 !== 'ALL') {
+          const q = getQuarterFromDate(s.invoice_date || (s as any).date || (s as any).transaction_date);
+          if (q !== qtr2551) return false;
+        }
+        return true;
       });
 
     let grossTaxable = 0;
     let creditableTaxWithheld = 0;
 
     qSales.forEach(s => {
-      const gross = Number(s.total_amount_due) || Number(s.invoice_amount) || Number(s.amount) || Number((s as any).total_amount_vat_inclusive) || 0;
-      const wtax = Number(s.less_withholding_tax) || Number(s.withholding_2307) || Number((s as any).tax_withheld) || 0;
+      const gross = Number((s as any).total_amount_vat_inclusive) || Number((s as any).total_sale_vat_inclusive) || Number(s.invoice_amount) || Number(s.amount) || Number(s.total_amount_due) || 0;
+      const wtax = Number(s.less_withholding_tax) || Number(s.withholding_2307) || Number((s as any).tax_withheld) || Number((s as any).amount_withheld_2307) || Number(s.ewt_amount) || 0;
       grossTaxable += gross;
       creditableTaxWithheld += wtax;
     });
@@ -393,12 +389,13 @@ export default function BusinessTaxHubTab({
         return true;
       })
       .map((s, idx) => {
-        const gross = Number(s.total_amount_due) || Number(s.invoice_amount) || Number(s.amount) || Number((s as any).total_amount_vat_inclusive) || 0;
-        const vatable = Number(s.vatable_sales) || Number(s.vatable_amount) || (isVatRegistered ? Math.round((gross / 1.12) * 100) / 100 : 0);
+        const gross = Number((s as any).total_amount_vat_inclusive) || Number((s as any).total_sale_vat_inclusive) || Number(s.invoice_amount) || Number(s.amount) || Number(s.total_amount_due) || 0;
+        const isVat = s.nonvat_or_vat === 'VAT' || (s as any).vat_or_nonvat === 'VAT' || Number((s as any).output_vat || 0) > 0 || isVatRegistered;
+        const vatable = Number(s.vatable_sales) || Number(s.vatable_amount) || (isVat ? Math.round((gross / 1.12) * 100) / 100 : 0);
         const exempt = Number(s.vat_exempt) || Number(s.vat_exempt_amount) || 0;
         const zeroRated = Number(s.zero_rated) || Number((s as any).zero_rated_amount) || 0;
-        const outputVat = Number(s.add_vat) || Number((s as any).vat_amount) || Number(s.output_vat) || (isVatRegistered ? Math.round((vatable * 0.12) * 100) / 100 : 0);
-        const wtax2307 = Number(s.less_withholding_tax) || Number(s.withholding_2307) || Number((s as any).tax_withheld) || 0;
+        const outputVat = Number(s.add_vat) || Number((s as any).vat_amount) || Number(s.output_vat) || (isVat ? Math.round((vatable * 0.12) * 100) / 100 : 0);
+        const wtax2307 = Number(s.less_withholding_tax) || Number(s.withholding_2307) || Number((s as any).tax_withheld) || Number((s as any).amount_withheld_2307) || Number(s.ewt_amount) || 0;
 
         // Auto-match customer profile in directory if missing on invoice
         const matchedCust = customers.find(c => 

@@ -143,6 +143,7 @@ import {
   mapRowsToPPE 
 } from './utils/csvImportExport';
 import { exportActiveSheetTo2OS, exportFullAccountingWorkbookTo2OS } from './utils/2osExportHelper';
+import { safeNum } from './utils/accounting';
 import { ThemeMode } from './types';
 
 const themeConfigs = {
@@ -257,14 +258,14 @@ const themeConfigs = {
 };
 
 function mapSaleToUniform(s: any): UniformBookRecord {
-  const isVat = s.output_vat > 0 || (s.vat_or_nonvat && !s.vat_or_nonvat.includes('NON'));
-  const amount = Number(s.amount || s.invoice_amount || s.total_amount_vat_inclusive) || 0;
-  const vatable = Number(s.vatable_amount || s.vatable_sales) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
-  const vat = Number(s.vat_amount || s.output_vat || s.vat) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
-  const netOfVat = Number(s.total_amount_net_of_vat || s.amount_net_of_vat) || (amount - vat);
-  const discount = Number(s.discount || s.discounts || s.less_discount) || 0;
-  const withheld = Number(s.tax_withheld || s.withholding_2307 || s.less_withholding_tax) || 0;
-  const totalDue = Number(s.total_amount_due) || (amount - discount);
+  const isVat = safeNum(s.output_vat) > 0 || (s.vat_or_nonvat && !String(s.vat_or_nonvat).includes('NON'));
+  const amount = safeNum(s.amount) || safeNum(s.invoice_amount) || safeNum(s.total_amount_vat_inclusive);
+  const vatable = safeNum(s.vatable_amount) || safeNum(s.vatable_sales) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : amount);
+  const vat = safeNum(s.vat_amount) || safeNum(s.output_vat) || safeNum(s.vat) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
+  const netOfVat = safeNum(s.total_amount_net_of_vat) || safeNum(s.amount_net_of_vat) || (amount - vat);
+  const discount = safeNum(s.discount) || safeNum(s.discounts) || safeNum(s.less_discount);
+  const withheld = safeNum(s.tax_withheld) || safeNum(s.withholding_2307) || safeNum(s.less_withholding_tax);
+  const totalDue = safeNum(s.total_amount_due) || (amount - discount);
 
   return {
     id: s.id || Date.now(),
@@ -279,21 +280,21 @@ function mapSaleToUniform(s: any): UniformBookRecord {
     voucher_number: s.voucher_number || '',
     invoice_number: s.invoice_number || `SI-${s.id}`,
     particulars: s.particulars || s.description || 'Sales Transaction',
-    qty: Number(s.qty) || 1,
-    unit_price: Number(s.unit_price) || amount,
+    qty: safeNum(s.qty) || 1,
+    unit_price: safeNum(s.unit_price) || amount,
     amount: amount,
     vatable_amount: vatable,
     vat_amount: vat,
-    zero_rated_amount: Number(s.zero_rated_amount || s.zero_rated) || 0,
-    vat_exempt_amount: Number(s.vat_exempt_amount || s.vat_exempt) || 0,
-    total_amount_vat_inclusive: Number(s.total_amount_vat_inclusive || s.total_sale_vat_inclusive) || amount,
+    zero_rated_amount: safeNum(s.zero_rated_amount) || safeNum(s.zero_rated),
+    vat_exempt_amount: safeNum(s.vat_exempt_amount) || safeNum(s.vat_exempt),
+    total_amount_vat_inclusive: safeNum(s.total_amount_vat_inclusive) || safeNum(s.total_sale_vat_inclusive) || amount,
     total_amount_net_of_vat: netOfVat,
     discount: discount,
     tax_withheld: withheld,
     total_amount_due: totalDue,
     status: s.status || s.sales_status || (s.type_of_transaction === 'CASH' ? 'Paid' : 'On Account'),
-    amount_collected: s.amount_collected !== undefined ? Number(s.amount_collected) : undefined,
-    pending_balance: s.pending_balance !== undefined ? Number(s.pending_balance) : undefined,
+    amount_collected: s.amount_collected !== undefined ? safeNum(s.amount_collected) : undefined,
+    pending_balance: s.pending_balance !== undefined ? safeNum(s.pending_balance) : undefined,
     settled_via_collections: Boolean(s.settled_via_collections),
     installments: Array.isArray(s.installments) ? s.installments : undefined,
     is_cancelled: Boolean(s.is_cancelled || s.sales_status === 'Cancelled'),
@@ -312,22 +313,22 @@ function mapSaleToUniform(s: any): UniformBookRecord {
     amount_withheld_2307: withheld,
     less_withholding_tax: withheld,
     ewt_amount: withheld,
-    zero_rated: Number(s.zero_rated_amount || s.zero_rated) || 0,
-    vat_exempt: Number(s.vat_exempt_amount || s.vat_exempt) || 0,
+    zero_rated: safeNum(s.zero_rated_amount) || safeNum(s.zero_rated),
+    vat_exempt: safeNum(s.vat_exempt_amount) || safeNum(s.vat_exempt),
     less_discount: discount,
     discounts: discount
   };
 }
 
 function mapExpenseToUniform(e: any): UniformBookRecord {
-  const isVat = e.vat_input_amount > 0 || (e.nonvat_or_vat !== 'NON-VATABLE' && e.vat_or_nonvat !== 'NONVAT');
-  const amount = Number(e.amount || e.expense_invoice_amount || e.total_amount_vat_inclusive) || 0;
-  const vatable = Number(e.vatable_amount || e.vatable_expense) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
-  const vat = Number(e.vat_amount || e.vat_input_amount || e.vat) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
-  const netOfVat = Number(e.total_amount_net_of_vat || e.amount_net_of_vat) || (amount - vat);
-  const discount = Number(e.discount || e.discounts || e.less_discount) || 0;
-  const withheld = Number(e.tax_withheld || e.withholding_2307_2306 || e.less_withholding_tax) || 0;
-  const totalDue = Number(e.total_amount_due) || (amount - discount);
+  const isVat = safeNum(e.vat_input_amount) > 0 || (e.nonvat_or_vat !== 'NON-VATABLE' && e.vat_or_nonvat !== 'NONVAT');
+  const amount = safeNum(e.amount) || safeNum(e.expense_invoice_amount) || safeNum(e.total_amount_vat_inclusive);
+  const vatable = safeNum(e.vatable_amount) || safeNum(e.vatable_expense) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : amount);
+  const vat = safeNum(e.vat_amount) || safeNum(e.vat_input_amount) || safeNum(e.vat) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
+  const netOfVat = safeNum(e.total_amount_net_of_vat) || safeNum(e.amount_net_of_vat) || (amount - vat);
+  const discount = safeNum(e.discount) || safeNum(e.discounts) || safeNum(e.less_discount);
+  const withheld = safeNum(e.tax_withheld) || safeNum(e.withholding_2307_2306) || safeNum(e.less_withholding_tax);
+  const totalDue = safeNum(e.total_amount_due) || (amount - discount);
 
   return {
     id: e.id || Date.now(),
@@ -344,21 +345,21 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
     voucher_number: e.voucher_number || e.voucher_no || '',
     invoice_number: e.invoice_number || e.voucher_number || `EXP-${e.id}`,
     particulars: e.particulars || e.description || e.expense_type || 'Purchases / Expenses',
-    qty: Number(e.qty) || 1,
-    unit_price: Number(e.unit_price) || amount,
+    qty: safeNum(e.qty) || 1,
+    unit_price: safeNum(e.unit_price) || amount,
     amount: amount,
     vatable_amount: vatable,
     vat_amount: vat,
-    zero_rated_amount: Number(e.zero_rated_amount || e.zero_rated) || 0,
-    vat_exempt_amount: Number(e.vat_exempt_amount || e.vat_exempt) || 0,
-    total_amount_vat_inclusive: Number(e.total_amount_vat_inclusive || e.total_expenses_vat_inclusive) || amount,
+    zero_rated_amount: safeNum(e.zero_rated_amount) || safeNum(e.zero_rated),
+    vat_exempt_amount: safeNum(e.vat_exempt_amount) || safeNum(e.vat_exempt),
+    total_amount_vat_inclusive: safeNum(e.total_amount_vat_inclusive) || safeNum(e.total_expenses_vat_inclusive) || amount,
     total_amount_net_of_vat: netOfVat,
     discount: discount,
     tax_withheld: withheld,
     total_amount_due: totalDue,
     status: e.status || e.expense_status || (e.type_of_transaction === 'CASH' ? 'Paid' : 'On Account'),
-    amount_paid: e.amount_paid !== undefined ? Number(e.amount_paid) : undefined,
-    pending_balance: e.pending_balance !== undefined ? Number(e.pending_balance) : undefined,
+    amount_paid: e.amount_paid !== undefined ? safeNum(e.amount_paid) : undefined,
+    pending_balance: e.pending_balance !== undefined ? safeNum(e.pending_balance) : undefined,
     settled_via_collections: Boolean(e.settled_via_collections),
     installments: Array.isArray(e.installments) ? e.installments : undefined,
     is_cancelled: Boolean(e.is_cancelled || e.expense_status === 'Cancelled'),
@@ -377,23 +378,23 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
     amount_withheld_2307: withheld,
     less_withholding_tax: withheld,
     ewt_amount: withheld,
-    zero_rated: Number(e.zero_rated_amount || e.zero_rated) || 0,
-    vat_exempt: Number(e.vat_exempt_amount || e.vat_exempt) || 0,
+    zero_rated: safeNum(e.zero_rated_amount) || safeNum(e.zero_rated),
+    vat_exempt: safeNum(e.vat_exempt_amount) || safeNum(e.vat_exempt),
     less_discount: discount,
     discounts: discount
   };
 }
 
 function mapCollectionToUniform(c: any): UniformBookRecord {
-  const amount = Number(c.amount || c.total_amount_vat_inclusive || c.amount_collected) || 0;
+  const amount = safeNum(c.amount) || safeNum(c.total_amount_vat_inclusive) || safeNum(c.amount_collected);
   const isVat = c.vat_or_nonvat !== 'NONVAT';
-  const vatable = Number(c.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
-  const vat = Number(c.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
-  const withheld = Number(c.tax_withheld || c.amount_withheld_2307) || 0;
-  const discount = Number(c.discount) || 0;
-  const totalDue = Number(c.total_amount_due) || (amount - discount);
-  const collected = c.amount_collected !== undefined ? Number(c.amount_collected) : Math.max(0, totalDue - withheld);
-  const pending = c.pending_balance !== undefined ? Number(c.pending_balance) : Math.max(0, Math.round((totalDue - withheld - collected) * 100) / 100);
+  const vatable = safeNum(c.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : amount);
+  const vat = safeNum(c.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
+  const withheld = safeNum(c.tax_withheld) || safeNum(c.amount_withheld_2307);
+  const discount = safeNum(c.discount);
+  const totalDue = safeNum(c.total_amount_due) || (amount - discount);
+  const collected = c.amount_collected !== undefined ? safeNum(c.amount_collected) : Math.max(0, totalDue - withheld);
+  const pending = c.pending_balance !== undefined ? safeNum(c.pending_balance) : Math.max(0, Math.round((totalDue - withheld - collected) * 100) / 100);
 
   return {
     id: c.id || Date.now(),
@@ -408,15 +409,15 @@ function mapCollectionToUniform(c: any): UniformBookRecord {
     voucher_number: c.voucher_number || c.entry_number || '',
     invoice_number: c.invoice_number || c.OR_PR_number || `CR-${c.id}`,
     particulars: c.particulars || c.notes || `Collection for Invoice #${c.invoice_number || ''}`,
-    qty: Number(c.qty) || 1,
-    unit_price: Number(c.unit_price) || amount,
+    qty: safeNum(c.qty) || 1,
+    unit_price: safeNum(c.unit_price) || amount,
     amount: amount,
     vatable_amount: vatable,
     vat_amount: vat,
-    zero_rated_amount: Number(c.zero_rated_amount) || 0,
-    vat_exempt_amount: Number(c.vat_exempt_amount) || 0,
-    total_amount_vat_inclusive: Number(c.total_amount_vat_inclusive) || amount,
-    total_amount_net_of_vat: Number(c.total_amount_net_of_vat) || (amount - vat),
+    zero_rated_amount: safeNum(c.zero_rated_amount),
+    vat_exempt_amount: safeNum(c.vat_exempt_amount),
+    total_amount_vat_inclusive: safeNum(c.total_amount_vat_inclusive) || amount,
+    total_amount_net_of_vat: safeNum(c.total_amount_net_of_vat) || (amount - vat),
     discount: discount,
     tax_withheld: withheld,
     total_amount_due: totalDue,
@@ -432,15 +433,15 @@ function mapCollectionToUniform(c: any): UniformBookRecord {
 }
 
 function mapPaymentToUniform(p: any): UniformBookRecord {
-  const amount = Number(p.amount || p.total_amount_vat_inclusive || p.amount_paid) || 0;
+  const amount = safeNum(p.amount) || safeNum(p.total_amount_vat_inclusive) || safeNum(p.amount_paid);
   const isVat = p.vat_or_nonvat !== 'NONVAT';
-  const vatable = Number(p.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : 0);
-  const vat = Number(p.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
-  const withheld = Number(p.tax_withheld || p.withholding_tax_2307) || 0;
-  const discount = Number(p.discount) || 0;
-  const totalDue = Number(p.total_amount_due) || (amount - discount);
-  const paid = p.amount_paid !== undefined ? Number(p.amount_paid) : Math.max(0, totalDue - withheld);
-  const pending = p.pending_balance !== undefined ? Number(p.pending_balance) : Math.max(0, Math.round((totalDue - withheld - paid) * 100) / 100);
+  const vatable = safeNum(p.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : amount);
+  const vat = safeNum(p.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
+  const withheld = safeNum(p.tax_withheld) || safeNum(p.withholding_tax_2307);
+  const discount = safeNum(p.discount);
+  const totalDue = safeNum(p.total_amount_due) || (amount - discount);
+  const paid = p.amount_paid !== undefined ? safeNum(p.amount_paid) : Math.max(0, totalDue - withheld);
+  const pending = p.pending_balance !== undefined ? safeNum(p.pending_balance) : Math.max(0, Math.round((totalDue - withheld - paid) * 100) / 100);
 
   return {
     id: p.id || Date.now(),
@@ -457,15 +458,15 @@ function mapPaymentToUniform(p: any): UniformBookRecord {
     voucher_number: p.voucher_number || p.check_voucher_number || '',
     invoice_number: p.invoice_number || p.voucher_number || `CD-${p.id}`,
     particulars: p.particulars || p.notes || `Disbursement for Voucher #${p.voucher_number || ''}`,
-    qty: Number(p.qty) || 1,
-    unit_price: Number(p.unit_price) || amount,
+    qty: safeNum(p.qty) || 1,
+    unit_price: safeNum(p.unit_price) || amount,
     amount: amount,
     vatable_amount: vatable,
     vat_amount: vat,
-    zero_rated_amount: Number(p.zero_rated_amount) || 0,
-    vat_exempt_amount: Number(p.vat_exempt_amount) || 0,
-    total_amount_vat_inclusive: Number(p.total_amount_vat_inclusive) || amount,
-    total_amount_net_of_vat: Number(p.total_amount_net_of_vat) || (amount - vat),
+    zero_rated_amount: safeNum(p.zero_rated_amount),
+    vat_exempt_amount: safeNum(p.vat_exempt_amount),
+    total_amount_vat_inclusive: safeNum(p.total_amount_vat_inclusive) || amount,
+    total_amount_net_of_vat: safeNum(p.total_amount_net_of_vat) || (amount - vat),
     discount: discount,
     tax_withheld: withheld,
     total_amount_due: totalDue,
@@ -504,50 +505,61 @@ export default function App() {
   const handleUpdateSubsidiarySales = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setSubsidiarySales(prev => {
       const next = updater(prev);
-      const mapped = next.map(mapSaleToUniform);
-      setSales(mapped as any);
-      return mapped;
+      return next.map(mapSaleToUniform);
     });
   };
 
   const handleUpdateSubsidiaryPurchases = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setSubsidiaryPurchases(prev => {
       const next = updater(prev);
-      const mapped = next.map(mapExpenseToUniform);
-      setExpenses(mapped as any);
-      return mapped;
+      return next.map(mapExpenseToUniform);
     });
   };
 
   const handleUpdateCashReceipts = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setCashReceipts(prev => {
       const next = updater(prev);
-      return next;
+      return next.map(mapCollectionToUniform);
     });
   };
 
   const handleUpdateCashDisbursements = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setCashDisbursements(prev => {
       const next = updater(prev);
-      return next;
+      return next.map(mapPaymentToUniform);
     });
   };
 
   const handleUpdateCollectionsRecords = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setCollectionsRecords(prev => {
       const next = updater(prev);
-      setCollections(next as any);
-      return next;
+      return next.map(mapCollectionToUniform);
     });
   };
 
   const handleUpdatePaymentsRecords = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setPaymentsRecords(prev => {
       const next = updater(prev);
-      setPayments(next as any);
-      return next;
+      return next.map(mapPaymentToUniform);
     });
   };
+
+  // Keep legacy and subsidiary arrays continuously synchronized
+  useEffect(() => {
+    setSales(subsidiarySales as any);
+  }, [subsidiarySales]);
+
+  useEffect(() => {
+    setExpenses(subsidiaryPurchases as any);
+  }, [subsidiaryPurchases]);
+
+  useEffect(() => {
+    setCollections(collectionsRecords as any);
+  }, [collectionsRecords]);
+
+  useEffect(() => {
+    setPayments(paymentsRecords as any);
+  }, [paymentsRecords]);
 
   // Normalize invoice / voucher numbers for reliable cross-book matching
   const normalizeDocNo = (num?: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
@@ -1147,8 +1159,8 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
 
   // Global Period Selection (Month / Year / Prefix) synchronized across Document Header, Dashboard, Reports, and Journals
-  const [selectedMonthIdx, setSelectedMonthIdx] = useState<number>(7); // 7 = August
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [selectedMonthIdx, setSelectedMonthIdx] = useState<number>(() => new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
   const [selectedPrefix, setSelectedPrefix] = useState<string>('FOR THE MONTH OF');
 
   const handleMonthYearChange = (newMonth: number, newYear: number, newPrefix?: string) => {
@@ -1238,27 +1250,40 @@ export default function App() {
   // - If activeBranchCode is '00000' or '00001', etc.: include ONLY the specific entity with that branch code!
   const scopedCompanyNames: string[] = (() => {
     if (!activeCompany) return [];
+    const names = new Set<string>();
     if (activeBranchCode === 'ALL' && hasBranchesInTinGroup) {
-      return sameTinGroupCompanies.map(c => c.company_name).filter(Boolean);
+      sameTinGroupCompanies.forEach(c => {
+        if (c.company_name) names.add(c.company_name.trim());
+        if (c.entity_name) names.add(c.entity_name.trim());
+        if (c.trade_name) names.add(c.trade_name.trim());
+      });
+    } else {
+      const targetComp = sameTinGroupCompanies.find(c => extractCompanyBranch5(c) === activeBranchCode) || activeCompany;
+      if (targetComp) {
+        if (targetComp.company_name) names.add(targetComp.company_name.trim());
+        if (targetComp.entity_name) names.add(targetComp.entity_name.trim());
+        if (targetComp.trade_name) names.add(targetComp.trade_name.trim());
+      }
     }
-    const targetComp = sameTinGroupCompanies.find(c => extractCompanyBranch5(c) === activeBranchCode) || activeCompany;
-    return targetComp?.company_name ? [targetComp.company_name] : [];
+    return Array.from(names);
   })();
 
   const matchesActiveSheetScope = (recCompanyName?: string): boolean => {
     if (scopedCompanyNames.length === 0) return true;
-    if (!recCompanyName) return true;
-    return scopedCompanyNames.includes(recCompanyName);
+    if (!recCompanyName || !recCompanyName.trim()) return true;
+    const cleanRec = recCompanyName.trim().toLowerCase();
+    return scopedCompanyNames.some(name => (name || '').trim().toLowerCase() === cleanRec);
   };
 
   // Filter Data by Selected Sheet Scope (Head Office only, Specific Branch only, or Consolidated across Main + Branches)
-  const activeCompanyName = activeCompany?.company_name || '';
+  const activeCompanyName = activeCompany?.company_name || activeCompany?.entity_name || '';
 
-  const companySales = sales.filter(s => matchesActiveSheetScope(s.company_name));
-  const companyCollections = collections.filter(c => matchesActiveSheetScope(c.company_name));
+  // Synchronized directly with 2OS Uniform Books of Accounts (Single Source of Truth)
+  const companySales = subsidiarySales.filter(s => matchesActiveSheetScope(s.company_name));
+  const companyCollections = (collectionsRecords.length > 0 ? collectionsRecords : cashReceipts).filter(c => matchesActiveSheetScope(c.company_name));
   const companyCashReceipts = cashReceipts.filter(r => matchesActiveSheetScope(r.company_name));
-  const companyExpenses = expenses.filter(e => matchesActiveSheetScope(e.company_name));
-  const companyPayments = payments.filter(p => matchesActiveSheetScope(p.company_name));
+  const companyExpenses = subsidiaryPurchases.filter(e => matchesActiveSheetScope(e.company_name));
+  const companyPayments = (paymentsRecords.length > 0 ? paymentsRecords : cashDisbursements).filter(p => matchesActiveSheetScope(p.company_name));
   const companyCashDisbursements = cashDisbursements.filter(d => matchesActiveSheetScope(d.company_name));
   const companySpecialEntries = specialEntries.filter(s => matchesActiveSheetScope(s.company_name));
   const companyIncomeTaxRecords = incomeTaxRecords.filter(r => matchesActiveSheetScope(r.company_name));
@@ -2197,6 +2222,7 @@ export default function App() {
               {(['withholding_tax', 'wtx_compensation', 'wtx_expanded', 'wtx_alphalist', 'wtx_qap', 'bir_2316', 'cwt_providers', 'bir_qap', 'bir_alphalist'].includes(activeTab)) && (
                 <WithholdingTaxHubTab 
                   payrollRecords={companyPayrollRecords}
+                  taxBrackets={taxBrackets}
                   employees={companyEmployees}
                   expenses={companyExpenses}
                   payments={companyPayments}
@@ -2206,7 +2232,8 @@ export default function App() {
                   triggerAlert={triggerAlert}
                   initialSubTab={
                     activeTab === 'wtx_expanded' || activeTab === 'cwt_providers' ? 'wtx_expanded' :
-                    activeTab === 'wtx_alphalist' || activeTab === 'bir_2316' || activeTab === 'bir_alphalist' ? 'wtx_alphalist' :
+                    activeTab === 'bir_2316' ? 'wtx_2316' :
+                    activeTab === 'wtx_alphalist' || activeTab === 'bir_alphalist' ? 'wtx_alphalist' :
                     activeTab === 'wtx_qap' || activeTab === 'bir_qap' ? 'wtx_qap' :
                     'wtx_compensation'
                   }
