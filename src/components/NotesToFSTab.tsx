@@ -1,6 +1,7 @@
 import React from 'react';
 import { FileText, Building2, Info, CheckCircle2 } from 'lucide-react';
 import { Sale, Collection, Expense, Payment, PPEAsset, Company } from '../types';
+import { safeNum } from '../utils/accounting';
 
 interface NotesToFSTabProps {
   sales?: Sale[];
@@ -27,13 +28,52 @@ export default function NotesToFSTab({
   const rdo = activeCompany?.rdo || 'RDO 050';
   const address = activeCompany?.business_address || 'Metro Manila, Philippines';
 
-  const grossSales = sales.reduce((sum, s) => sum + s.invoice_amount, 0);
-  const vatSales = sales.reduce((sum, s) => sum + s.vatable_amount, 0);
-  const exemptSales = sales.reduce((sum, s) => sum + s.vat_exempt_amount, 0);
-  const outputVat = sales.reduce((sum, s) => sum + s.output_vat, 0);
+  const grossSales = sales.reduce((sum, s) => {
+    const amt = safeNum(s.invoice_amount) || safeNum((s as any).total_amount_vat_inclusive) || safeNum((s as any).amount) || safeNum((s as any).total_amount_due);
+    return sum + amt;
+  }, 0);
 
-  const grossExpenses = expenses.reduce((sum, e) => sum + e.expense_invoice_amount, 0);
-  const inputVat = expenses.reduce((sum, e) => sum + e.vat_input_amount, 0);
+  const vatSales = sales.reduce((sum, s) => {
+    const vatable = safeNum(s.vatable_amount) || safeNum((s as any).vatable_sales);
+    if (vatable > 0) return sum + vatable;
+    const gross = safeNum(s.invoice_amount) || safeNum((s as any).total_amount_vat_inclusive) || safeNum((s as any).amount) || safeNum((s as any).total_amount_due);
+    const vat = safeNum(s.output_vat) || safeNum((s as any).vat_amount) || safeNum((s as any).add_vat);
+    const isVat = s.nonvat_or_vat === 'VAT' || (s as any).vat_or_nonvat === 'VAT' || vat > 0;
+    return sum + (isVat && gross > 0 ? Math.round((gross / 1.12) * 100) / 100 : (gross > 0 ? gross : 0));
+  }, 0);
+
+  const exemptSales = sales.reduce((sum, s) => sum + (safeNum(s.vat_exempt_amount) || safeNum((s as any).vat_exempt)), 0);
+
+  const outputVat = sales.reduce((sum, s) => {
+    const vat = safeNum(s.output_vat) || safeNum((s as any).vat_amount) || safeNum((s as any).add_vat);
+    if (vat > 0) return sum + vat;
+    const gross = safeNum(s.invoice_amount) || safeNum((s as any).total_amount_vat_inclusive) || safeNum((s as any).amount) || safeNum((s as any).total_amount_due);
+    const isVat = s.nonvat_or_vat === 'VAT' || (s as any).vat_or_nonvat === 'VAT';
+    return sum + (isVat && gross > 0 ? Math.round((gross - (gross / 1.12)) * 100) / 100 : 0);
+  }, 0);
+
+  const grossExpenses = expenses.reduce((sum, e) => {
+    const amt = safeNum(e.expense_invoice_amount) || safeNum((e as any).total_amount_vat_inclusive) || safeNum((e as any).amount) || safeNum((e as any).total_amount_due);
+    return sum + amt;
+  }, 0);
+
+  const inputVat = expenses.reduce((sum, e) => {
+    const inVat = safeNum(e.vat_input_amount) || safeNum((e as any).vat_amount) || safeNum((e as any).add_vat);
+    if (inVat > 0) return sum + inVat;
+    const gross = safeNum(e.expense_invoice_amount) || safeNum((e as any).total_amount_vat_inclusive) || safeNum((e as any).amount) || safeNum((e as any).total_amount_due);
+    const isVat = (e as any).vat_or_nonvat === 'VAT' || e.vat_status === 'VAT';
+    return sum + (isVat && gross > 0 ? Math.round((gross - (gross / 1.12)) * 100) / 100 : 0);
+  }, 0);
+
+  const cwtWithheldByClients = sales.reduce((sum, s) => {
+    const cwt = safeNum((s as any).tax_withheld) || safeNum((s as any).less_withholding_tax) || safeNum((s as any).withholding_2307) || safeNum((s as any).amount_withheld_2307) || safeNum(s.ewt_amount);
+    return sum + cwt;
+  }, 0);
+
+  const ewtPaidToVendors = expenses.reduce((s, e) => {
+    const ewt = safeNum(e.withholding_2307_2306) || safeNum((e as any).tax_withheld) || safeNum((e as any).less_withholding_tax) || safeNum((e as any).withholding_2307);
+    return s + ewt;
+  }, 0);
 
   const ppeCost = ppeAssets.reduce((sum, a) => sum + a.acquisition_cost, 0);
   const ppeDepr = ppeAssets.reduce((sum, a) => sum + a.accumulated_depreciation, 0);
@@ -126,7 +166,15 @@ export default function NotesToFSTab({
                   <td className="p-3 font-mono text-amber-400">BIR Form 0619-E / 1601-EQ</td>
                   <td className="p-3 text-right font-mono text-zinc-300">₱{grossExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="p-3 text-right font-mono font-bold text-purple-400">
-                    ₱{expenses.reduce((s, e) => s + (Number(e.withholding_2307_2306 ?? (e as any).tax_withheld) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    ₱{ewtPaidToVendors.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                <tr>
+                  <td className={`p-3 font-semibold ${theme.textTitle}`}>Creditable Withholding Tax Withheld by Clients (BIR 2307)</td>
+                  <td className="p-3 font-mono text-violet-400">BIR Form 1701 / 1702 (SAWT)</td>
+                  <td className="p-3 text-right font-mono text-zinc-300">₱{vatSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="p-3 text-right font-mono font-bold text-violet-400">
+                    ₱{cwtWithheldByClients.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
                 </tr>
               </tbody>

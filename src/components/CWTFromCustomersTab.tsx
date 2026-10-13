@@ -13,16 +13,26 @@ interface CWTFromCustomersTabProps {
 export default function CWTFromCustomersTab({ certificates = [], sales = [], collections = [], activeCompany, theme }: CWTFromCustomersTabProps) {
 
   // Aggregate 2307 withheld by clients from sales & collections
-  const cust2307List = sales.filter(s => s.withholding_2307 > 0).map(s => ({
-    id: s.id,
-    client: s.customer_name,
-    tin: s.customer_tin,
-    invNo: s.invoice_number,
-    date: s.invoice_date,
-    gross: s.invoice_amount,
-    taxWithheld: s.withholding_2307,
-    atc: 'WI010'
-  }));
+  const cust2307List = sales
+    .filter(s => (Number((s as any).tax_withheld ?? s.withholding_2307 ?? (s as any).amount_withheld_2307 ?? s.ewt_amount ?? (s as any).less_withholding_tax) || 0) > 0)
+    .map(s => {
+      const taxWithheld = Number((s as any).tax_withheld ?? s.withholding_2307 ?? (s as any).amount_withheld_2307 ?? s.ewt_amount ?? (s as any).less_withholding_tax) || 0;
+      const gross = Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount) || 0;
+      const vatable = Number(s.vatable_amount ?? (s as any).vatable_sales) || (gross > 0 ? Math.round((gross / 1.12) * 100) / 100 : gross);
+      const ratePct = vatable > 0 ? Math.round((taxWithheld / vatable) * 100) : 10;
+      const atc = ratePct >= 5 ? 'WC157' : (ratePct >= 2 ? 'WC010' : 'WI010');
+
+      return {
+        id: s.id,
+        client: s.customer_name || (s as any).registered_name || 'Customer',
+        tin: s.customer_tin || (s as any).tin || '000-000-000-00000',
+        invNo: s.invoice_number || `INV-${s.id}`,
+        date: s.invoice_date || (s as any).date || '',
+        gross: vatable || gross,
+        taxWithheld,
+        atc
+      };
+    });
 
   return (
     <div className="space-y-4">

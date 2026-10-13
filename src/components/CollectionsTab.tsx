@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CheckCircle2, Coins, Pencil, Trash2, Ban, RotateCcw, Plus, Search, X } from 'lucide-react';
 import { Collection, Sale, Customer, Company } from '../types';
+import AutoSuggestInput from './AutoSuggestInput';
 
 interface CollectionsTabProps {
   collections: Collection[];
@@ -175,35 +176,8 @@ export default function CollectionsTab({
     const amtCol = parseFloat(collAmt) || 0;
     const discountAmt = parseFloat(collDiscount) || 0;
     const w2307 = parseFloat(collWithheld) || 0;
-
-    // Check prior collections for this invoice
-    const cleanInv = collInvNo.trim().toLowerCase();
-    const priorCollections = collections.filter(c => 
-      c.id !== editingId && 
-      !c.is_cancelled && 
-      c.invoice_number && 
-      c.invoice_number.trim().toLowerCase() === cleanInv
-    );
-    const prevPaid = priorCollections.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
-    const prevDiscount = priorCollections.reduce((sum, c) => sum + (Number(c.discount || c.discounts) || 0), 0);
-    const prevWtax = priorCollections.reduce((sum, c) => sum + (Number(c.amount_withheld_2307) || 0), 0);
-    const prevTotalSettled = prevPaid + prevDiscount + prevWtax;
-
-    // Overpayment Precaution: block if attempt exceeds remaining balance due
-    if (invoiceAmt > 0) {
-      const remainingBalanceBeforeThis = Math.max(0, Math.round((invoiceAmt - prevTotalSettled) * 100) / 100);
-      const currentAttempt = Math.round((amtCol + discountAmt + w2307) * 100) / 100;
-      if (currentAttempt > remainingBalanceBeforeThis + 0.01) {
-        triggerAlert(
-          `Overpayment Precaution: Collection amount (₱${amtCol.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining balance due of ₱${remainingBalanceBeforeThis.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${collInvNo} (Prior collections: ₱${prevPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })} of total due ₱${invoiceAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}). Customer overpayment is blocked.`,
-          'error'
-        );
-        return;
-      }
-    }
-
-    const totalSettled = prevTotalSettled + amtCol + discountAmt + w2307;
-    const remBalance = Math.max(0, Math.round((invoiceAmt - totalSettled) * 100) / 100);
+    const totalSettled = amtCol + discountAmt + w2307;
+    const remBalance = Math.max(0, invoiceAmt - totalSettled);
 
     const newCollItem: Collection = {
       id: editingId !== null ? editingId : Date.now(),
@@ -454,12 +428,33 @@ export default function CollectionsTab({
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                     Customer Name
+                    <span className="text-[10px] text-emerald-400 font-normal ml-2">
+                      (Auto-suggests matching customers while typing)
+                    </span>
                   </label>
-                  <input 
-                    type="text"
+                  <AutoSuggestInput<Customer>
                     value={collCustName}
-                    onChange={(e) => setCollCustName(e.target.value)}
-                    className={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent ${theme.borderInput} ${theme.textMain}`}
+                    onChange={setCollCustName}
+                    onSelect={(c) => {
+                      const name = c.registered_name || c.customer_name || c.trade_name || '';
+                      setCollCustName(name);
+                      const tinVal = c.client_TIN || c.customer_tin || '';
+                      if (tinVal) setCollTin(tinVal);
+                    }}
+                    items={customers}
+                    categoryLabel="Customer"
+                    theme={theme}
+                    placeholder="Enter customer name (e.g. ABC, BAB, DAB)..."
+                    getItemLabel={(c) => c.registered_name || c.customer_name || c.trade_name || ''}
+                    getItemSublabel={(c) => `TIN: ${c.client_TIN || c.customer_tin || 'N/A'}`}
+                    getSearchFields={(c) => [
+                      c.registered_name || '',
+                      c.customer_name || '',
+                      c.trade_name || '',
+                      c.client_TIN || '',
+                      c.customer_tin || ''
+                    ]}
+                    inputClassName={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent ${theme.borderInput} ${theme.textMain}`}
                   />
                 </div>
 

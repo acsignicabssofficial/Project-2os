@@ -20,6 +20,7 @@ import {
   Eye
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
+import AutoSuggestInput from './AutoSuggestInput';
 import { UniformBookRecord, Contractor, Company, AccountTitle, SpecialEntry, SpecialEntryLine } from '../types';
 import { computeExpenseVAT } from '../utils/accounting';
 
@@ -382,7 +383,25 @@ export default function PurchaseTransactionTab({
       amount_paid: purchaseMode === 'ON CASH' ? netCashForFullPayable : (purchaseMode === 'ON PARTIAL' ? parseFloat(downPaymentAmount) || 0 : 0),
       pending_balance: purchaseMode === 'ON CASH' ? 0 : (purchaseMode === 'ON PARTIAL' ? Math.max(0, totalDue - (parseFloat(downPaymentAmount) || 0)) : totalDue),
       is_cancelled: false,
-      created_at: nowIso
+      created_at: nowIso,
+      // Compatibility aliases for BIR tools, Reports, Notes to FS
+      expense_date: date,
+      issue_date: date,
+      expense_invoice_amount: liveFormulas.total_amount_vat_inclusive || liveFormulas.amount,
+      vatable_expense: liveFormulas.vatable_purchases,
+      vatable_expense_amount: liveFormulas.vatable_purchases,
+      vat_input_amount: liveFormulas.input_vat,
+      add_vat: liveFormulas.input_vat,
+      withholding_2307_2306: totalEwt,
+      amount_withheld_2307: totalEwt,
+      less_withholding_tax: totalEwt,
+      ewt_amount: totalEwt,
+      zero_rated: parseFloat(zeroRated) || 0,
+      vat_exempt: parseFloat(vatExempt) || 0,
+      less_discount: liveFormulas.discount,
+      discounts: liveFormulas.discount,
+      service_provider_name: effectiveProviderName,
+      sp_tin: full14DigitTin
     };
 
     // 2. Routing Logic (Single-Entry Method - Books of Accounts generate General Journal entries):
@@ -921,14 +940,37 @@ export default function PurchaseTransactionTab({
             {/* PROVIDER & VOUCHER DETAILS */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
               <div className="md:col-span-5">
-                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Vendor / Service Provider Name (Optional)</label>
+                <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>
+                  Vendor / Service Provider Name (Optional)
+                  <span className="text-[10px] text-purple-400 font-normal ml-2">
+                    (Auto-suggests matching providers while typing)
+                  </span>
+                </label>
                 <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Enter vendor trade name (optional)..."
+                  <AutoSuggestInput<Contractor>
                     value={providerName}
-                    onChange={(e) => setProviderName(e.target.value)}
-                    className={`flex-1 px-3 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
+                    onChange={setProviderName}
+                    onSelect={(p) => {
+                      const name = p.registered_name || p.service_provider_name || p.company_name || '';
+                      setProviderName(name);
+                      handleSelectProvider(name);
+                    }}
+                    items={contractors}
+                    categoryLabel="Provider"
+                    theme={theme}
+                    placeholder="Enter vendor trade name (e.g. ABC, BAB, DAB)..."
+                    getItemLabel={(p) => p.registered_name || p.service_provider_name || p.company_name || ''}
+                    getItemSublabel={(p) => `TIN: ${p.sp_tin || p.client_TIN || 'N/A'} • ${p.address || p.sp_address || 'No address'}`}
+                    getItemBadge={(p) => p.expense_type || 'Provider'}
+                    getSearchFields={(p) => [
+                      p.registered_name || '',
+                      p.service_provider_name || '',
+                      p.company_name || '',
+                      p.sp_tin || '',
+                      p.client_TIN || ''
+                    ]}
+                    className="flex-1"
+                    inputClassName={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
                   />
                   {contractors.length > 0 && (
                     <select

@@ -13,16 +13,26 @@ interface CWTForProvidersTabProps {
 export default function CWTForProvidersTab({ certificates = [], expenses = [], payments = [], activeCompany, theme }: CWTForProvidersTabProps) {
 
   // Aggregate 2307 withheld for vendors/suppliers from expenses
-  const provider2307List = expenses.filter(e => e.withholding_2307_2306 > 0).map(e => ({
-    id: e.id,
-    provider: e.service_provider_name,
-    tin: e.sp_tin,
-    voucherNo: e.voucher_number,
-    date: e.expense_date,
-    gross: e.expense_invoice_amount,
-    taxWithheld: e.withholding_2307_2306,
-    atc: 'WC120'
-  }));
+  const provider2307List = expenses
+    .filter(e => (Number(e.withholding_2307_2306 ?? (e as any).tax_withheld ?? (e as any).amount_withheld_2307 ?? (e as any).less_withholding_tax) || 0) > 0)
+    .map(e => {
+      const taxWithheld = Number(e.withholding_2307_2306 ?? (e as any).tax_withheld ?? (e as any).amount_withheld_2307 ?? (e as any).less_withholding_tax) || 0;
+      const gross = Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount) || 0;
+      const vatable = Number((e as any).vatable_amount ?? (e as any).vatable_expense) || (gross > 0 ? Math.round((gross / 1.12) * 100) / 100 : gross);
+      const ratePct = vatable > 0 ? Math.round((taxWithheld / vatable) * 100) : 2;
+      const atc = ratePct >= 5 ? 'WC157' : (ratePct >= 2 ? 'WC120' : 'WI010');
+
+      return {
+        id: e.id,
+        provider: e.service_provider_name || (e as any).registered_name || 'Vendor',
+        tin: e.sp_tin || (e as any).tin || '000-000-000-00000',
+        voucherNo: e.voucher_number || e.invoice_number || `EXP-${e.id}`,
+        date: e.expense_date || (e as any).date || '',
+        gross: vatable || gross,
+        taxWithheld,
+        atc
+      };
+    });
 
   return (
     <div className="space-y-4">

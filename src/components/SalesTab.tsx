@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CheckCircle2, Pencil, Trash2, Ban, RotateCcw, Plus, Search, X, Calculator } from 'lucide-react';
 import { Sale, Customer, Company, Collection } from '../types';
+import AutoSuggestInput from './AutoSuggestInput';
 import { computeSaleFormulas } from '../utils/accounting';
 
 interface SalesTabProps {
@@ -424,14 +425,34 @@ export default function SalesTab({
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                     Registered Customer Name *
+                    <span className="text-[10px] text-cyan-400 font-normal ml-2">
+                      (Auto-suggests matching customers while typing)
+                    </span>
                   </label>
-                  <input 
-                    type="text"
+                  <AutoSuggestInput<Customer>
                     value={registeredName}
-                    onChange={(e) => setRegisteredName(e.target.value)}
-                    placeholder="e.g. Apex Trading Corp."
+                    onChange={setRegisteredName}
+                    onSelect={(c) => {
+                      const name = c.registered_name || c.customer_name || c.trade_name || '';
+                      setRegisteredName(name);
+                      if (c.customer_tin || c.client_TIN) setSaleTin(c.customer_tin || c.client_TIN || '');
+                      if (c.customer_address || c.client_Address || c.address) setClientAddress(c.customer_address || c.client_Address || c.address || '');
+                    }}
+                    items={customers}
+                    categoryLabel="Customer"
+                    theme={theme}
                     required
-                    className={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent focus:outline-none ${theme.accentFocus} ${theme.borderInput} ${theme.textMain}`}
+                    placeholder="e.g. Apex Trading Corp. (e.g. ABC, BAB, DAB)..."
+                    getItemLabel={(c) => c.registered_name || c.customer_name || c.trade_name || ''}
+                    getItemSublabel={(c) => `TIN: ${c.customer_tin || c.client_TIN || 'N/A'} • ${c.customer_address || c.client_Address || c.address || 'No address'}`}
+                    getSearchFields={(c) => [
+                      c.registered_name || '',
+                      c.customer_name || '',
+                      c.trade_name || '',
+                      c.customer_tin || '',
+                      c.client_TIN || ''
+                    ]}
+                    inputClassName={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent focus:outline-none ${theme.accentFocus} ${theme.borderInput} ${theme.textMain}`}
                   />
                 </div>
 

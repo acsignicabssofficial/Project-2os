@@ -23,6 +23,7 @@ import {
   X
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
+import AutoSuggestInput from './AutoSuggestInput';
 import { UniformBookRecord, Customer, Company, SpecialEntry, SpecialEntryLine } from '../types';
 import { computeSaleFormulas } from '../utils/accounting';
 
@@ -388,7 +389,22 @@ export default function SalesTransactionTab({
       down_payment: saleMode === 'ON PARTIAL' ? parseFloat(downPaymentAmount) || 0 : undefined,
       is_cancelled: false,
       is_various: finalIsVarious,
-      created_at: nowIso
+      created_at: nowIso,
+      // Compatibility aliases for BIR tools, Reports, Notes to FS
+      invoice_date: date,
+      issue_date: date,
+      invoice_amount: liveFormulas.total_sale_vat_inclusive || liveFormulas.amount,
+      vatable_sales: liveFormulas.vatable_sales,
+      output_vat: liveFormulas.vat,
+      add_vat: liveFormulas.vat,
+      withholding_2307: liveFormulas.less_withholding_tax,
+      amount_withheld_2307: liveFormulas.less_withholding_tax,
+      less_withholding_tax: liveFormulas.less_withholding_tax,
+      ewt_amount: liveFormulas.less_withholding_tax,
+      zero_rated: liveFormulas.zero_rated,
+      vat_exempt: liveFormulas.vat_exempt,
+      discounts: liveFormulas.less_discount,
+      less_discount: liveFormulas.less_discount
     };
 
     // 2. Routing Logic based on user specification:
@@ -1146,15 +1162,35 @@ export default function SalesTransactionTab({
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                 <div className="md:col-span-8">
                   <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>
-                    Customer Registered Name *
+                    Customer Registered Name <span className="text-rose-500">*</span>
+                    <span className="text-[10px] text-cyan-400 font-normal ml-2">
+                      (Type e.g. &quot;AB&quot; to auto-suggest &quot;ABC&quot;, &quot;BAB&quot;, &quot;DAB&quot;)
+                    </span>
                   </label>
-                  <input
-                    type="text"
-                    placeholder="Enter customer registered trade name..."
+                  <AutoSuggestInput<Customer>
                     value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    className={`w-full px-3.5 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                    onChange={setCustomerName}
+                    onSelect={(c) => {
+                      const name = c.registered_name || c.customer_name || c.trade_name || '';
+                      setCustomerName(name);
+                      handleSelectCustomer(name);
+                    }}
+                    items={customers}
+                    categoryLabel="Customer"
+                    theme={theme}
                     required
+                    placeholder="Enter customer registered trade name (e.g. ABC, BAB, DAB)..."
+                    getItemLabel={(c) => c.registered_name || c.customer_name || c.trade_name || ''}
+                    getItemSublabel={(c) => `TIN: ${c.client_TIN || c.customer_tin || 'N/A'} • ${c.address || c.client_Address || 'No address'}`}
+                    getItemBadge={(c) => c.customer_branch_code || 'Customer'}
+                    getSearchFields={(c) => [
+                      c.registered_name || '',
+                      c.customer_name || '',
+                      c.trade_name || '',
+                      c.client_TIN || '',
+                      c.customer_tin || ''
+                    ]}
+                    inputClassName={`w-full px-3.5 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
                   />
                 </div>
 

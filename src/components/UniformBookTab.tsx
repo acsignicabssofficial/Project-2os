@@ -17,6 +17,7 @@ import {
   Eye
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
+import AutoSuggestInput from './AutoSuggestInput';
 import { 
   UniformBookRecord, 
   UniformBookType, 
@@ -44,6 +45,7 @@ interface UniformBookTabProps {
   allowedCompanyNames?: string[];
   customers?: Customer[];
   contractors?: Contractor[];
+  employees?: any[];
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch?: string;
@@ -51,7 +53,6 @@ interface UniformBookTabProps {
   onSyncLegacy?: (updated: UniformBookRecord[]) => void;
   accountTitles?: AccountTitle[];
   onDeleteRecord?: (bookType: UniformBookType, record: UniformBookRecord) => void;
-  subsidiarySales?: UniformBookRecord[];
 }
 
 export default function UniformBookTab({
@@ -62,13 +63,13 @@ export default function UniformBookTab({
   allowedCompanyNames,
   customers = [],
   contractors = [],
+  employees = [],
   theme,
   triggerAlert,
   globalSearch = '',
   onSyncLegacy,
   accountTitles = [],
-  onDeleteRecord,
-  subsidiarySales = []
+  onDeleteRecord
 }: UniformBookTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const effectiveCompanyNames = useMemo(() => {
@@ -86,6 +87,29 @@ export default function UniformBookTab({
   const labels = getBookDisplayLabel(bookType);
   const isDisbursementOrPurchase = bookType === 'cash_disbursement' || bookType === 'subsidiary_purchases' || bookType === 'payments' || bookType === 'payments_book';
   const isCollectionsOrPaymentsBook = bookType === 'collections' || bookType === 'collections_book' || bookType === 'payments' || bookType === 'payments_book';
+
+  // Combine contractors with employees when in disbursement / payments books
+  const combinedPayees = useMemo(() => {
+    const list: Contractor[] = [...contractors];
+    if (employees && employees.length > 0) {
+      employees.forEach((emp) => {
+        const empName = emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim();
+        if (empName) {
+          list.push({
+            id: Number(emp.id) || Date.now(),
+            company_name: emp.company_name,
+            registered_name: empName,
+            service_provider_name: empName,
+            sp_tin: emp.tin || '',
+            client_TIN: emp.tin || '',
+            address: emp.address || '',
+            expense_type: `Employee (${emp.position || 'Staff'})`
+          });
+        }
+      });
+    }
+    return list;
+  }, [contractors, employees]);
 
   // Dynamic Chart of Accounts Expenses options
   const selectableExpenseAccounts = useMemo(() => {
@@ -354,29 +378,6 @@ export default function UniformBookTab({
     if (!formInvoiceNo.trim()) {
       triggerAlert('Invoice # is required.', 'error');
       return;
-    }
-
-    if (bookType === 'collections') {
-      const amtCol = liveFormulas.amount || parseFloat(formUnitPrice) || 0;
-      const totDue = liveFormulas.total_amount_due || parseFloat(formUnitPrice) || 0;
-      
-      // Calculate prior collections for this invoice
-      const cleanInv = formInvoiceNo.trim().toLowerCase();
-      const priorCols = records.filter(r => 
-        r.id !== editingRecordId && 
-        !r.is_cancelled && 
-        r.invoice_number && 
-        r.invoice_number.trim().toLowerCase() === cleanInv
-      );
-      const prevPaid = priorCols.reduce((sum, r) => sum + (Number(r.amount_collected) || (Number(r.amount) || 0)), 0);
-
-      if (totDue > 0) {
-        const remainingDue = Math.max(0, Math.round((totDue - prevPaid) * 100) / 100);
-        if (amtCol > remainingDue + 0.01) {
-          triggerAlert(`Overpayment Precaution: Collection amount (₱${amtCol.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining balance due of ₱${remainingDue.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${formInvoiceNo.trim()} (Prior collections: ₱${prevPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })} of total due ₱${totDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}). Customer overpayment is blocked.`, 'error');
-          return;
-        }
-      }
     }
 
     const newRecord: UniformBookRecord = {
@@ -984,24 +985,6 @@ export default function UniformBookTab({
               ) : bookType === 'collections' && collectionsDisplayMode === 'grouped' ? (
                 (() => {
                   const groupsMap = new Map<string, UniformBookRecord[]>();
-
-                  // Seed with all sales on account / partial sales from subsidiarySales matching active scope
-                  if (subsidiarySales && subsidiarySales.length > 0) {
-                    subsidiarySales.forEach(s => {
-                      if (!matchesActiveScope(s.company_name) || s.is_cancelled) return;
-                      const isSaleOnAccountOrPartial = (s.type_of_transaction || '').toUpperCase().includes('ACCOUNT') ||
-                        (s.status || '').toLowerCase().includes('account') ||
-                        (s.status || '').toLowerCase().includes('partial') ||
-                        (Number(s.down_payment) > 0);
-                      if (isSaleOnAccountOrPartial && s.invoice_number) {
-                        const key = s.invoice_number.trim().toUpperCase();
-                        if (!groupsMap.has(key)) {
-                          groupsMap.set(key, []);
-                        }
-                      }
-                    });
-                  }
-
                   filteredRecords.forEach(r => {
                     const key = (r.invoice_number || `NO-INV-${r.id}`).trim().toUpperCase();
                     if (!groupsMap.has(key)) groupsMap.set(key, []);
@@ -1012,8 +995,7 @@ export default function UniformBookTab({
                   return groups.map(([invKey, groupRows], groupIdx) => {
                     // Sort collections chronologically (oldest first: COLLECTION 1, COLLECTION 2, etc.)
                     const sortedPayments = [...groupRows].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
-                    const matchingSale = subsidiarySales?.find(s => s.invoice_number && s.invoice_number.trim().toUpperCase() === invKey);
-                    const primary = matchingSale || sortedPayments[sortedPayments.length - 1] || sortedPayments[0] || {} as UniformBookRecord;
+                    const primary = sortedPayments[sortedPayments.length - 1] || sortedPayments[0];
                     const isExpanded = expandedInvoices[invKey] !== undefined ? expandedInvoices[invKey] : true;
 
                     const totalDueVal = Number(primary.total_amount_due || primary.amount) || 0;
@@ -1249,7 +1231,7 @@ export default function UniformBookTab({
                                 <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
                                 <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
                                 <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
-                                  ₱{(payAmt > 0 ? payAmt : (payment.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  ₱{(payment.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
                                 <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
                                   ₱{(payment.vatable_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -1260,7 +1242,7 @@ export default function UniformBookTab({
                                 <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
                                 <td className="p-2.5 text-right font-mono text-zinc-400">-</td>
                                 <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
-                                  ₱{(payAmt > 0 ? payAmt : (payment.total_amount_vat_inclusive || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  ₱{(payment.total_amount_vat_inclusive || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
                                 <td className={`p-2.5 text-right font-mono ${theme.textMuted}`}>
                                   ₱{(payment.total_amount_net_of_vat || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -1747,15 +1729,94 @@ export default function UniformBookTab({
               <div className="lg:col-span-2">
                 <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                   1. REGISTERED NAME <span className="text-rose-500">*</span>
+                  <span className="text-[10px] text-zinc-500 font-normal ml-2">
+                    (Auto-suggests matching {isDisbursementOrPurchase ? 'providers' : 'customers'} while typing)
+                  </span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. San Miguel Corporation / ABC Retailers"
-                  value={formRegisteredName}
-                  onChange={(e) => setFormRegisteredName(e.target.value)}
-                  className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-transparent focus:outline-none ${theme.borderInput} ${theme.textMain}`}
-                />
+                {isDisbursementOrPurchase ? (
+                  <AutoSuggestInput<Contractor>
+                    value={formRegisteredName}
+                    onChange={setFormRegisteredName}
+                    onSelect={(p) => {
+                      const name = p.registered_name || p.service_provider_name || p.company_name || '';
+                      setFormRegisteredName(name);
+                      const tinVal = p.sp_tin || p.client_TIN || p.tin_number;
+                      if (tinVal) {
+                        const digits = tinVal.replace(/\D/g, '').slice(0, 14);
+                        let formatted = '';
+                        if (digits.length > 0) formatted += digits.slice(0, 3);
+                        if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
+                        if (digits.length > 6) formatted += '-' + digits.slice(6, 9);
+                        if (digits.length > 9) formatted += '-' + digits.slice(9, 14);
+                        setFormTin(formatted || tinVal);
+                      }
+                      const addr = p.address || p.sp_address || p.service_provider_Address;
+                      if (addr) setFormAddress(addr);
+                      const vatVal = (p.vat_status || p.vat_type || '').toUpperCase();
+                      if (vatVal.includes('NON')) setFormVatOrNonVat('NONVAT');
+                      else if (vatVal.includes('VAT')) setFormVatOrNonVat('VAT');
+                      if (p.business_tax_type) setFormBusinessTaxType(p.business_tax_type as any);
+                      if (p.expense_type) setFormExpenseType(p.expense_type);
+                    }}
+                    items={combinedPayees}
+                    categoryLabel="Provider / Payee"
+                    theme={theme}
+                    required
+                    placeholder="e.g. San Miguel Corporation / ABC Retailers"
+                    getItemLabel={(p) => p.registered_name || p.service_provider_name || p.company_name || ''}
+                    getItemSublabel={(p) => `TIN: ${p.sp_tin || p.client_TIN || 'N/A'} • ${p.address || p.sp_address || 'No address'}`}
+                    getItemBadge={(p) => p.expense_type || 'Provider'}
+                    getSearchFields={(p) => [
+                      p.registered_name || '',
+                      p.service_provider_name || '',
+                      p.company_name || '',
+                      p.sp_tin || '',
+                      p.client_TIN || ''
+                    ]}
+                    inputClassName={`w-full px-3 py-1.5 text-xs rounded-lg border bg-transparent focus:outline-none ${theme.borderInput} ${theme.textMain}`}
+                  />
+                ) : (
+                  <AutoSuggestInput<Customer>
+                    value={formRegisteredName}
+                    onChange={setFormRegisteredName}
+                    onSelect={(c) => {
+                      const name = c.registered_name || c.customer_name || c.trade_name || c.company_name || '';
+                      setFormRegisteredName(name);
+                      const tinVal = c.customer_tin || c.client_TIN || c.tin_number;
+                      if (tinVal) {
+                        const digits = tinVal.replace(/\D/g, '').slice(0, 14);
+                        let formatted = '';
+                        if (digits.length > 0) formatted += digits.slice(0, 3);
+                        if (digits.length > 3) formatted += '-' + digits.slice(3, 6);
+                        if (digits.length > 6) formatted += '-' + digits.slice(6, 9);
+                        if (digits.length > 9) formatted += '-' + digits.slice(9, 14);
+                        setFormTin(formatted || tinVal);
+                      }
+                      const addr = c.customer_address || c.client_Address || c.address;
+                      if (addr) setFormAddress(addr);
+                      const vatVal = (c.vat_type || c.tax_type || c.vat_status || '').toUpperCase();
+                      if (vatVal.includes('NON')) setFormVatOrNonVat('NONVAT');
+                      else if (vatVal.includes('VAT')) setFormVatOrNonVat('VAT');
+                    }}
+                    items={customers}
+                    categoryLabel="Customer"
+                    theme={theme}
+                    required
+                    placeholder="e.g. San Miguel Corporation / ABC Retailers"
+                    getItemLabel={(c) => c.registered_name || c.customer_name || c.trade_name || c.company_name || ''}
+                    getItemSublabel={(c) => `TIN: ${c.customer_tin || c.client_TIN || 'N/A'} • ${c.customer_address || c.client_Address || c.address || 'No address'}`}
+                    getItemBadge={(c) => (c.trade_name ? 'Trade' : 'Customer')}
+                    getSearchFields={(c) => [
+                      c.registered_name || '',
+                      c.customer_name || '',
+                      c.trade_name || '',
+                      c.company_name || '',
+                      c.customer_tin || '',
+                      c.client_TIN || ''
+                    ]}
+                    inputClassName={`w-full px-3 py-1.5 text-xs rounded-lg border bg-transparent focus:outline-none ${theme.borderInput} ${theme.textMain}`}
+                  />
+                )}
               </div>
 
               {/* 2. VAT OR NONVAT */}

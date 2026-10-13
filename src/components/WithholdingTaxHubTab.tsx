@@ -120,17 +120,10 @@ export default function WithholdingTaxHubTab({
 
 function isSampleTransaction(record: any): boolean {
   if (!record) return true;
-  if (record.is_sample || record.isSample) return true;
+  if (record.is_sample === true || record.isSample === true) return true;
+  if (Number(record.id) > 100000 || record.created_at) return false;
   const name = String(record.payeeName || record.service_provider_name || record.supplier_name || record.registered_name || record.name || '').toLowerCase().trim();
-  const desc = String(record.particulars || record.description || record.expense_type || '').toLowerCase().trim();
-  const invoiceNo = String(record.voucher_number || record.voucherNo || record.invoice_number || '').toLowerCase().trim();
-  if (/^(sample|demo|test)(\s|$)/i.test(name)) return true;
-  if (/sample\s*transaction|demo\s*transaction|test\s*transaction/i.test(name)) return true;
-  if (/sample\s*transaction|demo\s*transaction|test\s*transaction/i.test(desc)) return true;
   if (name === 'vendor / contractor' || name === 'sample vendor') return true;
-  if ((name.includes('pldt enterprise') || name.includes('ayala land')) && (invoiceNo.includes('apv-2026') || invoiceNo.includes('001') || invoiceNo.includes('002'))) {
-    return true;
-  }
   return false;
 }
 

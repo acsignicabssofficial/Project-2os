@@ -719,5 +719,8 @@ export interface UniformBookRecord {
   vat_input_amount?: number;
   output_vat?: number;
   invoice_amount?: number;
+  vatable_expense?: number;
+  vatable_expense_amount?: number;
+  ewt_amount?: number;
 }
 

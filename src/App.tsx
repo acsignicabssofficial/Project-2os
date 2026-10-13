@@ -302,10 +302,20 @@ function mapSaleToUniform(s: any): UniformBookRecord {
     customer_tin: s.tin || s.customer_tin || s.client_TIN,
     client_TIN: s.tin || s.customer_tin || s.client_TIN,
     client_Address: s.address || s.client_Address,
+    invoice_date: s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0],
+    issue_date: s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0],
     invoice_amount: amount,
     vatable_sales: vatable,
     output_vat: vat,
-    withholding_2307: withheld
+    add_vat: vat,
+    withholding_2307: withheld,
+    amount_withheld_2307: withheld,
+    less_withholding_tax: withheld,
+    ewt_amount: withheld,
+    zero_rated: Number(s.zero_rated_amount || s.zero_rated) || 0,
+    vat_exempt: Number(s.vat_exempt_amount || s.vat_exempt) || 0,
+    less_discount: discount,
+    discounts: discount
   };
 }
 
@@ -356,9 +366,21 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
     service_provider_name: e.registered_name || e.service_provider_name,
     service_provider_tin: e.tin || e.service_provider_tin || e.sp_tin,
     sp_tin: e.tin || e.service_provider_tin || e.sp_tin,
+    expense_date: e.date || e.expense_date || new Date().toISOString().split('T')[0],
+    issue_date: e.date || e.expense_date || new Date().toISOString().split('T')[0],
     expense_invoice_amount: amount,
+    vatable_expense: vatable,
+    vatable_expense_amount: vatable,
     vat_input_amount: vat,
-    withholding_2307_2306: withheld
+    add_vat: vat,
+    withholding_2307_2306: withheld,
+    amount_withheld_2307: withheld,
+    less_withholding_tax: withheld,
+    ewt_amount: withheld,
+    zero_rated: Number(e.zero_rated_amount || e.zero_rated) || 0,
+    vat_exempt: Number(e.vat_exempt_amount || e.vat_exempt) || 0,
+    less_discount: discount,
+    discounts: discount
   };
 }
 
@@ -482,16 +504,18 @@ export default function App() {
   const handleUpdateSubsidiarySales = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setSubsidiarySales(prev => {
       const next = updater(prev);
-      setSales(next as any);
-      return next;
+      const mapped = next.map(mapSaleToUniform);
+      setSales(mapped as any);
+      return mapped;
     });
   };
 
   const handleUpdateSubsidiaryPurchases = (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => {
     setSubsidiaryPurchases(prev => {
       const next = updater(prev);
-      setExpenses(next as any);
-      return next;
+      const mapped = next.map(mapExpenseToUniform);
+      setExpenses(mapped as any);
+      return mapped;
     });
   };
 
@@ -1254,17 +1278,17 @@ export default function App() {
     return `${sign}₱${num.toFixed(0)}`;
   };
 
-  const totalSalesDue = companySales.reduce((sum, s) => sum + (Number(s.invoice_amount) || 0), 0);
-  const totalColls = companyCollections.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+  const totalSalesDue = companySales.reduce((sum, s) => sum + (Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount) || 0), 0);
+  const totalColls = companyCollections.reduce((sum, c) => sum + (Number(c.amount_collected ?? (c as any).amount) || 0), 0);
   const overdueAR = Math.max(0, totalSalesDue - totalColls);
 
-  const totalExpDue = companyExpenses.reduce((sum, e) => sum + (Number(e.expense_invoice_amount) || 0), 0);
-  const totalPaid = companyPayments.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+  const totalExpDue = companyExpenses.reduce((sum, e) => sum + (Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount) || 0), 0);
+  const totalPaid = companyPayments.reduce((sum, p) => sum + (Number(p.amount_paid ?? (p as any).amount) || 0), 0);
   const outstandingAP = Math.max(0, totalExpDue - totalPaid);
   
   const netVatPayable = Math.max(0, 
-    companySales.reduce((sum, s) => sum + (Number(s.output_vat) || 0), 0) - 
-    companyExpenses.reduce((sum, e) => sum + (Number(e.vat_input_amount) || 0), 0)
+    companySales.reduce((sum, s) => sum + (Number(s.output_vat ?? (s as any).vat_amount) || 0), 0) - 
+    companyExpenses.reduce((sum, e) => sum + (Number(e.vat_input_amount ?? (e as any).vat_amount) || 0), 0)
   );
 
   const withholdingTaxCompPayable = companyPayrollRecords.reduce((sum, p) => sum + (Number(p.withholding_tax) || 0), 0);
@@ -1790,6 +1814,7 @@ export default function App() {
                   allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
+                  employees={employees}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
@@ -1808,6 +1833,7 @@ export default function App() {
                   allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
+                  employees={employees}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}
@@ -1826,6 +1852,7 @@ export default function App() {
                   allowedCompanyNames={scopedCompanyNames}
                   customers={customers}
                   contractors={contractors}
+                  employees={employees}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}
                   globalSearch={globalSearch}

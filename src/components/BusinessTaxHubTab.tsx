@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   ShieldCheck, 
   FileSpreadsheet, 
@@ -57,8 +57,13 @@ interface BusinessTaxHubTabProps {
 // Global filter to permanently exclude sample / demo / mock transactions from all BIR filings
 export function isSampleTransaction(record: any): boolean {
   if (!record) return true;
-  if (record.is_sample || record.isSample) return true;
+  if (record.is_sample === true || record.isSample === true) return true;
   
+  // Never exclude user transactions created in UI (has timestamp ID > 100000 or created_at)
+  if (Number(record.id) > 100000 || record.created_at) {
+    return false;
+  }
+
   const name = String(
     record.customer_name || 
     record.registered_name || 
@@ -70,36 +75,8 @@ export function isSampleTransaction(record: any): boolean {
     ''
   ).toLowerCase().trim();
 
-  const desc = String(
-    record.particulars || 
-    record.description || 
-    record.expense_type || 
-    record.category || 
-    record.expense_category ||
-    ''
-  ).toLowerCase().trim();
-
-  const invNo = String(
-    record.invoice_number || 
-    record.invoiceNo || 
-    record.voucher_number || 
-    record.voucherNo || 
-    ''
-  ).toLowerCase().trim();
-
-  // Explicit demo / sample identifiers
-  if (/^(sample|demo|test)(\s|$)/i.test(name)) return true;
-  if (/sample\s*transaction|demo\s*transaction|test\s*transaction/i.test(name)) return true;
-  if (/sample\s*transaction|demo\s*transaction|test\s*transaction/i.test(desc)) return true;
+  // Explicit demo boilerplate identifiers
   if (name === 'customer / client' || name === 'vendor / contractor' || name === 'sample customer' || name === 'sample vendor') return true;
-  
-  // Exclude boilerplate demo names matched with demo invoice numbers
-  if ((name.includes('metro retail corp') || name.includes('luzon trading inc')) && (invNo.includes('si-2026') || invNo.includes('001') || invNo.includes('002'))) {
-    return true;
-  }
-  if ((name.includes('pldt enterprise') || name.includes('ayala land')) && (invNo.includes('apv-2026') || invNo.includes('001') || invNo.includes('002'))) {
-    return true;
-  }
 
   return false;
 }
@@ -177,16 +154,22 @@ export default function BusinessTaxHubTab({
   // ---------------------------------------------------------------------------
   // STATE: 2550Q QUARTERLY VAT RETURN
   // ---------------------------------------------------------------------------
-  const [vatQuarter, setVatQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q3');
-  const [vatYear, setVatYear] = useState<string>('2026');
+  const [vatQuarter, setVatQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>(() => {
+    const m = new Date().getMonth() + 1;
+    return m <= 3 ? 'Q1' : m <= 6 ? 'Q2' : m <= 9 ? 'Q3' : 'Q4';
+  });
+  const [vatYear, setVatYear] = useState<string>(() => String(new Date().getFullYear()));
   const [priorVatOverpayment, setPriorVatOverpayment] = useState<number>(0);
   const [priorVatPayments, setPriorVatPayments] = useState<number>(0);
 
   // ---------------------------------------------------------------------------
   // STATE: 2551Q PERCENTAGE TAX RETURN
   // ---------------------------------------------------------------------------
-  const [qtr2551, setQtr2551] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q3');
-  const [year2551, setYear2551] = useState<string>('2026');
+  const [qtr2551, setQtr2551] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>(() => {
+    const m = new Date().getMonth() + 1;
+    return m <= 3 ? 'Q1' : m <= 6 ? 'Q2' : m <= 9 ? 'Q3' : 'Q4';
+  });
+  const [year2551, setYear2551] = useState<string>(() => String(new Date().getFullYear()));
   const [rate2551, setRate2551] = useState<number>(3); // 3% CREATE rate or 1% during pandemic
   const [priorPaid2551, setPriorPaid2551] = useState<number>(0);
 
@@ -194,15 +177,37 @@ export default function BusinessTaxHubTab({
   // STATE: SUMMARY LIST OF SALES (SLS)
   // ---------------------------------------------------------------------------
   const [salesQuarter, setSalesQuarter] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
-  const [salesYear, setSalesYear] = useState<string>('2026');
+  const [salesYear, setSalesYear] = useState<string>(() => String(new Date().getFullYear()));
   const [salesSearch, setSalesSearch] = useState<string>('');
 
   // ---------------------------------------------------------------------------
   // STATE: SUMMARY LIST OF PURCHASES (SLP)
   // ---------------------------------------------------------------------------
   const [purchasesQuarter, setPurchasesQuarter] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
-  const [purchasesYear, setPurchasesYear] = useState<string>('2026');
+  const [purchasesYear, setPurchasesYear] = useState<string>(() => String(new Date().getFullYear()));
   const [purchasesSearch, setPurchasesSearch] = useState<string>('');
+
+  // Auto-align default quarter to most recent transaction if available
+  useEffect(() => {
+    const allDates = [...sales, ...expenses]
+      .map(t => (t as any).date || (t as any).invoice_date || (t as any).expense_date)
+      .filter(Boolean);
+    if (allDates.length > 0) {
+      const latestDateStr = allDates.sort().reverse()[0];
+      const q = getQuarterFromDate(latestDateStr);
+      const y = getYearFromDate(latestDateStr);
+      if (q) {
+        setVatQuarter(q);
+        setQtr2551(q);
+      }
+      if (y) {
+        setVatYear(y);
+        setYear2551(y);
+        setSalesYear(y);
+        setPurchasesYear(y);
+      }
+    }
+  }, [sales, expenses]);
 
   /* ========================================================================= */
   /* COMPUTATION: 2550Q QUARTERLY VAT RETURN (REAL TRANSACTIONS ONLY)          */

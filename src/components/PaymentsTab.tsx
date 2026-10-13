@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { CheckCircle2, Pencil, Trash2, Ban, RotateCcw, Plus, Search, X, CreditCard } from 'lucide-react';
 import { Payment, Expense, Contractor, Company } from '../types';
+import AutoSuggestInput from './AutoSuggestInput';
 
 interface PaymentsTabProps {
   payments: Payment[];
@@ -404,12 +405,32 @@ export default function PaymentsTab({
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                     Provider Name
+                    <span className="text-[10px] text-purple-400 font-normal ml-2">
+                      (Auto-suggests matching providers while typing)
+                    </span>
                   </label>
-                  <input 
-                    type="text"
+                  <AutoSuggestInput<Contractor>
                     value={providerName}
-                    onChange={(e) => setProviderName(e.target.value)}
-                    className={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent ${theme.borderInput} ${theme.textMain}`}
+                    onChange={setProviderName}
+                    onSelect={(p) => {
+                      const name = p.registered_name || p.service_provider_name || p.company_name || '';
+                      setProviderName(name);
+                      if (p.service_provider_TIN || p.sp_tin) setPayTin(p.service_provider_TIN || p.sp_tin || '');
+                    }}
+                    items={serviceProviders}
+                    categoryLabel="Provider"
+                    theme={theme}
+                    placeholder="Enter provider name (e.g. ABC, BAB, DAB)..."
+                    getItemLabel={(p) => p.registered_name || p.service_provider_name || p.company_name || ''}
+                    getItemSublabel={(p) => `TIN: ${p.service_provider_TIN || p.sp_tin || 'N/A'}`}
+                    getSearchFields={(p) => [
+                      p.registered_name || '',
+                      p.service_provider_name || '',
+                      p.company_name || '',
+                      p.service_provider_TIN || '',
+                      p.sp_tin || ''
+                    ]}
+                    inputClassName={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent ${theme.borderInput} ${theme.textMain}`}
                   />
                 </div>
 

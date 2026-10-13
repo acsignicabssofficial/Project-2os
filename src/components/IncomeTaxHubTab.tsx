@@ -112,13 +112,29 @@ export default function IncomeTaxHubTab({
   /* COMMON FINANCIAL BASE COMPUTATION                                         */
   /* ========================================================================= */
   const booksData = useMemo(() => {
-    // Gross sales revenue
-    let grossSales = sales.reduce((sum, s) => 
-      sum + (Number(s.vatable_sales) || 0) + (Number(s.zero_rated) || 0) + (Number(s.vat_exempt) || 0), 0);
+    // Gross sales revenue (vatable + zero rated + vat exempt)
+    let grossSales = sales.reduce((sum, s) => {
+      const vatable = Number((s as any).vatable_amount ?? (s as any).vatable_sales) || 0;
+      const zero = Number((s as any).zero_rated_amount ?? (s as any).zero_rated) || 0;
+      const exempt = Number((s as any).vat_exempt_amount ?? (s as any).vat_exempt) || 0;
+      const gross = vatable + zero + exempt;
+      if (gross > 0) return sum + gross;
+      const fallbackGross = Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount) || 0;
+      const isVat = s.nonvat_or_vat === 'VAT' || (s as any).vat_or_nonvat === 'VAT';
+      return sum + (isVat && fallbackGross > 0 ? Math.round((fallbackGross / 1.12) * 100) / 100 : fallbackGross);
+    }, 0);
     
     // Total itemized expenses
-    let itemizedExpenses = expenses.reduce((sum, e) => 
-      sum + (Number(e.vatable_expense) || 0) + (Number(e.zero_rated) || 0) + (Number(e.vat_exempt) || 0), 0);
+    let itemizedExpenses = expenses.reduce((sum, e) => {
+      const vatable = Number((e as any).vatable_amount ?? (e as any).vatable_expense ?? (e as any).vatable_purchases) || 0;
+      const zero = Number((e as any).zero_rated_amount ?? (e as any).zero_rated) || 0;
+      const exempt = Number((e as any).vat_exempt_amount ?? (e as any).vat_exempt) || 0;
+      const gross = vatable + zero + exempt;
+      if (gross > 0) return sum + gross;
+      const fallbackGross = Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount) || 0;
+      const isVat = (e as any).vat_or_nonvat === 'VAT' || (e as any).vat_status === 'VAT';
+      return sum + (isVat && fallbackGross > 0 ? Math.round((fallbackGross / 1.12) * 100) / 100 : fallbackGross);
+    }, 0);
 
     // PPE Depreciation
     const ppeDepreciation = ppeAssets.reduce((sum, a) => sum + (Number(a.accumulated_depreciation) || 0), 0);
@@ -139,12 +155,19 @@ export default function IncomeTaxHubTab({
     });
 
     // Creditable Withholding Tax (2307)
-    const creditable2307 = sales.reduce((sum, s) => sum + (Number(s.less_withholding_tax) || Number(s.withholding_2307) || 0), 0);
+    const creditable2307 = sales.reduce((sum, s) => {
+      const cwt = Number((s as any).tax_withheld ?? (s as any).less_withholding_tax ?? (s as any).withholding_2307 ?? (s as any).amount_withheld_2307 ?? s.ewt_amount) || 0;
+      return sum + cwt;
+    }, 0);
 
-    // Cost of Sales estimate (40% of gross or actual 5xxx expenses)
+    // Cost of Sales (strictly from actual cost of goods / purchases expenses)
     const costOfSales = expenses
-      .filter(e => e.expense_category?.toUpperCase().includes('COST') || e.expense_category?.toUpperCase().includes('COGS'))
-      .reduce((sum, e) => sum + (Number(e.vatable_expense) || Number(e.amount) || 0), 0) || Math.round(grossSales * 0.35 * 100) / 100;
+      .filter(e => {
+        const cat = ((e.expense_category || (e as any).category || (e as any).expense_type || (e as any).particulars || '') + '').toLowerCase();
+        const desc = ((e.description || (e as any).particulars || '') + '').toLowerCase();
+        return cat.includes('cost') || cat.includes('cogs') || cat.includes('merchandise') || desc.includes('purchases') || desc.includes('cost of');
+      })
+      .reduce((sum, e) => sum + (Number((e as any).vatable_amount ?? (e as any).vatable_expense ?? e.expense_invoice_amount ?? (e as any).amount) || 0), 0);
 
     const grossProfit = Math.max(0, grossSales - costOfSales);
     const operatingExpenses = Math.max(0, itemizedExpenses - costOfSales);
@@ -287,17 +310,10 @@ export default function IncomeTaxHubTab({
 
 function isSampleTransaction(record: any): boolean {
   if (!record) return true;
-  if (record.is_sample || record.isSample) return true;
+  if (record.is_sample === true || record.isSample === true) return true;
+  if (Number(record.id) > 100000 || record.created_at) return false;
   const name = String(record.customer_name || record.registered_name || record.client_name || record.name || '').toLowerCase().trim();
-  const desc = String(record.particulars || record.description || '').toLowerCase().trim();
-  const invoiceNo = String(record.invoice_number || record.invoiceNo || '').toLowerCase().trim();
-  if (/^(sample|demo|test)(\s|$)/i.test(name)) return true;
-  if (/sample\s*transaction|demo\s*transaction|test\s*transaction/i.test(name)) return true;
-  if (/sample\s*transaction|demo\s*transaction|test\s*transaction/i.test(desc)) return true;
   if (name === 'customer / client' || name === 'sample customer') return true;
-  if ((name.includes('metro retail corp') || name.includes('luzon trading inc')) && (invoiceNo.includes('si-2026') || invoiceNo.includes('001') || invoiceNo.includes('002'))) {
-    return true;
-  }
   return false;
 }
 
@@ -307,23 +323,24 @@ function isSampleTransaction(record: any): boolean {
   const sawtRows = useMemo(() => {
     return sales
       .filter(s => !isSampleTransaction(s))
-      .filter(s => (Number(s.less_withholding_tax) || 0) > 0 || (Number(s.withholding_2307) || 0) > 0)
+      .filter(s => (Number((s as any).tax_withheld ?? (s as any).less_withholding_tax ?? (s as any).withholding_2307 ?? (s as any).amount_withheld_2307 ?? s.ewt_amount) || 0) > 0)
       .map((s, idx) => {
-        const taxWithheld = Number(s.less_withholding_tax) || Number(s.withholding_2307) || 0;
-        const incomeBase = Number(s.vatable_sales) || Number(s.vatable_amount) || Number(s.invoice_amount) || Number(s.amount) || 0;
-        const ratePct = incomeBase > 0 ? Math.round((taxWithheld / incomeBase) * 100) : 1;
-        const atc = ratePct >= 2 ? 'WC010' : 'WI010';
+        const taxWithheld = Number((s as any).tax_withheld ?? (s as any).less_withholding_tax ?? (s as any).withholding_2307 ?? (s as any).amount_withheld_2307 ?? s.ewt_amount) || 0;
+        const incomeBase = Number((s as any).vatable_amount ?? (s as any).vatable_sales) || 
+          Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount) || 0;
+        const ratePct = incomeBase > 0 ? Math.round((taxWithheld / incomeBase) * 100) : 10;
+        const atc = ratePct >= 5 ? 'WC157' : (ratePct >= 2 ? 'WC010' : 'WI010');
 
         return {
           seq: idx + 1,
           id: s.id,
-          tin: s.customer_tin || '000-000-000-00000',
+          tin: s.customer_tin || (s as any).tin || (s as any).client_TIN || '000-000-000-00000',
           branch: '00000',
-          name: s.customer_name || 'Customer / Payor',
+          name: s.customer_name || (s as any).registered_name || 'Customer / Payor',
           invoiceNo: s.invoice_number || `INV-${s.id}`,
           date: s.invoice_date || (s as any).date || '',
           atc,
-          nature: ratePct >= 2 ? 'Sale of Services subject to CWT' : 'Sale of Goods subject to CWT',
+          nature: `${ratePct}% Creditable Withholding Tax on Sale of Goods / Services`,
           ratePct: `${ratePct}%`,
           incomeBase,
           taxWithheld

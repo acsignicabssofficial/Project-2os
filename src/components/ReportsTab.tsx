@@ -79,8 +79,8 @@ export default function ReportsTab({
   theme,
   triggerAlert,
   initialSubTab = 'turnovers',
-  selectedMonthIdx: propMonthIdx = 7,
-  selectedYear: propYear = 2026,
+  selectedMonthIdx: propMonthIdx = new Date().getMonth(),
+  selectedYear: propYear = new Date().getFullYear(),
   selectedPrefix: propPrefix = 'FOR THE MONTH OF',
   onMonthYearChange
 }: ReportsTabProps) {
@@ -94,6 +94,21 @@ export default function ReportsTab({
 
   const [currentMonthIdx, setCurrentMonthIdx] = useState(propMonthIdx);
   const [currentYear, setCurrentYear] = useState(propYear);
+
+  // Auto-align default period to actual transaction dates
+  useEffect(() => {
+    const allDates = [...sales, ...collections, ...expenses, ...payments]
+      .map(t => (t as any).date || (t as any).invoice_date || (t as any).expense_date || (t as any).collection_date || (t as any).payment_date)
+      .filter(Boolean);
+    if (allDates.length > 0) {
+      const latestDateStr = allDates.sort().reverse()[0];
+      const d = new Date(latestDateStr);
+      if (!isNaN(d.getTime())) {
+        setCurrentMonthIdx(d.getMonth());
+        setCurrentYear(d.getFullYear());
+      }
+    }
+  }, [sales, collections, expenses, payments]);
 
   useEffect(() => {
     setCurrentMonthIdx(propMonthIdx);
@@ -145,52 +160,67 @@ export default function ReportsTab({
 
   // Filtered transactions strictly by active company AND selected Month/Year
   const periodFilteredSales = useMemo(() => {
-    return sales.filter(s => isDateInSelectedPeriod(s.invoice_date || s.issue_date));
+    return sales.filter(s => isDateInSelectedPeriod(s.invoice_date || s.issue_date || (s as any).date));
   }, [sales, currentMonthIdx, currentYear, periodFilterMode]);
 
   const periodFilteredCollections = useMemo(() => {
-    return collections.filter(c => isDateInSelectedPeriod(c.collection_date));
+    return collections.filter(c => isDateInSelectedPeriod(c.collection_date || (c as any).date));
   }, [collections, currentMonthIdx, currentYear, periodFilterMode]);
 
   const periodFilteredExpenses = useMemo(() => {
-    return expenses.filter(e => isDateInSelectedPeriod(e.expense_date || e.issue_date));
+    return expenses.filter(e => isDateInSelectedPeriod(e.expense_date || e.issue_date || (e as any).date));
   }, [expenses, currentMonthIdx, currentYear, periodFilterMode]);
 
   const periodFilteredPayments = useMemo(() => {
-    return payments.filter(p => isDateInSelectedPeriod(p.payment_date));
+    return payments.filter(p => isDateInSelectedPeriod(p.payment_date || (p as any).date));
   }, [payments, currentMonthIdx, currentYear, periodFilterMode]);
 
-  // Derived financial figures for the filtered period
+  // Derived financial figures for the filtered period (100% synced with actual transactions)
   const totalSales = useMemo(() => {
-    const sum = periodFilteredSales.reduce((acc, s) => acc + (Number(s.invoice_amount) || 0), 0);
-    return sum > 0 ? sum : (sales.length > 0 ? 125000 : 0);
-  }, [periodFilteredSales, sales]);
+    return periodFilteredSales.reduce((acc, s) => {
+      const amt = Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount ?? (s as any).total_amount_due) || 0;
+      return acc + amt;
+    }, 0);
+  }, [periodFilteredSales]);
 
   const totalCollections = useMemo(() => {
-    const sum = periodFilteredCollections.reduce((acc, c) => acc + (Number(c.amount_collected) || 0), 0);
-    return sum > 0 ? sum : (collections.length > 0 ? 98000 : 0);
-  }, [periodFilteredCollections, collections]);
+    return periodFilteredCollections.reduce((acc, c) => {
+      const amt = Number(c.amount_collected ?? (c as any).amount ?? (c as any).total_amount_due) || 0;
+      return acc + amt;
+    }, 0);
+  }, [periodFilteredCollections]);
 
   const totalExpenses = useMemo(() => {
-    const sum = periodFilteredExpenses.reduce((acc, e) => acc + (Number(e.expense_invoice_amount) || 0), 0);
-    return sum > 0 ? sum : (expenses.length > 0 ? 64000 : 0);
-  }, [periodFilteredExpenses, expenses]);
+    return periodFilteredExpenses.reduce((acc, e) => {
+      const amt = Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount ?? (e as any).total_amount_due) || 0;
+      return acc + amt;
+    }, 0);
+  }, [periodFilteredExpenses]);
 
   const totalPayments = useMemo(() => {
-    const sum = periodFilteredPayments.reduce((acc, p) => acc + (Number(p.amount_paid) || 0), 0);
-    return sum > 0 ? sum : (payments.length > 0 ? 52000 : 0);
-  }, [periodFilteredPayments, payments]);
+    return periodFilteredPayments.reduce((acc, p) => {
+      const amt = Number(p.amount_paid ?? (p as any).amount ?? (p as any).total_amount_due) || 0;
+      return acc + amt;
+    }, 0);
+  }, [periodFilteredPayments]);
 
-  // Cost of Sales & Profitability
+  // Cost of Sales & Profitability (Strictly real Cost of Goods Sold from actual purchases / expenses)
   const costOfSales = useMemo(() => {
     const directCost = periodFilteredExpenses
-      .filter(e => e.expense_category?.toLowerCase().includes('cost') || e.description?.toLowerCase().includes('purchases') || e.expense_type?.toLowerCase().includes('material'))
-      .reduce((sum, e) => sum + (Number(e.expense_invoice_amount) || 0), 0);
-    return directCost > 0 ? directCost : (totalSales * 0.52);
-  }, [periodFilteredExpenses, totalSales]);
+      .filter(e => {
+        const cat = ((e.expense_category || (e as any).category || (e as any).expense_type || (e as any).particulars || '') + '').toLowerCase();
+        const desc = ((e.description || (e as any).particulars || '') + '').toLowerCase();
+        return cat.includes('cost') || cat.includes('cogs') || cat.includes('merchandise') || desc.includes('purchases') || desc.includes('cost of');
+      })
+      .reduce((sum, e) => {
+        const amt = Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount) || 0;
+        return sum + amt;
+      }, 0);
+    return directCost;
+  }, [periodFilteredExpenses]);
 
   const grossProfit = totalSales - costOfSales;
-  const opex = totalExpenses - costOfSales > 0 ? (totalExpenses - costOfSales) : (totalExpenses * 0.48);
+  const opex = Math.max(0, totalExpenses - costOfSales);
   const operatingIncome = grossProfit - opex;
   const incomeTaxExpense = operatingIncome > 0 ? operatingIncome * 0.20 : 0; // 20% CREATE RCIT
   const netIncome = operatingIncome - incomeTaxExpense;
@@ -250,10 +280,10 @@ export default function ReportsTab({
 
   // Chart: Vertical common-size Donut
   const verticalDonutData = useMemo(() => [
-    { name: 'Cost of Sales (COGS)', value: Math.max(1, costOfSales), percent: totalSales > 0 ? ((costOfSales / totalSales) * 100).toFixed(1) : '52.0', color: '#06B6D4' },
-    { name: 'Operating Expenses', value: Math.max(1, opex), percent: totalSales > 0 ? ((opex / totalSales) * 100).toFixed(1) : '24.0', color: '#3B82F6' },
-    { name: 'Income Tax Provision', value: Math.max(1, incomeTaxExpense), percent: totalSales > 0 ? ((incomeTaxExpense / totalSales) * 100).toFixed(1) : '4.8', color: '#8B5CF6' },
-    { name: 'Net Profit Margin', value: Math.max(1, netIncome), percent: totalSales > 0 ? ((netIncome / totalSales) * 100).toFixed(1) : '19.2', color: '#10B981' }
+    { name: 'Cost of Sales (COGS)', value: Math.max(0, costOfSales), percent: totalSales > 0 ? ((costOfSales / totalSales) * 100).toFixed(1) : '0.0', color: '#06B6D4' },
+    { name: 'Operating Expenses', value: Math.max(0, opex), percent: totalSales > 0 ? ((opex / totalSales) * 100).toFixed(1) : '0.0', color: '#3B82F6' },
+    { name: 'Income Tax Provision', value: Math.max(0, incomeTaxExpense), percent: totalSales > 0 ? ((incomeTaxExpense / totalSales) * 100).toFixed(1) : '0.0', color: '#8B5CF6' },
+    { name: 'Net Profit Margin', value: Math.max(0, netIncome), percent: totalSales > 0 ? ((netIncome / totalSales) * 100).toFixed(1) : '0.0', color: '#10B981' }
   ], [costOfSales, opex, incomeTaxExpense, netIncome, totalSales]);
 
   // Export CSV Helper

@@ -4,6 +4,16 @@
 
 import { Sale, Expense, Collection, Payment, SpecialEntry, AccountTitle, PPEAsset, PayrollRecord, JournalEntry, UniformBookRecord } from '../types';
 
+export function safeNum(val: any): number {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  const str = String(val).trim();
+  if (str === '' || str.toLowerCase() === 'nan') return 0;
+  const cleaned = str.replace(/,/g, '').replace(/[^\d.-]/g, '');
+  const parsed = parseFloat(cleaned);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
 export interface SalesCalculationInput {
   qty: number;
   unit_price: number;

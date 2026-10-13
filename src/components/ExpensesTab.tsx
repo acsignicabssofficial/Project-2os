@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CheckCircle2, Pencil, Trash2, Ban, RotateCcw, Plus, Search, X, Receipt, Calculator } from 'lucide-react';
 import { Expense, Contractor, Company, Payment, AccountTitle } from '../types';
+import AutoSuggestInput from './AutoSuggestInput';
 import { computeExpenseFormulas } from '../utils/accounting';
 
 interface ExpensesTabProps {
@@ -461,14 +462,34 @@ export default function ExpensesTab({
                 <div>
                   <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                     Registered Provider Name *
+                    <span className="text-[10px] text-purple-400 font-normal ml-2">
+                      (Auto-suggests matching providers while typing)
+                    </span>
                   </label>
-                  <input 
-                    type="text"
+                  <AutoSuggestInput<Contractor>
                     value={registeredName}
-                    onChange={(e) => setRegisteredName(e.target.value)}
-                    placeholder="e.g. Prime Realty Services"
+                    onChange={setRegisteredName}
+                    onSelect={(p) => {
+                      const name = p.registered_name || p.service_provider_name || p.company_name || '';
+                      setRegisteredName(name);
+                      if (p.service_provider_TIN || p.sp_tin) setExpTin(p.service_provider_TIN || p.sp_tin || '');
+                      if (p.service_provider_Address || p.address) setProviderAddress(p.service_provider_Address || p.address || '');
+                    }}
+                    items={serviceProviders}
+                    categoryLabel="Provider"
+                    theme={theme}
                     required
-                    className={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent ${theme.borderInput} ${theme.textMain}`}
+                    placeholder="e.g. Prime Realty Services (e.g. ABC, BAB, DAB)..."
+                    getItemLabel={(p) => p.registered_name || p.service_provider_name || p.company_name || ''}
+                    getItemSublabel={(p) => `TIN: ${p.service_provider_TIN || p.sp_tin || 'N/A'} • ${p.service_provider_Address || p.address || 'No address'}`}
+                    getSearchFields={(p) => [
+                      p.registered_name || '',
+                      p.service_provider_name || '',
+                      p.company_name || '',
+                      p.service_provider_TIN || '',
+                      p.sp_tin || ''
+                    ]}
+                    inputClassName={`w-full px-2.5 py-1.5 border rounded-lg text-xs bg-transparent ${theme.borderInput} ${theme.textMain}`}
                   />
                 </div>
 

@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { FileText, Printer, Info, Layers, Sparkles } from 'lucide-react';
 import { PayrollRecord, Employee, Company } from '../types';
+import AutoSuggestInput from './AutoSuggestInput';
 
 interface BIR2316TabProps {
   payrollRecords?: PayrollRecord[];
@@ -18,7 +19,15 @@ export default function BIR2316Tab({
   triggerAlert
 }: BIR2316TabProps) {
   const [selectedEmpId, setSelectedEmpId] = useState<string>(employees[0]?.employee_id || '');
+  const [empSearchName, setEmpSearchName] = useState<string>(employees[0]?.full_name || '');
   const [taxYear, setTaxYear] = useState<string>('2024');
+
+  useEffect(() => {
+    const found = employees.find(e => e.employee_id === selectedEmpId);
+    if (found && found.full_name) {
+      setEmpSearchName(found.full_name);
+    }
+  }, [selectedEmpId, employees]);
   const [periodFrom, setPeriodFrom] = useState<string>('01/01');
   const [periodTo, setPeriodTo] = useState<string>('05/08');
   const [useModelDefaults, setUseModelDefaults] = useState<boolean>(payrollRecords.length === 0);
@@ -268,10 +277,35 @@ export default function BIR2316Tab({
 
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-zinc-400">Employee:</span>
+              <div className="w-56">
+                <AutoSuggestInput<Employee>
+                  value={empSearchName}
+                  onChange={setEmpSearchName}
+                  onSelect={(emp) => {
+                    setEmpSearchName(emp.full_name || '');
+                    if (emp.employee_id) setSelectedEmpId(String(emp.employee_id));
+                  }}
+                  items={employees}
+                  categoryLabel="Employee"
+                  theme={theme}
+                  placeholder="Type name (e.g. AB)..."
+                  getItemLabel={(emp) => emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || String(emp.employee_id)}
+                  getItemSublabel={(emp) => `ID: ${emp.employee_id} • TIN: ${emp.tin || 'N/A'}`}
+                  getItemBadge={(emp) => emp.position || 'Staff'}
+                  getSearchFields={(emp) => [
+                    emp.full_name || '',
+                    emp.first_name || '',
+                    emp.last_name || '',
+                    String(emp.employee_id || ''),
+                    emp.tin || ''
+                  ]}
+                  inputClassName={`w-full text-xs px-3 py-1.5 rounded-lg border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
+                />
+              </div>
               <select
                 value={selectedEmpId}
                 onChange={(e) => setSelectedEmpId(e.target.value)}
-                className={`text-xs px-3 py-1.5 rounded-lg border bg-transparent font-semibold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
+                className={`text-xs px-2 py-1.5 rounded-lg border bg-transparent font-semibold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
               >
                 {employees.map(e => (
                   <option key={e.id} value={e.employee_id} className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>
