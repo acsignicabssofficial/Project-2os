@@ -24,6 +24,19 @@ import {
 } from 'lucide-react';
 import { safeNum } from '../utils/accounting';
 import BIR2316Tab from './BIR2316Tab';
+import BIR2307CertificateView from './BIR2307CertificateView';
+import {
+  normalizeTransactions,
+  txnsForQuarter,
+  buildCertificates,
+  build0619E,
+  build1601EQ,
+  buildQAP,
+  reconcileQuarter,
+  parseQuarter,
+  latestPeriod,
+  Cert2307
+} from '../utils/cwt2307';
 import {
   translatePayrollRecords,
   build1601C,
@@ -210,8 +223,9 @@ export default function WithholdingTaxHubTab({
   };
 
   // State for Expanded Withholding Tax (1601-EQ / 0619-E)
-  const [ewtQuarter, setEwtQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q3');
-  const [ewtYear, setEwtYear] = useState<string>('2026');
+  const lastExp = latestPeriod(expenses, ['expense_date', 'date']);
+  const [ewtQuarter, setEwtQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>(lastExp ? (`Q${lastExp.quarter}` as any) : 'Q3');
+  const [ewtYear, setEwtYear] = useState<string>(lastExp?.year || '2026');
   const [ewtSearch, setEwtSearch] = useState<string>('');
 
   // State for Alphalist of Employees (1604-C)
@@ -224,8 +238,8 @@ export default function WithholdingTaxHubTab({
   const [certYear, setCertYear] = useState<string>('2026');
 
   // State for QAP (1601-EQ Attachment)
-  const [qapQuarter, setQapQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q3');
-  const [qapYear, setQapYear] = useState<string>('2026');
+  const [qapQuarter, setQapQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>(lastExp ? (`Q${lastExp.quarter}` as any) : 'Q3');
+  const [qapYear, setQapYear] = useState<string>(lastExp?.year || '2026');
   const [qapSearch, setQapSearch] = useState<string>('');
 
 function isSampleTransaction(record: any): boolean {
@@ -240,55 +254,77 @@ function isSampleTransaction(record: any): boolean {
   /* ========================================================================= */
   /* TAB 2: EXPANDED WITHHOLDING TAX DATA & CALCULATIONS (1601-EQ / 0619-E)     */
   /* ========================================================================= */
-  const ewtRows = useMemo(() => {
-    return expenses
-      .filter(e => !isSampleTransaction(e))
-      .filter(e => (Number(e.withholding_2307_2306) || 0) > 0 || (Number((e as any).tax_withheld) || 0) > 0)
-      .map(e => {
-        const taxWithheld = Number(e.withholding_2307_2306) || Number((e as any).tax_withheld) || 0;
-        const grossAmount = Number(e.expense_invoice_amount) || Number((e as any).amount) || Number(e.vatable_expense) || 0;
-        const ratePct = grossAmount > 0 ? Math.round((taxWithheld / grossAmount) * 100) : 1;
-        const atc = ratePct >= 10 ? 'WI100' : ratePct === 5 ? 'WC157' : ratePct === 2 ? 'WC120' : 'WC158';
-        const nature = ratePct >= 10 ? 'Professional Fees (Corp/Individual)' : ratePct === 5 ? 'Rental of Real/Personal Property' : ratePct === 2 ? 'Subcontractors / Contractors' : 'Purchase of Goods / Services';
+  // SHARED ENGINE: every expense with EWT -> normalized line -> BIR 2307 -> 0619-E / 1601-EQ -> QAP
+  const issuedTxns = useMemo(() => normalizeTransactions(expenses, 'issued', {
+    exclude: isSampleTransaction,
+    partyLookup: (tin9, name) => {
+      const sp: any = (serviceProviders || []).find((p: any) => {
+        const t = String(p.tin_number || p.sp_tin || p.service_provider_TIN || '').replace(/\D/g, '').slice(0, 9);
+        if (tin9 !== '000000000' && t === tin9) return true;
+        return String(p.registered_name || p.company_name || p.service_provider_name || '').toLowerCase() === name.toLowerCase();
+      });
+      return sp ? { address: sp.address || sp.sp_address || sp.service_provider_Address, atc: sp.atc_code } : undefined;
+    }
+  }), [expenses, serviceProviders]);
 
-        return {
-          id: e.id,
-          date: e.expense_date || (e as any).date || '',
-          voucherNo: (e as any).voucher_number || (e as any).invoice_number || `VCH-${e.id}`,
-          payeeName: e.service_provider_name || (e as any).supplier_name || 'Vendor / Contractor',
-          payeeTin: e.sp_tin || (e as any).tin || '000-000-000-00000',
-          branch: '00000',
-          nature,
-          atc,
-          ratePct: `${ratePct}%`,
-          taxBase: grossAmount,
-          taxWithheld
-        };
-      })
+  const ewtQ = parseQuarter(ewtQuarter);
+  const ewtCerts = useMemo(() => buildCertificates(issuedTxns, ewtYear, ewtQ), [issuedTxns, ewtYear, ewtQ]);
+
+  const ewtRows = useMemo(() => {
+    return txnsForQuarter(issuedTxns, ewtYear, ewtQ)
+      .map(t => ({
+        id: t.id,
+        date: t.date,
+        voucherNo: t.ref,
+        payeeName: t.partyName,
+        payeeTin: t.partyTin,
+        branch: t.partyBranch,
+        nature: t.nature,
+        atc: t.atc,
+        atcDerived: t.atcDerived,
+        ratePct: `${t.ratePct}%`,
+        taxBase: t.base,
+        taxWithheld: t.tax
+      }))
       .filter(r => {
         if (!ewtSearch) return true;
         const q = ewtSearch.toLowerCase();
         return r.payeeName.toLowerCase().includes(q) || r.payeeTin.includes(q) || r.voucherNo.toLowerCase().includes(q);
       });
-  }, [expenses, ewtSearch]);
+  }, [issuedTxns, ewtYear, ewtQ, ewtSearch]);
+
+  // Penalty / amendment inputs for 0619-E (month 1 & 2) and 1601-EQ, kept per quarter
+  const [wInputs, setWInputs] = useState<Record<string, number>>({});
+  const wKey = (k: string) => `${ewtYear}.${ewtQ}.${k}`;
+  const wv = (k: string) => wInputs[wKey(k)] || 0;
+  const setWv = (k: string, v: number) => setWInputs(prev => ({ ...prev, [wKey(k)]: v }));
+  const [ewtFormMonth, setEwtFormMonth] = useState<1 | 2>(1);
+  const [viewCert, setViewCert] = useState<Cert2307 | null>(null);
+
+  const mOpts = (m: 1 | 2) => ({ prevRemitted: wv(`m${m}.prev`), surcharge: wv(`m${m}.sur`), interest: wv(`m${m}.int`), compromise: wv(`m${m}.comp`) });
+  const form0619E = useMemo(
+    () => build0619E(ewtCerts, ewtYear, ewtQ, ewtFormMonth, mOpts(ewtFormMonth)),
+    [ewtCerts, ewtYear, ewtQ, ewtFormMonth, wInputs]
+  );
+  const form1601EQ = useMemo(() => build1601EQ(ewtCerts, ewtYear, ewtQ, {
+    m1: mOpts(1), m2: mOpts(2),
+    prevRemitted: wv('eq.prev'), prevOverRemittance: wv('eq.over'),
+    surcharge: wv('eq.sur'), interest: wv('eq.int'), compromise: wv('eq.comp')
+  }), [ewtCerts, ewtYear, ewtQ, wInputs]);
+  const ewtRecon = useMemo(() => reconcileQuarter(issuedTxns, ewtYear, ewtQ), [issuedTxns, ewtYear, ewtQ]);
 
   const ewtSummary = useMemo(() => {
     const totalTaxBase = ewtRows.reduce((sum, r) => sum + r.taxBase, 0);
     const totalTaxWithheld = ewtRows.reduce((sum, r) => sum + r.taxWithheld, 0);
-    // Estimated breakdown across 3 months of the quarter
-    const month1 = Math.round((totalTaxWithheld * 0.33) * 100) / 100;
-    const month2 = Math.round((totalTaxWithheld * 0.33) * 100) / 100;
-    const month3 = Math.max(0, Math.round((totalTaxWithheld - month1 - month2) * 100) / 100);
-
     return {
       totalTaxBase,
       totalTaxWithheld,
       payeeCount: ewtRows.length,
-      month1,
-      month2,
-      month3
+      month1: ewtRecon.m1,
+      month2: ewtRecon.m2,
+      month3: ewtRecon.m3
     };
-  }, [ewtRows]);
+  }, [ewtRows, ewtRecon]);
 
   /* ========================================================================= */
   /* TAB 3: ALPHALIST OF EMPLOYEES DATA (1604-C / 2316 ATTACHMENT)             */
@@ -324,22 +360,29 @@ function isSampleTransaction(record: any): boolean {
   /* ========================================================================= */
   /* TAB 4: QAP DATA (ATTACHMENT TO 1601EQ)                                    */
   /* ========================================================================= */
+  // QAP = one row per payee per ATC, taken from the same BIR 2307 certificates (per quarter)
+  const qapCerts = useMemo(() => buildCertificates(issuedTxns, qapYear, parseQuarter(qapQuarter)), [issuedTxns, qapYear, qapQuarter]);
+  const qapData = useMemo(() => buildQAP(qapCerts, qapYear, parseQuarter(qapQuarter)), [qapCerts, qapYear, qapQuarter]);
+  const qapEq = useMemo(() => build1601EQ(qapCerts, qapYear, parseQuarter(qapQuarter)), [qapCerts, qapYear, qapQuarter]);
+
   const qapRows = useMemo(() => {
-    return ewtRows.map(r => ({
-      id: r.id,
-      tin: r.payeeTin,
+    return qapData.rows.map(r => ({
+      id: `${r.seq}`,
+      tin: r.tin,
       branch: r.branch,
-      payeeName: r.payeeName,
+      payeeName: r.name,
       atc: r.atc,
-      taxBase: r.taxBase,
-      taxRate: r.ratePct,
+      atcDerived: r.atcDerived,
+      month1: r.month1, month2: r.month2, month3: r.month3,
+      taxBase: r.incomePayment,
+      taxRate: `${r.ratePct}%`,
       taxWithheld: r.taxWithheld
     })).filter(r => {
       if (!qapSearch) return true;
       const q = qapSearch.toLowerCase();
       return r.payeeName.toLowerCase().includes(q) || r.tin.includes(q) || r.atc.toLowerCase().includes(q);
     });
-  }, [ewtRows, qapSearch]);
+  }, [qapData, qapSearch]);
 
   const qapSummary = useMemo(() => {
     const totalBase = qapRows.reduce((sum, r) => sum + r.taxBase, 0);
@@ -352,7 +395,7 @@ function isSampleTransaction(record: any): boolean {
   }, [qapRows]);
 
   const handleDownloadQAPDat = () => {
-    const validRows = qapRows.filter(r => !isSampleTransaction(r));
+    const validRows = qapRows;
     if (validRows.length === 0) {
       triggerAlert(`Cannot generate QAP .DAT: No real expanded withholding tax transactions found for ${qapQuarter} ${qapYear}. Sample or dummy data is prohibited in BIR files.`, 'error');
       return;
@@ -628,7 +671,27 @@ function isSampleTransaction(record: any): boolean {
       {/* ===================================================================== */}
       {/* TAB CONTENT 2: EXPANDED WITHHOLDING TAX (1601-EQ & 0619-E)             */}
       {/* ===================================================================== */}
-      {activeSubTab === 'wtx_expanded' && (
+      {activeSubTab === 'wtx_expanded' && viewCert && (
+        <BIR2307CertificateView
+          certNo={viewCert.certNo}
+          periodFrom={viewCert.periodFrom}
+          periodTo={viewCert.periodTo}
+          payeeTin={viewCert.partyTin}
+          payeeName={viewCert.partyName}
+          payeeAddress={viewCert.partyAddress}
+          payorTin={companyTin}
+          payorName={activeCompany?.company_name || ''}
+          payorAddress={(activeCompany as any)?.company_address || (activeCompany as any)?.address || ''}
+          rows={viewCert.lines.map(l => ({
+            nature: l.nature, atc: l.atc, month1: l.month1, month2: l.month2, month3: l.month3,
+            totalAmount: l.totalAmount, taxWithheld: l.taxWithheld
+          }))}
+          theme={theme}
+          onClose={() => setViewCert(null)}
+        />
+      )}
+
+      {activeSubTab === 'wtx_expanded' && !viewCert && (
         <div className="space-y-4">
           
           {/* Controls */}
@@ -714,21 +777,114 @@ function isSampleTransaction(record: any): boolean {
             </div>
 
             <div className={`p-4 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs`}>
-              <span className={`text-[11px] font-semibold ${theme.textMuted} uppercase tracking-wider`}>Form 0619-E (Month 1 & 2)</span>
+              <span className={`text-[11px] font-semibold ${theme.textMuted} uppercase tracking-wider`}>Form 0619-E (Month 1 + Month 2)</span>
               <p className={`text-lg font-bold font-mono mt-1 ${theme.textTitle}`}>
-                ₱{(ewtSummary.month1 + ewtSummary.month2).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ₱{(form1601EQ.item15a + form1601EQ.item15b).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
-              <span className="text-[10px] text-zinc-400 mt-0.5 block">Monthly advance remittances</span>
+              <span className="text-[10px] text-zinc-400 mt-0.5 block">Remitted via 0619-E (actual withholdings of months 1 &amp; 2)</span>
             </div>
 
             <div className={`p-4 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs`}>
               <span className={`text-[11px] font-semibold ${theme.textMuted} uppercase tracking-wider`}>Quarterly Balance (1601-EQ)</span>
               <p className="text-lg font-bold font-mono mt-1 text-emerald-500">
-                ₱{ewtSummary.month3.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ₱{form1601EQ.item17.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
-              <span className="text-[10px] text-zinc-400 mt-0.5 block">Net remittance on final quarter month</span>
+              <span className="text-[10px] text-zinc-400 mt-0.5 block">Tax still due with 1601-EQ (3rd month withholdings)</span>
             </div>
           </div>
+
+          {/* BIR 0619-E (Part II – Tax Remittance, items 14-18) and 1601-EQ (quarterly) */}
+          {(() => {
+            const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const fmtN = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            type PR = { no: string; label: string; value: number; kind: 'auto' | 'input' | 'total'; key?: string; sub?: boolean; note?: string };
+            const mk = `m${ewtFormMonth}`;
+            const f = form0619E;
+            const rows0619: PR[] = [
+              { no: '14', label: 'Amount of Remittance', value: f.item14, kind: 'auto', note: 'Σ tax withheld on BIR 2307 certificates for this month' },
+              { no: '15', label: 'Less: Amount Remitted from Previously Filed Form, if this is an amended form', value: f.item15, kind: 'input', key: `${mk}.prev` },
+              { no: '16', label: 'Net Amount of Remittance (Item 14 Less Item 15)', value: f.item16, kind: 'total' },
+              { no: '17', label: 'Add: Penalties', value: 0, kind: 'auto' },
+              { no: '17A', label: 'Surcharge', value: f.item17a, kind: 'input', key: `${mk}.sur`, sub: true },
+              { no: '17B', label: 'Interest', value: f.item17b, kind: 'input', key: `${mk}.int`, sub: true },
+              { no: '17C', label: 'Compromise', value: f.item17c, kind: 'input', key: `${mk}.comp`, sub: true },
+              { no: '17D', label: 'Total Penalties (Sum of Items 17A to 17C)', value: f.item17d, kind: 'total', sub: true },
+              { no: '18', label: 'Total Amount of Remittance (Sum of Items 16 and 17D)', value: f.item18, kind: 'total' }
+            ];
+            const q = form1601EQ;
+            const rowsEQ: PR[] = [
+              { no: '14', label: 'Total Taxes Withheld for the Quarter', value: q.item14, kind: 'auto', note: 'Σ QAP = Σ BIR 2307 certificates' },
+              { no: '15A', label: 'Less: Remitted – 1st Month (Form 0619-E, Item 16)', value: q.item15a, kind: 'auto', sub: true },
+              { no: '15B', label: 'Less: Remitted – 2nd Month (Form 0619-E, Item 16)', value: q.item15b, kind: 'auto', sub: true },
+              { no: '15C', label: 'Less: Tax Remitted in Return Previously Filed, if amended', value: q.item15c, kind: 'input', key: 'eq.prev', sub: true },
+              { no: '15D', label: 'Less: Over-remittance from Previous Quarter', value: q.item15d, kind: 'input', key: 'eq.over', sub: true },
+              { no: '16', label: 'Total Remittances Made (Sum of Items 15A to 15D)', value: q.item16, kind: 'total' },
+              { no: '17', label: 'Tax Still Due / (Over-remittance) (Item 14 Less Item 16)', value: q.item17, kind: 'total' },
+              { no: '18A', label: 'Surcharge', value: q.item18a, kind: 'input', key: 'eq.sur', sub: true },
+              { no: '18B', label: 'Interest', value: q.item18b, kind: 'input', key: 'eq.int', sub: true },
+              { no: '18C', label: 'Compromise', value: q.item18c, kind: 'input', key: 'eq.comp', sub: true },
+              { no: '18D', label: 'Total Penalties', value: q.item18d, kind: 'total', sub: true },
+              { no: '19', label: 'TOTAL AMOUNT STILL DUE / (Over-remittance) (Sum of Items 17 and 18D)', value: q.item19, kind: 'total' }
+            ];
+            const renderRows = (rows: PR[]) => rows.map((r, i) => (
+              <div key={i} className={`px-3 py-1.5 flex items-center justify-between gap-3 text-xs ${r.kind === 'total' ? 'bg-black/5 dark:bg-white/5' : ''}`}>
+                <div className={`flex items-start gap-2 min-w-0 ${r.sub ? 'pl-5' : ''}`}>
+                  <span className="w-8 text-center py-0.5 rounded font-bold text-[10px] shrink-0 bg-zinc-500/20 text-zinc-300 font-mono">{r.no}</span>
+                  <div className="min-w-0">
+                    <span className={`font-sans text-[11px] ${r.kind === 'total' ? 'font-bold' : 'font-medium'} ${theme.textTitle}`}>{r.label}</span>
+                    {r.note && <span className="text-[10px] text-zinc-400 block">{r.note}</span>}
+                  </div>
+                </div>
+                {r.label === 'Add: Penalties' ? null : r.kind === 'input' && r.key ? (
+                  <input
+                    type="number" step="0.01" min="0" placeholder="0.00"
+                    value={r.value === 0 ? '' : r.value}
+                    onChange={(e) => setWv(r.key as string, parseFloat(e.target.value) || 0)}
+                    className={`w-32 h-6 px-2 text-right font-mono text-[11px] rounded border bg-black/10 dark:bg-white/5 ${theme.borderInput} ${theme.textMain}`}
+                  />
+                ) : (
+                  <span className={`font-mono text-[11px] px-2 py-0.5 rounded bg-black/20 dark:bg-white/5 border border-zinc-700/40 ${r.kind === 'total' ? 'font-bold' : ''} ${theme.textTitle}`}>₱{fmtN(r.value)}</span>
+                )}
+              </div>
+            ));
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl overflow-hidden`}>
+                  <div className={`p-3 border-b ${theme.borderCard} bg-black/5 dark:bg-white/5 flex flex-wrap items-center justify-between gap-2`}>
+                    <h3 className={`font-bold text-xs uppercase tracking-wider ${theme.textTitle}`}>BIR Form 0619-E • Part II – Tax Remittance</h3>
+                    <div className="flex items-center gap-1.5">
+                      {[1, 2, 3].map(m => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => m !== 3 && setEwtFormMonth(m as 1 | 2)}
+                          disabled={m === 3}
+                          title={m === 3 ? 'Third month is covered by Form 1601-EQ' : ''}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold border ${m === ewtFormMonth ? 'bg-amber-500 text-slate-950 border-amber-500' : `${theme.borderCard} ${theme.textMuted}`} ${m === 3 ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                        >
+                          {MONTHS[(ewtQ - 1) * 3 + m - 1].slice(0, 3)}{m === 3 ? ' (1601-EQ)' : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="divide-y divide-zinc-800/30 font-mono">{renderRows(rows0619)}</div>
+                  <div className="px-3 py-1.5 text-[10px] text-zinc-400 border-t border-zinc-800/30">
+                    For the month of {MONTHS[f.calendarMonth - 1]} {ewtYear} · {f.payeeCount} payee(s) · Source: BIR 2307 certificates issued
+                  </div>
+                </div>
+
+                <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl overflow-hidden`}>
+                  <div className={`p-3 border-b ${theme.borderCard} bg-black/5 dark:bg-white/5`}>
+                    <h3 className={`font-bold text-xs uppercase tracking-wider ${theme.textTitle}`}>BIR Form 1601-EQ • Part II – Computation of Tax ({ewtQuarter} {ewtYear})</h3>
+                  </div>
+                  <div className="divide-y divide-zinc-800/30 font-mono">{renderRows(rowsEQ)}</div>
+                  <div className={`px-3 py-1.5 text-[10px] font-mono border-t border-zinc-800/30 ${ewtRecon.balanced ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {ewtRecon.balanced ? '✔ Reconciled' : '✖ Not reconciled'}: ledger ₱{fmtN(ewtRecon.txTotal)} = 2307 ₱{fmtN(ewtRecon.certTotal)} = QAP ₱{fmtN(ewtRecon.qap)} = 1601-EQ ₱{fmtN(ewtRecon.eq1601)} = months 1+2+3 ₱{fmtN(ewtRecon.monthsTotal)}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Table */}
           <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-xs overflow-hidden`}>
@@ -769,7 +925,7 @@ function isSampleTransaction(record: any): boolean {
                         <td className="p-3 font-mono font-bold text-amber-500">{r.voucherNo}</td>
                         <td className={`p-3 font-semibold ${theme.textTitle}`}>{r.payeeName}</td>
                         <td className="p-3 font-mono text-zinc-400">{r.payeeTin}</td>
-                        <td className="p-3 font-mono font-bold text-cyan-500">{r.atc}</td>
+                        <td className="p-3 font-mono font-bold text-cyan-500">{r.atc}{r.atcDerived && <span className="text-[9px] text-zinc-400 font-normal"> (derived)</span>}</td>
                         <td className={`p-3 ${theme.textMuted}`}>{r.nature}</td>
                         <td className={`p-3 text-right font-mono font-medium ${theme.textTitle}`}>
                           ₱{r.taxBase.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -780,7 +936,7 @@ function isSampleTransaction(record: any): boolean {
                         </td>
                         <td className="p-3 text-center">
                           <button
-                            onClick={() => triggerAlert(`Generated BIR Form 2307 certificate for ${r.payeeName} (₱${r.taxWithheld.toFixed(2)})!`, 'success')}
+                            onClick={() => { const c = ewtCerts.find(cc => cc.txnIds.includes(r.id)); if (c) setViewCert(c); }}
                             className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/10 text-cyan-500 border border-cyan-500/20 hover:bg-cyan-500 hover:text-slate-950 transition cursor-pointer"
                           >
                             View 2307
@@ -1115,6 +1271,9 @@ function isSampleTransaction(record: any): boolean {
                 Mandatory Attachment to Form 1601-EQ
               </span>
             </div>
+            <div className={`px-4 py-2 text-[11px] font-mono border-b ${theme.borderCard} ${Math.abs(qapSummary.totalWithheld - qapEq.item14) < 0.01 || qapSearch ? 'text-emerald-400' : 'text-rose-400'}`}>
+              Σ QAP ₱{qapData.totalTax.toLocaleString(undefined, { minimumFractionDigits: 2 })} = Form 1601-EQ Item 14 ₱{qapEq.item14.toLocaleString(undefined, { minimumFractionDigits: 2 })} · Source: BIR 2307 certificates issued ({qapCerts.length}) ← Purchases / Expenses
+            </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
@@ -1125,6 +1284,9 @@ function isSampleTransaction(record: any): boolean {
                     <th className="p-3">Branch</th>
                     <th className="p-3">Registered Payee Name</th>
                     <th className="p-3">ATC Code</th>
+                    <th className="p-3 text-right">1st Month</th>
+                    <th className="p-3 text-right">2nd Month</th>
+                    <th className="p-3 text-right">3rd Month</th>
                     <th className="p-3 text-right">Gross Income Base</th>
                     <th className="p-3 text-center">Tax Rate</th>
                     <th className="p-3 text-right">Tax Withheld</th>
@@ -1133,7 +1295,7 @@ function isSampleTransaction(record: any): boolean {
                 <tbody className={`divide-y ${theme.borderCard}`}>
                   {qapRows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center text-zinc-400">
+                      <td colSpan={11} className="p-8 text-center text-zinc-400">
                         No creditable withholding tax payees found for QAP in {qapQuarter} {qapYear}.
                       </td>
                     </tr>
@@ -1144,7 +1306,10 @@ function isSampleTransaction(record: any): boolean {
                         <td className="p-3 font-mono font-bold text-amber-500">{r.tin}</td>
                         <td className="p-3 font-mono text-zinc-400">{r.branch}</td>
                         <td className={`p-3 font-semibold ${theme.textTitle}`}>{r.payeeName}</td>
-                        <td className="p-3 font-mono font-bold text-cyan-500">{r.atc}</td>
+                        <td className="p-3 font-mono font-bold text-cyan-500">{r.atc}{r.atcDerived && <span className="text-[9px] text-zinc-400 font-normal"> (derived)</span>}</td>
+                        <td className="p-3 text-right font-mono text-zinc-400">{r.month1 ? r.month1.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}</td>
+                        <td className="p-3 text-right font-mono text-zinc-400">{r.month2 ? r.month2.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}</td>
+                        <td className="p-3 text-right font-mono text-zinc-400">{r.month3 ? r.month3.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}</td>
                         <td className={`p-3 text-right font-mono font-medium ${theme.textTitle}`}>
                           ₱{r.taxBase.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>

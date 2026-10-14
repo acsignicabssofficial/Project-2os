@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Printer, Download, Sparkles, Building2, User, FileText, CheckCircle2 } from 'lucide-react';
+import React from 'react';
+import { Printer } from 'lucide-react';
 import { safeNum } from '../utils/accounting';
 
 export interface BIR2307Row {
@@ -24,6 +24,7 @@ export interface BIR2307CertificateProps {
   payorAddress?: string;
   payorZip?: string;
   rows?: BIR2307Row[];
+  certNo?: string;
   theme: any;
   title?: string;
   subtitle?: string;
@@ -31,66 +32,30 @@ export interface BIR2307CertificateProps {
 }
 
 export default function BIR2307CertificateView({
-  periodFrom = '01/01/2025',
-  periodTo = '03/31/2025',
-  payeeTin = '008-622-147-000',
-  payeeName = 'PROFICERE TRANSPORT LOGISTICS CORP.',
-  payeeAddress = '0468 Niugan, Angat Bulacan',
-  payeeZip = '3012',
-  payorTin = '008-287-044-000',
-  payorName = 'NIPPON HASHA INC. (FORMERLY THE REAL RAMEN NAZI, INC.)',
-  payorAddress = 'U20 C3 MOLITO LIFESTYLE BLDG., ZAPOTE RD, MADRIGAL AVE, MUNTINLUPA CITY',
-  payorZip = '1780',
+  periodFrom = '',
+  periodTo = '',
+  payeeTin = '',
+  payeeName = '',
+  payeeAddress = '',
+  payeeZip = '',
+  payorTin = '',
+  payorName = '',
+  payorAddress = '',
+  payorZip = '',
   rows = [],
+  certNo,
   theme,
   title = 'BIR Form No. 2307',
   subtitle = 'Certificate of Creditable Tax Withheld at Source',
   onClose
 }: BIR2307CertificateProps) {
-  const [useReferenceModel, setUseReferenceModel] = useState<boolean>(rows.length === 0);
-
-  // Reference Model from Screenshot 2026-10-13 175249.png
-  const activeData = useMemo(() => {
-    if (useReferenceModel || rows.length === 0) {
-      return {
-        periodFrom: '01/01/2025',
-        periodTo: '03/31/2025',
-        payeeTin: '008-622-147-000',
-        payeeName: 'PROFICERE TRANSPORT LOGISTICS CORP.',
-        payeeAddress: '0468 Niugan, Angat Bulacan',
-        payeeZip: '3012',
-        payorTin: '008-287-044-000',
-        payorName: 'NIPPON HASHA INC. (FORMERLY THE REAL RAMEN NAZI, INC.)',
-        payorAddress: 'U20 C3 MOLITO LIFESTYLE BLDG., ZAPOTE RD, MADRIGAL AVE, MUNTINLUPA CITY',
-        payorZip: '1780',
-        rows: [
-          {
-            nature: 'Income payment made by top withholding agents to their local/resident supplier of services other than those covered by other rates of withholding tax',
-            atc: 'WC160',
-            month1: 0,
-            month2: 0,
-            month3: 11607.14,
-            totalAmount: 11607.14,
-            taxWithheld: 232.14
-          }
-        ]
-      };
-    }
-
-    return {
-      periodFrom,
-      periodTo,
-      payeeTin,
-      payeeName,
-      payeeAddress,
-      payeeZip,
-      payorTin,
-      payorName,
-      payorAddress,
-      payorZip,
-      rows
-    };
-  }, [useReferenceModel, rows, periodFrom, periodTo, payeeTin, payeeName, payeeAddress, payeeZip, payorTin, payorName, payorAddress, payorZip]);
+  const activeData = {
+    periodFrom, periodTo, payeeTin, payeeName, payeeAddress, payeeZip,
+    payorTin, payorName, payorAddress, payorZip, rows
+  };
+  const totalM1 = rows.reduce((sum, r) => sum + safeNum(r.month1), 0);
+  const totalM2 = rows.reduce((sum, r) => sum + safeNum(r.month2), 0);
+  const totalM3 = rows.reduce((sum, r) => sum + safeNum(r.month3), 0);
 
   const totalIncomePayments = activeData.rows.reduce((sum, r) => sum + safeNum(r.totalAmount), 0);
   const totalTaxWithheld = activeData.rows.reduce((sum, r) => sum + safeNum(r.taxWithheld), 0);
@@ -135,27 +100,12 @@ export default function BIR2307CertificateView({
           <span className="font-bold text-zinc-300">
             {subtitle}
           </span>
-          {useReferenceModel && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-              ⚡ Reference Sample Model
-            </span>
+          {certNo && (
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-zinc-700 text-zinc-200">{certNo}</span>
           )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setUseReferenceModel(!useReferenceModel)}
-            className={`px-2.5 py-1 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-              useReferenceModel
-                ? 'bg-amber-500 text-slate-950 border-amber-500'
-                : `border-zinc-700 bg-zinc-800 text-zinc-300 hover:text-white`
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{useReferenceModel ? 'Active: Image 4 Model Data' : 'Load Image 4 Reference Model'}</span>
-          </button>
-
           <button
             type="button"
             onClick={handlePrint}
@@ -334,9 +284,9 @@ export default function BIR2307CertificateView({
                   <td className="p-1 font-sans text-right uppercase" colSpan={2}>
                     Total
                   </td>
-                  <td className="p-1 text-right">-</td>
-                  <td className="p-1 text-right">-</td>
-                  <td className="p-1 text-right">{fmt(totalIncomePayments)}</td>
+                  <td className="p-1 text-right">{fmt(totalM1)}</td>
+                  <td className="p-1 text-right">{fmt(totalM2)}</td>
+                  <td className="p-1 text-right">{fmt(totalM3)}</td>
                   <td className="p-1 text-right font-black">{fmt(totalIncomePayments)}</td>
                   <td className="p-1 text-right font-black text-rose-950 bg-amber-200/60">{fmt(totalTaxWithheld)}</td>
                 </tr>
@@ -358,9 +308,9 @@ export default function BIR2307CertificateView({
                   <td className="p-1.5 font-sans text-right uppercase" colSpan={2}>
                     Grand Total
                   </td>
-                  <td className="p-1.5 text-right">-</td>
-                  <td className="p-1.5 text-right">-</td>
-                  <td className="p-1.5 text-right">{fmt(totalIncomePayments)}</td>
+                  <td className="p-1.5 text-right">{fmt(totalM1)}</td>
+                  <td className="p-1.5 text-right">{fmt(totalM2)}</td>
+                  <td className="p-1.5 text-right">{fmt(totalM3)}</td>
                   <td className="p-1.5 text-right">{fmt(totalIncomePayments)}</td>
                   <td className="p-1.5 text-right text-rose-950 bg-amber-300/80">{fmt(totalTaxWithheld)}</td>
                 </tr>

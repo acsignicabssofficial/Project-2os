@@ -16,6 +16,17 @@ import {
   Search,
   BookOpen
 } from 'lucide-react';
+import BIR2307CertificateView from './BIR2307CertificateView';
+import {
+  normalizeTransactions,
+  latestPeriod,
+  buildCertificates,
+  buildSAWT,
+  creditableForITR,
+  isWithinItrPeriod,
+  ItrPeriod,
+  Cert2307
+} from '../utils/cwt2307';
 import { 
   Company, 
   Sale, 
@@ -86,7 +97,7 @@ export default function IncomeTaxHubTab({
   const isIndividual = isIndividualEntity(rawEntityType);
 
   // General period state
-  const [taxYear, setTaxYear] = useState<string>('2026');
+  const [taxYear, setTaxYear] = useState<string>(latestPeriod([...sales, ...expenses], ['invoice_date', 'expense_date', 'date'])?.year || '2026');
   const [taxQuarter, setTaxQuarter] = useState<'ANNUAL' | 'Q1' | 'Q2' | 'Q3'>('ANNUAL');
 
   // 1701 Individual State
@@ -108,12 +119,25 @@ export default function IncomeTaxHubTab({
   const [sawtQuarter, setSawtQuarter] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
   const [sawtSearch, setSawtSearch] = useState<string>('');
 
+  // SHARED ENGINE (sales side): sale with CWT -> normalized line -> BIR 2307 received -> ITR credit / SAWT
+  const receivedTxns = useMemo(
+    () => normalizeTransactions(sales, 'received', { exclude: isSampleTransaction }),
+    [sales]
+  );
+  const itrPeriod: ItrPeriod = taxQuarter as ItrPeriod;
+  const itrCredit = useMemo(() => creditableForITR(receivedTxns, taxYear, itrPeriod), [receivedTxns, taxYear, itrPeriod]);
+
   /* ========================================================================= */
   /* COMMON FINANCIAL BASE COMPUTATION                                         */
   /* ========================================================================= */
   const booksData = useMemo(() => {
+    // Income and expenses are cut off at the same ITR period as the 2307 credits
+    // (quarterly ITR = year-to-date up to the quarter end; annual ITR = whole year).
+    const salesP = sales.filter(s => isWithinItrPeriod(s.invoice_date || (s as any).date || (s as any).issue_date, taxYear, itrPeriod));
+    const expP = expenses.filter(e => isWithinItrPeriod(e.expense_date || (e as any).date || (e as any).issue_date, taxYear, itrPeriod));
+
     // Gross sales revenue (vatable + zero rated + vat exempt)
-    let grossSales = sales.reduce((sum, s) => {
+    let grossSales = salesP.reduce((sum, s) => {
       const vatable = Number((s as any).vatable_amount ?? (s as any).vatable_sales) || 0;
       const zero = Number((s as any).zero_rated_amount ?? (s as any).zero_rated) || 0;
       const exempt = Number((s as any).vat_exempt_amount ?? (s as any).vat_exempt) || 0;
@@ -125,7 +149,7 @@ export default function IncomeTaxHubTab({
     }, 0);
     
     // Total itemized expenses
-    let itemizedExpenses = expenses.reduce((sum, e) => {
+    let itemizedExpenses = expP.reduce((sum, e) => {
       const vatable = Number((e as any).vatable_amount ?? (e as any).vatable_expense ?? (e as any).vatable_purchases) || 0;
       const zero = Number((e as any).zero_rated_amount ?? (e as any).zero_rated) || 0;
       const exempt = Number((e as any).vat_exempt_amount ?? (e as any).vat_exempt) || 0;
@@ -155,13 +179,11 @@ export default function IncomeTaxHubTab({
     });
 
     // Creditable Withholding Tax (2307)
-    const creditable2307 = sales.reduce((sum, s) => {
-      const cwt = Number((s as any).tax_withheld ?? (s as any).less_withholding_tax ?? (s as any).withholding_2307 ?? (s as any).amount_withheld_2307 ?? s.ewt_amount) || 0;
-      return sum + cwt;
-    }, 0);
+    // = Σ BIR 2307 received (Q1..Qn cumulative; annual = Q1..Q4), same lines as the SAWT
+    const creditable2307 = itrCredit.cumulative;
 
     // Cost of Sales (strictly from actual cost of goods / purchases expenses)
-    const costOfSales = expenses
+    const costOfSales = expP
       .filter(e => {
         const cat = ((e.expense_category || (e as any).category || (e as any).expense_type || (e as any).particulars || '') + '').toLowerCase();
         const desc = ((e.description || (e as any).particulars || '') + '').toLowerCase();
@@ -181,7 +203,7 @@ export default function IncomeTaxHubTab({
       ppeDepreciation,
       creditable2307
     };
-  }, [sales, expenses, ppeAssets, specialEntries]);
+  }, [sales, expenses, ppeAssets, specialEntries, taxYear, itrPeriod, itrCredit]);
 
   /* ========================================================================= */
   /* TAB 1: 1701 [FOR INDIVIDUALS] CALCULATIONS                                */
@@ -320,38 +342,37 @@ function isSampleTransaction(record: any): boolean {
   /* ========================================================================= */
   /* TAB 4: SAWT [ATTACHMENT TO ITR] DATA                                      */
   /* ========================================================================= */
-  const sawtRows = useMemo(() => {
-    return sales
-      .filter(s => !isSampleTransaction(s))
-      .filter(s => (Number((s as any).tax_withheld ?? (s as any).less_withholding_tax ?? (s as any).withholding_2307 ?? (s as any).amount_withheld_2307 ?? s.ewt_amount) || 0) > 0)
-      .map((s, idx) => {
-        const taxWithheld = Number((s as any).tax_withheld ?? (s as any).less_withholding_tax ?? (s as any).withholding_2307 ?? (s as any).amount_withheld_2307 ?? s.ewt_amount) || 0;
-        const incomeBase = Number((s as any).vatable_amount ?? (s as any).vatable_sales) || 
-          Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount) || 0;
-        const ratePct = incomeBase > 0 ? Math.round((taxWithheld / incomeBase) * 100) : 10;
-        const atc = ratePct >= 5 ? 'WC157' : (ratePct >= 2 ? 'WC010' : 'WI010');
+  // SAWT = one row per payor per ATC from the BIR 2307 certificates received (same period as the ITR)
+  const sawtData = useMemo(() => buildSAWT(receivedTxns, taxYear, itrPeriod), [receivedTxns, taxYear, itrPeriod]);
 
-        return {
-          seq: idx + 1,
-          id: s.id,
-          tin: s.customer_tin || (s as any).tin || (s as any).client_TIN || '000-000-000-00000',
-          branch: '00000',
-          name: s.customer_name || (s as any).registered_name || 'Customer / Payor',
-          invoiceNo: s.invoice_number || `INV-${s.id}`,
-          date: s.invoice_date || (s as any).date || '',
-          atc,
-          nature: `${ratePct}% Creditable Withholding Tax on Sale of Goods / Services`,
-          ratePct: `${ratePct}%`,
-          incomeBase,
-          taxWithheld
-        };
-      })
+  const sawtRows = useMemo(() => {
+    return sawtData.rows
+      .map(r => ({
+        seq: r.seq,
+        tin: r.tin,
+        branch: r.branch,
+        name: r.name,
+        atc: r.atc,
+        atcDerived: r.atcDerived,
+        nature: r.nature,
+        ratePct: `${r.ratePct}%`,
+        incomeBase: r.incomePayment,
+        taxWithheld: r.taxWithheld,
+        certCount: r.certNos.length
+      }))
       .filter(r => {
         if (!sawtSearch) return true;
         const q = sawtSearch.toLowerCase();
-        return r.name.toLowerCase().includes(q) || r.tin.includes(q) || r.invoiceNo.toLowerCase().includes(q);
+        return r.name.toLowerCase().includes(q) || r.tin.includes(q) || r.atc.toLowerCase().includes(q);
       });
-  }, [sales, sawtSearch]);
+  }, [sawtData, sawtSearch]);
+
+  // Received BIR 2307 certificates behind the SAWT (one per payor per quarter)
+  const receivedCerts = useMemo(() => {
+    const qs = itrPeriod === 'ANNUAL' ? [1, 2, 3, 4] : [parseInt(itrPeriod.replace(/\D/g, ''), 10)];
+    return qs.flatMap(q => buildCertificates(receivedTxns, taxYear, q));
+  }, [receivedTxns, taxYear, itrPeriod]);
+  const [viewCert, setViewCert] = useState<Cert2307 | null>(null);
 
   const sawtSummary = useMemo(() => {
     const totalBase = sawtRows.reduce((sum, r) => sum + r.incomeBase, 0);
@@ -364,7 +385,7 @@ function isSampleTransaction(record: any): boolean {
   }, [sawtRows]);
 
   const handleDownloadSAWTDat = () => {
-    const validRows = sawtRows.filter(r => !isSampleTransaction(r));
+    const validRows = sawtRows;
     if (validRows.length === 0) {
       triggerAlert(`Cannot generate SAWT .DAT: No real creditable withholding tax (BIR Form 2307) transactions found for ${taxYear}. Sample or dummy data is prohibited in BIR files.`, 'error');
       return;
@@ -688,7 +709,7 @@ function isSampleTransaction(record: any): boolean {
             </div>
 
             <div className="flex justify-between py-1.5 border-b border-zinc-700/20">
-              <span className={theme.textMuted}>Part IV-A Item 42A: Less: Creditable Withholding Tax (BIR Form 2307 / SAWT)</span>
+              <span className={theme.textMuted}>Part IV-A Item 42A: Less: Creditable Withholding Tax (BIR Form 2307 / SAWT, {taxQuarter})</span>
               <span className="font-bold text-emerald-500">(₱{comp1701.creditable2307.toFixed(2)})</span>
             </div>
 
@@ -885,7 +906,7 @@ function isSampleTransaction(record: any): boolean {
             </div>
 
             <div className="flex justify-between py-1.5 border-b border-zinc-700/20">
-              <span className={theme.textMuted}>Part IV Item 35A: Less: Creditable Withholding Tax (2307 / SAWT)</span>
+              <span className={theme.textMuted}>Part IV Item 35A: Less: Creditable Withholding Tax (2307 / SAWT, {taxQuarter})</span>
               <span className="font-bold text-emerald-500">(₱{comp1702rt.creditable2307.toFixed(2)})</span>
             </div>
 
@@ -1044,7 +1065,27 @@ function isSampleTransaction(record: any): boolean {
       {/* ===================================================================== */}
       {/* TAB CONTENT 4: SAWT [ATTACHMENT TO ITR]                                */}
       {/* ===================================================================== */}
-      {activeSubTab === 'itax_sawt' && (
+      {activeSubTab === 'itax_sawt' && viewCert && (
+        <BIR2307CertificateView
+          certNo={viewCert.certNo}
+          periodFrom={viewCert.periodFrom}
+          periodTo={viewCert.periodTo}
+          payeeTin={companyTin}
+          payeeName={companyName}
+          payeeAddress={(activeCompany as any)?.company_address || ''}
+          payorTin={viewCert.partyTin}
+          payorName={viewCert.partyName}
+          payorAddress={viewCert.partyAddress}
+          rows={viewCert.lines.map(l => ({
+            nature: l.nature, atc: l.atc, month1: l.month1, month2: l.month2, month3: l.month3,
+            totalAmount: l.totalAmount, taxWithheld: l.taxWithheld
+          }))}
+          theme={theme}
+          onClose={() => setViewCert(null)}
+        />
+      )}
+
+      {activeSubTab === 'itax_sawt' && !viewCert && (
         <div className="space-y-4">
           
           {/* Controls */}
@@ -1053,11 +1094,11 @@ function isSampleTransaction(record: any): boolean {
               <Calendar className="w-4 h-4 text-violet-500" />
               <span className={`text-xs font-bold ${theme.textTitle}`}>Tax Period:</span>
               <select
-                value={sawtQuarter}
-                onChange={(e) => setSawtQuarter(e.target.value as any)}
+                value={taxQuarter}
+                onChange={(e) => setTaxQuarter(e.target.value as any)}
                 className={`px-2.5 py-1.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="ALL">Annual ITR Attachment (1701 / 1702)</option>
+                <option value="ANNUAL">Annual ITR Attachment (1701 / 1702)</option>
                 <option value="Q1">1st Quarter (1701Q / 1702Q)</option>
                 <option value="Q2">2nd Quarter (1701Q / 1702Q)</option>
                 <option value="Q3">3rd Quarter (1701Q / 1702Q)</option>
@@ -1098,19 +1139,18 @@ function isSampleTransaction(record: any): boolean {
 
               <button
                 onClick={() => {
-                  const headers = ['Seq #', 'Payor TIN', 'Registered Payor Name', 'Invoice #', 'Date', 'ATC Code', 'Nature of Payment', 'Income Base Amount', 'Creditable Tax Withheld'];
+                  const headers = ['Seq #', 'Payor TIN', 'Registered Payor Name', 'ATC Code', 'Nature of Payment', '2307 Count', 'Income Base Amount', 'Creditable Tax Withheld'];
                   const rows = sawtRows.map(r => [
                     r.seq,
                     r.tin,
                     r.name,
-                    r.invoiceNo,
-                    r.date,
                     r.atc,
                     r.nature,
+                    r.certCount,
                     r.incomeBase.toFixed(2),
                     r.taxWithheld.toFixed(2)
                   ]);
-                  handleExportCSV(`BIR_SAWT_Schedule_${taxYear}`, headers, rows);
+                  handleExportCSV(`BIR_SAWT_Schedule_${taxYear}_${taxQuarter}`, headers, rows);
                 }}
                 className={`p-2 rounded-xl border ${theme.borderCard} text-xs font-semibold hover:bg-black/5 dark:hover:bg-white/5 transition cursor-pointer`}
                 title="Export SAWT Schedule CSV"
@@ -1165,9 +1205,9 @@ function isSampleTransaction(record: any): boolean {
                     <th className="p-3">Seq #</th>
                     <th className="p-3">Payor TIN</th>
                     <th className="p-3">Payor Registered Name</th>
-                    <th className="p-3">Invoice Ref #</th>
-                    <th className="p-3">Date</th>
                     <th className="p-3">ATC Code</th>
+                    <th className="p-3">Nature of Income Payment</th>
+                    <th className="p-3 text-center">2307s</th>
                     <th className="p-3 text-right">Income Base Amount</th>
                     <th className="p-3 text-right">Creditable Tax Withheld</th>
                   </tr>
@@ -1175,7 +1215,7 @@ function isSampleTransaction(record: any): boolean {
                 <tbody className={`divide-y ${theme.borderCard}`}>
                   {sawtRows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center text-zinc-400">
+                      <td colSpan={9} className="p-8 text-center text-zinc-400">
                         No creditable withholding tax claims found for SAWT. Sales with 2307 deductions will appear here automatically.
                       </td>
                     </tr>
@@ -1185,9 +1225,9 @@ function isSampleTransaction(record: any): boolean {
                         <td className="p-3 font-mono text-zinc-400">{r.seq}</td>
                         <td className="p-3 font-mono font-bold text-violet-500">{r.tin}</td>
                         <td className={`p-3 font-semibold ${theme.textTitle}`}>{r.name}</td>
-                        <td className="p-3 font-mono text-amber-500">{r.invoiceNo}</td>
-                        <td className="p-3 font-mono text-zinc-400">{r.date}</td>
-                        <td className="p-3 font-mono font-bold text-cyan-500">{r.atc}</td>
+                        <td className="p-3 font-mono font-bold text-cyan-500">{r.atc}{r.atcDerived && <span className="text-[9px] text-zinc-400 font-normal"> (derived)</span>}</td>
+                        <td className={`p-3 ${theme.textMuted}`}>{r.nature}</td>
+                        <td className="p-3 text-center font-mono text-amber-500">{r.certCount}</td>
                         <td className={`p-3 text-right font-mono font-medium ${theme.textTitle}`}>
                           ₱{r.incomeBase.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
@@ -1201,6 +1241,68 @@ function isSampleTransaction(record: any): boolean {
               </table>
             </div>
           </div>
+
+          {/* ITR credit link + received BIR 2307 register */}
+          {(() => {
+            const fmtN = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const expected = itrPeriod === 'ANNUAL' ? itrCredit.cumulative : itrCredit.current;
+            const ok = Math.abs(sawtData.totalTax - expected) < 0.01;
+            return (
+              <>
+                <div className={`px-4 py-2 rounded-xl border ${theme.borderCard} text-[11px] font-mono ${ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {ok ? '✔' : '✖'} Σ SAWT ₱{fmtN(sawtData.totalTax)} = {itrPeriod === 'ANNUAL' ? 'Annual ITR credit (Q1–Q4)' : `ITR ${itrPeriod} 2307 for the quarter`} ₱{fmtN(expected)}
+                  {itrPeriod !== 'ANNUAL' && ` · carried from previous quarters ₱${fmtN(itrCredit.previous)} · cumulative credit in 1701Q/1702Q ₱${fmtN(itrCredit.cumulative)}`}
+                </div>
+
+                <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-xs overflow-hidden`}>
+                  <div className={`p-4 border-b ${theme.borderCard} bg-black/5 dark:bg-white/5 flex items-center justify-between`}>
+                    <h3 className={`font-bold text-xs uppercase tracking-wider ${theme.textTitle}`}>
+                      BIR Form 2307 Received from Customers ({receivedCerts.length})
+                    </h3>
+                    <span className="text-[11px] text-violet-500 font-mono font-bold">Source of SAWT & ITR credit</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className={`border-b ${theme.borderCard} ${theme.textMuted} font-bold text-[11px] uppercase`}>
+                          <th className="p-3">Certificate #</th>
+                          <th className="p-3">Quarter</th>
+                          <th className="p-3">Payor</th>
+                          <th className="p-3">ATC</th>
+                          <th className="p-3 text-right">Income Payments</th>
+                          <th className="p-3 text-right">Tax Withheld</th>
+                          <th className="p-3 text-center">BIR 2307</th>
+                        </tr>
+                      </thead>
+                      <tbody className={`divide-y ${theme.borderCard}`}>
+                        {receivedCerts.length === 0 ? (
+                          <tr><td colSpan={7} className="p-6 text-center text-zinc-400">No 2307 received for this period. Sales recorded with tax withheld appear here automatically.</td></tr>
+                        ) : receivedCerts.map(c => (
+                          <tr key={c.certNo} className="hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                            <td className="p-3 font-mono text-amber-500">{c.certNo}</td>
+                            <td className="p-3 font-mono text-zinc-400">Q{c.quarter} {c.year}</td>
+                            <td className={`p-3 font-semibold ${theme.textTitle}`}>{c.partyName}</td>
+                            <td className="p-3 font-mono text-cyan-500">{c.lines.map(l => l.atc).join(', ')}</td>
+                            <td className={`p-3 text-right font-mono ${theme.textTitle}`}>₱{fmtN(c.totalAmount)}</td>
+                            <td className="p-3 text-right font-mono font-bold text-emerald-500">₱{fmtN(c.totalTax)}</td>
+                            <td className="p-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => setViewCert(c)}
+                                className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-500/10 text-violet-500 border border-violet-500/20 hover:bg-violet-500 hover:text-white transition cursor-pointer"
+                              >
+                                View 2307
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
         </div>
       )}
