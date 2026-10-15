@@ -104,6 +104,8 @@ export default function CompaniesTab({
   const [vatType, setVatType] = useState<'VATABLE' | 'NON-VAT' | 'EXEMPT'>('VATABLE');
   const [regFee, setRegFee] = useState<'Yes' | 'No'>('Yes');
   const [incomeTax, setIncomeTax] = useState<'Yes' | 'No'>('Yes');
+  const [incomeTaxType, setIncomeTaxType] = useState<'GRADUATED' | 'EIGHT_PERCENT'>('GRADUATED');
+  const [expenseDeductionType, setExpenseDeductionType] = useState<'ITEMIZED' | 'OSD_40'>('ITEMIZED');
   const [finalWithholding, setFinalWithholding] = useState<'Yes' | 'No'>('No');
   const [expandedWithholding, setExpandedWithholding] = useState<'Yes' | 'No'>('Yes');
   const [withholdingComp, setWithholdingComp] = useState<'Yes' | 'No'>('Yes');
@@ -202,6 +204,8 @@ export default function CompaniesTab({
     setVatType('VATABLE');
     setRegFee('Yes');
     setIncomeTax('Yes');
+    setIncomeTaxType('GRADUATED');
+    setExpenseDeductionType('ITEMIZED');
     setFinalWithholding('No');
     setExpandedWithholding('Yes');
     setWithholdingComp('Yes');
@@ -279,6 +283,13 @@ export default function CompaniesTab({
     const formattedTin9 = `${cleanTinDigits.slice(0, 3)}-${cleanTinDigits.slice(3, 6)}-${cleanTinDigits.slice(6, 9)}`;
     const formattedFullTin = `${formattedTin9}-${cleanBranch}`;
 
+    // 8% option is exclusive to individuals (sole proprietor / professional); everyone else is graduated / regular
+    const finalIncomeTaxType: 'GRADUATED' | 'EIGHT_PERCENT' =
+      isIndiv && incomeTaxType === 'EIGHT_PERCENT' ? 'EIGHT_PERCENT' : 'GRADUATED';
+    // Under the 8% option there is no deduction method (gross sales / receipts less P250k) -> keep the stored value neutral
+    const finalExpenseDeduction: 'ITEMIZED' | 'OSD_40' =
+      finalIncomeTaxType === 'EIGHT_PERCENT' ? 'ITEMIZED' : expenseDeductionType;
+
     const savedCompany: Company = {
       id: editingCompanyId !== null ? editingCompanyId : Date.now(),
       company_name: finalEntityName,
@@ -306,6 +317,8 @@ export default function CompaniesTab({
       vat_or_non_vat: vatType,
       registration_fee: regFee === 'Yes',
       income_tax: incomeTax === 'Yes',
+      income_tax_type: finalIncomeTaxType,
+      expense_deduction_type: finalExpenseDeduction,
       form_0619f: finalWithholding === 'Yes',
       withholding_expanded: expandedWithholding === 'Yes',
       withholding_compensation: withholdingComp === 'Yes',
@@ -453,7 +466,9 @@ export default function CompaniesTab({
     // BIR 2303
     setVatType((c.vat_or_non_vat as any) || 'VATABLE');
     setRegFee(c.registration_fee ? 'Yes' : 'No');
-    setIncomeTax(c.income_tax ? 'Yes' : 'No');
+    setIncomeTax(c.income_tax === false || c.income_tax === 'No' ? 'No' : (c.income_tax ? 'Yes' : 'No'));
+    setIncomeTaxType(isIndiv && c.income_tax_type === 'EIGHT_PERCENT' ? 'EIGHT_PERCENT' : 'GRADUATED');
+    setExpenseDeductionType(c.expense_deduction_type === 'OSD_40' ? 'OSD_40' : 'ITEMIZED');
     setFinalWithholding(c.form_0619f ? 'Yes' : 'No');
     setExpandedWithholding(c.withholding_expanded ? 'Yes' : 'No');
     setWithholdingComp(c.withholding_compensation ? 'Yes' : 'No');
@@ -826,6 +841,7 @@ export default function CompaniesTab({
                       onChange={(e) => {
                         const newType = e.target.value;
                         setEntityType(newType);
+                        if (!isIndividualEntity(newType)) setIncomeTaxType('GRADUATED');
                         if (sameTradeName) {
                           if (isIndividualEntity(newType)) {
                             setTradeName(getComputedIndividualName());
@@ -1141,6 +1157,94 @@ export default function CompaniesTab({
                       <option value="NON-VAT" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Non-VAT / Percentage Tax (1% or 3%)</option>
                       <option value="EXEMPT" className={theme.isLight ? "text-zinc-900 bg-white" : "text-white bg-[#121215]"}>Tax Exempt / PEZA / BOI Registered</option>
                     </select>
+                  </div>
+
+                  {/* INCOME TAX TYPE & EXPENSE (DEDUCTION) TYPE */}
+                  <div className={`p-4 rounded-xl border ${theme.borderCard} bg-zinc-500/5 flex flex-col gap-4`}>
+                    <h4 className={`text-xs font-bold uppercase tracking-wider ${theme.textTitle} flex items-center gap-2`}>
+                      <Landmark className="w-4 h-4 text-cyan-400" />
+                      Income Tax Type & Expense Type
+                    </h4>
+
+                    <div>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Income Tax Type *</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setIncomeTaxType('GRADUATED')}
+                          className={`text-left p-3 rounded-xl border text-xs transition cursor-pointer ${
+                            incomeTaxType === 'GRADUATED' || !isIndividualEntity(entityType)
+                              ? 'border-emerald-500 bg-emerald-500/10'
+                              : `${theme.borderInput} hover:bg-zinc-500/10`
+                          }`}
+                        >
+                          <p className={`font-bold ${theme.textMain}`}>
+                            {isIndividualEntity(entityType) ? 'Graduated Income Tax Rates' : 'Regular Income Tax (RCIT / Graduated)'}
+                          </p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5">
+                            {isIndividualEntity(entityType) ? '0% - 35% on net taxable income (BIR 1701 / 1701Q)' : 'Corporate / partnership rates on taxable income (BIR 1702 / 1702Q)'}
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!isIndividualEntity(entityType)}
+                          onClick={() => isIndividualEntity(entityType) && setIncomeTaxType('EIGHT_PERCENT')}
+                          className={`text-left p-3 rounded-xl border text-xs transition ${
+                            !isIndividualEntity(entityType)
+                              ? 'opacity-40 cursor-not-allowed border-zinc-700/50'
+                              : incomeTaxType === 'EIGHT_PERCENT'
+                                ? 'border-emerald-500 bg-emerald-500/10 cursor-pointer'
+                                : `${theme.borderInput} hover:bg-zinc-500/10 cursor-pointer`
+                          }`}
+                        >
+                          <p className={`font-bold ${theme.textMain}`}>8% Income Tax on Gross Sales / Receipts</p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5">
+                            Optional flat rate on gross in excess of ₱250,000. Individuals only (Sole Proprietor / Professional).
+                          </p>
+                        </button>
+                      </div>
+                      {!isIndividualEntity(entityType) && (
+                        <p className="text-[10px] text-amber-500 mt-1.5">
+                          The 8% option is exclusive to individuals (Sole Proprietor / Professional). This entity uses regular income tax.
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className={`block text-xs font-bold mb-1.5 ${theme.textMuted}`}>Expense Type (Deductions) *</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {([
+                          { key: 'ITEMIZED', title: 'Itemized Deductions', desc: 'Actual allowable expenses per books, with supporting documents' },
+                          { key: 'OSD_40', title: '40% Optional Standard Deduction (OSD)', desc: '40% of gross sales / gross income; no itemized expenses needed' }
+                        ] as const).map(opt => {
+                          const lockedBy8 = isIndividualEntity(entityType) && incomeTaxType === 'EIGHT_PERCENT';
+                          return (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              disabled={lockedBy8}
+                              onClick={() => setExpenseDeductionType(opt.key)}
+                              className={`text-left p-3 rounded-xl border text-xs transition ${
+                                lockedBy8
+                                  ? 'opacity-40 cursor-not-allowed border-zinc-700/50'
+                                  : expenseDeductionType === opt.key
+                                    ? 'border-emerald-500 bg-emerald-500/10 cursor-pointer'
+                                    : `${theme.borderInput} hover:bg-zinc-500/10 cursor-pointer`
+                              }`}
+                            >
+                              <p className={`font-bold ${theme.textMain}`}>{opt.title}</p>
+                              <p className="text-[10px] text-zinc-500 mt-0.5">{opt.desc}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {isIndividualEntity(entityType) && incomeTaxType === 'EIGHT_PERCENT' && (
+                        <p className="text-[10px] text-amber-500 mt-1.5">
+                          Under the 8% option, no deductions (itemized or OSD) are claimed. Tax is computed on gross sales/receipts less ₱250,000.
+                        </p>
+                      )}
+                    </div>
                   </div>
 
                   {/* YES / NO BIR 2303 REGISTERED TAX OBLIGATIONS */}

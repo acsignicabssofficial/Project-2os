@@ -52,16 +52,19 @@ if ($method === 'POST') {
     }
 
     try {
-        $pdo->beginTransaction();
+        // Self-heal: new entity tax columns (ALTER causes an implicit commit, so do it before the transaction)
+        ensureColumn($pdo, 'Company', 'income_tax_type', "VARCHAR(30) DEFAULT 'GRADUATED'");
+        ensureColumn($pdo, 'Company', 'expense_deduction_type', "VARCHAR(30) DEFAULT 'ITEMIZED'");
+
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0;");
+        $pdo->beginTransaction();
 
         // Sync Companies
         if (isset($payload['companies']) && is_array($payload['companies'])) {
-            $pdo->exec("TRUNCATE TABLE `Company`");
-            $stmt = $pdo->prepare("INSERT INTO `Company` (id, company_name, trade_name, entity_type, company_tin, tin_branch_code, company_address, company_email, company_contact, birthday_or_incorporation_date, rdo, rdo_code, line_of_business, vat_or_non_vat, registration_fee, income_tax, form_0619f, withholding_expanded, withholding_compensation, withholding_fringe_benefit, date_of_entry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `Company`");
+            $stmt = $pdo->prepare("INSERT INTO `Company` (company_name, trade_name, entity_type, company_tin, tin_branch_code, company_address, company_email, company_contact, birthday_or_incorporation_date, rdo, rdo_code, line_of_business, vat_or_non_vat, registration_fee, income_tax, form_0619f, withholding_expanded, withholding_compensation, withholding_fringe_benefit, date_of_entry, income_tax_type, expense_deduction_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($payload['companies'] as $c) {
                 $stmt->execute([
-                    $c['id'] ?? null,
                     $c['company_name'] ?? 'Unnamed Entity',
                     $c['trade_name'] ?? $c['company_name'] ?? '',
                     $c['entity_type'] ?? 'CORPORATION',
@@ -81,18 +84,19 @@ if ($method === 'POST') {
                     (!empty($c['withholding_expanded']) && $c['withholding_expanded'] !== 'No') ? 'Yes' : 'No',
                     (!empty($c['withholding_compensation']) && $c['withholding_compensation'] !== 'No') ? 'Yes' : 'No',
                     (!empty($c['withholding_fringe_benefit']) && $c['withholding_fringe_benefit'] !== 'No') ? 'Yes' : 'No',
-                    $c['date_of_entry'] ?? date('Y-m-d')
+                    $c['date_of_entry'] ?? date('Y-m-d'),
+                    $c['income_tax_type'] ?? 'GRADUATED',
+                    $c['expense_deduction_type'] ?? 'ITEMIZED'
                 ]);
             }
         }
 
         // Sync Customers
         if (isset($payload['customers']) && is_array($payload['customers'])) {
-            $pdo->exec("TRUNCATE TABLE `Customers`");
-            $stmt = $pdo->prepare("INSERT INTO `Customers` (id, customer_name, trade_name, entity_type, customer_tin, tin_branch_code, customer_address, customer_email, customer_contact, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `Customers`");
+            $stmt = $pdo->prepare("INSERT INTO `Customers` (customer_name, trade_name, entity_type, customer_tin, tin_branch_code, customer_address, customer_email, customer_contact, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($payload['customers'] as $cust) {
                 $stmt->execute([
-                    $cust['id'] ?? null,
                     $cust['customer_name'] ?? $cust['name'] ?? '',
                     $cust['trade_name'] ?? '',
                     $cust['entity_type'] ?? 'CORPORATION',
@@ -108,24 +112,23 @@ if ($method === 'POST') {
 
         // Sync Sales
         if (isset($payload['sales']) && is_array($payload['sales'])) {
-            $pdo->exec("TRUNCATE TABLE `Sales`");
-            $stmt = $pdo->prepare("INSERT INTO `Sales` (id, transaction_date, invoice_no, customer_name, customer_tin, customer_address, description_of_goods_or_services, amount, vat_amount, net_amount, cwt_rate, cwt_amount, sales_terms, amount_due, account_code, account_title, status, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `Sales`");
+            $stmt = $pdo->prepare("INSERT INTO `Sales` (transaction_date, invoice_no, customer_name, customer_tin, customer_address, description_of_goods_or_services, amount, vat_amount, net_amount, cwt_rate, cwt_amount, sales_terms, amount_due, account_code, account_title, status, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($payload['sales'] as $s) {
                 $stmt->execute([
-                    $s['id'] ?? null,
                     $s['transaction_date'] ?? $s['date'] ?? date('Y-m-d'),
                     $s['invoice_no'] ?? $s['invoice_number'] ?? '',
-                    $s['customer_name'] ?? '',
-                    $s['customer_tin'] ?? '',
-                    $s['customer_address'] ?? '',
-                    $s['description_of_goods_or_services'] ?? $s['description'] ?? '',
+                    $s['customer_name'] ?? $s['registered_name'] ?? '',
+                    $s['customer_tin'] ?? $s['tin'] ?? '',
+                    $s['customer_address'] ?? $s['address'] ?? '',
+                    $s['description_of_goods_or_services'] ?? $s['particulars'] ?? $s['description'] ?? '',
                     floatval($s['amount'] ?? $s['gross_amount'] ?? 0),
                     floatval($s['vat_amount'] ?? 0),
-                    floatval($s['net_amount'] ?? 0),
+                    floatval($s['net_amount'] ?? $s['total_amount_net_of_vat'] ?? 0),
                     floatval($s['cwt_rate'] ?? 0),
-                    floatval($s['cwt_amount'] ?? 0),
+                    floatval($s['cwt_amount'] ?? $s['tax_withheld'] ?? 0),
                     $s['sales_terms'] ?? '30 Days',
-                    floatval($s['amount_due'] ?? $s['net_amount'] ?? $s['amount'] ?? 0),
+                    floatval($s['amount_due'] ?? $s['total_amount_due'] ?? $s['net_amount'] ?? $s['amount'] ?? 0),
                     $s['account_code'] ?? '4010',
                     $s['account_title'] ?? 'Service Revenue',
                     $s['status'] ?? 'Open',
@@ -136,18 +139,17 @@ if ($method === 'POST') {
 
         // Sync Collections
         if (isset($payload['collections']) && is_array($payload['collections'])) {
-            $pdo->exec("TRUNCATE TABLE `Collections`");
-            $stmt = $pdo->prepare("INSERT INTO `Collections` (id, collection_date, reference_no, invoice_no, customer_name, customer_tin, amount_collected, cwt_withheld, net_cash_received, payment_method, account_code, account_title, remarks, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `Collections`");
+            $stmt = $pdo->prepare("INSERT INTO `Collections` (collection_date, reference_no, invoice_no, customer_name, customer_tin, amount_collected, cwt_withheld, net_cash_received, payment_method, account_code, account_title, remarks, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($payload['collections'] as $col) {
                 $stmt->execute([
-                    $col['id'] ?? null,
                     $col['collection_date'] ?? $col['date'] ?? date('Y-m-d'),
-                    $col['reference_no'] ?? $col['ref_no'] ?? '',
-                    $col['invoice_no'] ?? '',
-                    $col['customer_name'] ?? '',
-                    $col['customer_tin'] ?? '',
+                    $col['reference_no'] ?? $col['voucher_number'] ?? $col['ref_no'] ?? '',
+                    $col['invoice_no'] ?? $col['invoice_number'] ?? '',
+                    $col['customer_name'] ?? $col['registered_name'] ?? '',
+                    $col['customer_tin'] ?? $col['tin'] ?? '',
                     floatval($col['amount_collected'] ?? $col['gross_amount'] ?? 0),
-                    floatval($col['cwt_withheld'] ?? 0),
+                    floatval($col['cwt_withheld'] ?? $col['amount_withheld_2307'] ?? $col['tax_withheld'] ?? 0),
                     floatval($col['net_cash_received'] ?? $col['amount_collected'] ?? 0),
                     $col['payment_method'] ?? 'Bank Transfer',
                     $col['account_code'] ?? '1010',
@@ -160,11 +162,10 @@ if ($method === 'POST') {
 
         // Sync Service Providers
         if (isset($payload['serviceProviders']) && is_array($payload['serviceProviders'])) {
-            $pdo->exec("TRUNCATE TABLE `Service_Providers`");
-            $stmt = $pdo->prepare("INSERT INTO `Service_Providers` (id, provider_name, trade_name, provider_tin, tin_branch_code, provider_address, vat_type, entity_type, atc_code, ewt_rate, provider_email, provider_contact, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `Service_Providers`");
+            $stmt = $pdo->prepare("INSERT INTO `Service_Providers` (provider_name, trade_name, provider_tin, tin_branch_code, provider_address, vat_type, entity_type, atc_code, ewt_rate, provider_email, provider_contact, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($payload['serviceProviders'] as $sp) {
                 $stmt->execute([
-                    $sp['id'] ?? null,
                     $sp['provider_name'] ?? $sp['name'] ?? '',
                     $sp['trade_name'] ?? '',
                     $sp['provider_tin'] ?? $sp['tin'] ?? '',
@@ -183,23 +184,22 @@ if ($method === 'POST') {
 
         // Sync Expenses
         if (isset($payload['expenses']) && is_array($payload['expenses'])) {
-            $pdo->exec("TRUNCATE TABLE `Expenses`");
-            $stmt = $pdo->prepare("INSERT INTO `Expenses` (id, transaction_date, invoice_no, provider_name, provider_tin, provider_address, description_of_expense, gross_amount, vat_amount, net_amount, ewt_rate, ewt_amount, amount_payable, account_code, account_title, atc_code, status, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `Expenses`");
+            $stmt = $pdo->prepare("INSERT INTO `Expenses` (transaction_date, invoice_no, provider_name, provider_tin, provider_address, description_of_expense, gross_amount, vat_amount, net_amount, ewt_rate, ewt_amount, amount_payable, account_code, account_title, atc_code, status, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($payload['expenses'] as $exp) {
                 $stmt->execute([
-                    $exp['id'] ?? null,
                     $exp['transaction_date'] ?? $exp['date'] ?? date('Y-m-d'),
                     $exp['invoice_no'] ?? $exp['invoice_number'] ?? '',
-                    $exp['provider_name'] ?? $exp['supplier_name'] ?? '',
-                    $exp['provider_tin'] ?? '',
-                    $exp['provider_address'] ?? '',
-                    $exp['description_of_expense'] ?? $exp['description'] ?? '',
+                    $exp['provider_name'] ?? $exp['registered_name'] ?? $exp['supplier_name'] ?? '',
+                    $exp['provider_tin'] ?? $exp['tin'] ?? '',
+                    $exp['provider_address'] ?? $exp['address'] ?? '',
+                    $exp['description_of_expense'] ?? $exp['particulars'] ?? $exp['description'] ?? '',
                     floatval($exp['gross_amount'] ?? $exp['amount'] ?? 0),
                     floatval($exp['vat_amount'] ?? 0),
-                    floatval($exp['net_amount'] ?? 0),
+                    floatval($exp['net_amount'] ?? $exp['total_amount_net_of_vat'] ?? 0),
                     floatval($exp['ewt_rate'] ?? 0),
-                    floatval($exp['ewt_amount'] ?? 0),
-                    floatval($exp['amount_payable'] ?? $exp['gross_amount'] ?? 0),
+                    floatval($exp['ewt_amount'] ?? $exp['tax_withheld'] ?? 0),
+                    floatval($exp['amount_payable'] ?? $exp['total_amount_due'] ?? $exp['gross_amount'] ?? 0),
                     $exp['account_code'] ?? '6010',
                     $exp['account_title'] ?? 'Operating Expenses',
                     $exp['atc_code'] ?? '',
@@ -211,18 +211,17 @@ if ($method === 'POST') {
 
         // Sync Payments
         if (isset($payload['payments']) && is_array($payload['payments'])) {
-            $pdo->exec("TRUNCATE TABLE `Payments`");
-            $stmt = $pdo->prepare("INSERT INTO `Payments` (id, payment_date, voucher_no, invoice_no, provider_name, provider_tin, amount_paid, ewt_deducted, net_cash_disbursed, payment_method, account_code, account_title, remarks, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `Payments`");
+            $stmt = $pdo->prepare("INSERT INTO `Payments` (payment_date, voucher_no, invoice_no, provider_name, provider_tin, amount_paid, ewt_deducted, net_cash_disbursed, payment_method, account_code, account_title, remarks, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($payload['payments'] as $p) {
                 $stmt->execute([
-                    $p['id'] ?? null,
                     $p['payment_date'] ?? $p['date'] ?? date('Y-m-d'),
-                    $p['voucher_no'] ?? $p['ref_no'] ?? '',
-                    $p['invoice_no'] ?? '',
-                    $p['provider_name'] ?? $p['payee'] ?? '',
-                    $p['provider_tin'] ?? '',
+                    $p['voucher_no'] ?? $p['voucher_number'] ?? $p['ref_no'] ?? '',
+                    $p['invoice_no'] ?? $p['invoice_number'] ?? '',
+                    $p['provider_name'] ?? $p['registered_name'] ?? $p['payee'] ?? '',
+                    $p['provider_tin'] ?? $p['tin'] ?? '',
                     floatval($p['amount_paid'] ?? $p['gross_amount'] ?? 0),
-                    floatval($p['ewt_deducted'] ?? 0),
+                    floatval($p['ewt_deducted'] ?? $p['tax_withheld'] ?? $p['withholding_tax_2307'] ?? 0),
                     floatval($p['net_cash_disbursed'] ?? $p['amount_paid'] ?? 0),
                     $p['payment_method'] ?? 'Check / Online Transfer',
                     $p['account_code'] ?? '1010',
@@ -235,33 +234,38 @@ if ($method === 'POST') {
 
         // Sync General Journal
         if (isset($payload['generalJournal']) && is_array($payload['generalJournal'])) {
-            $pdo->exec("TRUNCATE TABLE `General_Journal`");
-            $stmt = $pdo->prepare("INSERT INTO `General_Journal` (id, entry_date, entry_number, reference_no, ref_type, source_module, account_code, account_title, debit, credit, explanation, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `General_Journal`");
+            $stmt = $pdo->prepare("INSERT INTO `General_Journal` (entry_date, entry_number, reference_no, ref_type, source_module, account_code, account_title, debit, credit, explanation, company_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($payload['generalJournal'] as $gj) {
-                $stmt->execute([
-                    $gj['id'] ?? null,
-                    $gj['entry_date'] ?? $gj['date'] ?? date('Y-m-d'),
-                    $gj['entry_number'] ?? $gj['entry_no'] ?? '',
-                    $gj['reference_no'] ?? $gj['ref_no'] ?? '',
-                    $gj['ref_type'] ?? 'General',
-                    $gj['source_module'] ?? 'General Journal',
-                    $gj['account_code'] ?? '1010',
-                    $gj['account_title'] ?? 'Cash and Cash Equivalents',
-                    floatval($gj['debit'] ?? 0),
-                    floatval($gj['credit'] ?? 0),
-                    $gj['explanation'] ?? $gj['description'] ?? '',
-                    $gj['company_name'] ?? ''
-                ]);
+                // App special entries are headers with a `lines` array -> one MySQL row per line
+                $rows = (isset($gj['lines']) && is_array($gj['lines']) && count($gj['lines']) > 0) ? $gj['lines'] : [$gj];
+                foreach ($rows as $ln) {
+                    $isLine = isset($gj['lines']) && is_array($gj['lines']) && count($gj['lines']) > 0;
+                    $amt = floatval($ln['amount'] ?? 0);
+                    $isDebit = $isLine ? (strtolower($ln['type'] ?? '') === 'debit') : false;
+                    $stmt->execute([
+                        $gj['entry_date'] ?? $gj['date'] ?? date('Y-m-d'),
+                        $gj['entry_number'] ?? $gj['entry_no'] ?? $gj['jv_number'] ?? '',
+                        $gj['reference_no'] ?? $gj['voucher_no'] ?? $gj['ref_no'] ?? '',
+                        $gj['ref_type'] ?? $gj['entry_type'] ?? 'General',
+                        $gj['source_module'] ?? 'General Journal',
+                        $ln['account_code'] ?? '1010',
+                        $ln['account_title'] ?? 'Cash and Cash Equivalents',
+                        $isLine ? ($isDebit ? $amt : 0) : floatval($gj['debit'] ?? 0),
+                        $isLine ? ($isDebit ? 0 : $amt) : floatval($gj['credit'] ?? 0),
+                        $gj['explanation'] ?? $gj['description'] ?? '',
+                        $gj['company_name'] ?? ''
+                    ]);
+                }
             }
         }
 
         // Sync Chart of Accounts
         if (isset($payload['chartOfAccounts']) && is_array($payload['chartOfAccounts'])) {
-            $pdo->exec("TRUNCATE TABLE `Chart_of_Accounts`");
-            $stmt = $pdo->prepare("INSERT INTO `Chart_of_Accounts` (id, account_code, account_title, account_category, financial_statement, normal_balance, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $pdo->exec("DELETE FROM `Chart_of_Accounts`");
+            $stmt = $pdo->prepare("INSERT INTO `Chart_of_Accounts` (account_code, account_title, account_category, financial_statement, normal_balance, description) VALUES (?, ?, ?, ?, ?, ?)");
             foreach ($payload['chartOfAccounts'] as $coa) {
                 $stmt->execute([
-                    $coa['id'] ?? null,
                     $coa['account_code'] ?? $coa['code'] ?? '',
                     $coa['account_title'] ?? $coa['title'] ?? '',
                     $coa['account_category'] ?? $coa['category'] ?? 'Current Assets',
@@ -277,8 +281,19 @@ if ($method === 'POST') {
 
         sendJsonResponse(true, null, 'Successfully synchronized all records to InfinityFree MySQL database!');
     } catch (Exception $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
         sendJsonResponse(false, null, 'Database synchronization error: ' . $e->getMessage(), 500);
+    }
+}
+
+/**
+ * Adds a column to a table if it does not exist yet (safe to call on every sync)
+ */
+function ensureColumn($pdo, $table, $column, $definition) {
+    $stmt = $pdo->prepare("SHOW COLUMNS FROM `{$table}` LIKE ?");
+    $stmt->execute([$column]);
+    if (!$stmt->fetch()) {
+        $pdo->exec("ALTER TABLE `{$table}` ADD COLUMN `{$column}` {$definition}");
     }
 }
 

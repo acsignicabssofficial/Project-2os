@@ -170,6 +170,23 @@ export default function SalesTransactionTab({
   // Search filter for open invoices
   const [openSearch, setOpenSearch] = useState('');
 
+  // ---- Matching helpers (name normalisation, company scoping) ----
+  const normName = (v?: string) => (v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const customerNameKeys = (c: Customer) => {
+    const list = [c.registered_name, c.customer_name, c.trade_name].filter(Boolean) as string[];
+    const norms = list.map(normName);
+    const rawLowers = list.map(s => s.trim().toLowerCase());
+    return Array.from(new Set([...norms, ...rawLowers]));
+  };
+  const isActiveCompanyRow = (row: { company_name?: string }) =>
+    !activeCompanyName || !row.company_name || row.company_name.trim().toLowerCase() === activeCompanyName.trim().toLowerCase();
+  const sameInvoiceNo = (a?: string, b?: string) =>
+    (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+  const tin9Of = (c: Customer) =>
+    (c.client_TIN || c.customer_tin || (c as any).tin_number || (c as any).tin || '').replace(/\D/g, '').slice(0, 9);
+  const customerDisplayName = (c: Customer) =>
+    (c.registered_name || c.customer_name || c.trade_name || '').trim();
+
   // Live TIN Conflict Check (Requirement 2)
   const tinMatchCustomer = useMemo(() => {
     const digits = tin.replace(/\D/g, '');
@@ -182,18 +199,21 @@ export default function SalesTransactionTab({
 
   const hasTinNameConflict = useMemo(() => {
     if (!tinMatchCustomer || !customerName.trim()) return false;
-    const registeredName = (tinMatchCustomer.registered_name || tinMatchCustomer.customer_name || tinMatchCustomer.trade_name || '').trim();
-    return registeredName.toLowerCase() !== customerName.trim().toLowerCase();
+    return !customerNameKeys(tinMatchCustomer).includes(normName(customerName));
   }, [tinMatchCustomer, customerName]);
 
   // Auto-fill TIN & Customer details
   const handleSelectCustomer = (custName: string) => {
     setCustomerName(custName);
+    const norm = normName(custName);
+    const rawLower = custName.trim().toLowerCase();
     const found = customers.find(c => 
-      (c.registered_name || c.customer_name || c.trade_name || '').toLowerCase() === custName.toLowerCase()
+      customerNameKeys(c).includes(norm) ||
+      customerNameKeys(c).includes(rawLower) ||
+      (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase() === rawLower
     );
     if (found) {
-      const rawDigits = (found.client_TIN || found.customer_tin || '').replace(/\D/g, '').slice(0, 9);
+      const rawDigits = (found.client_TIN || found.customer_tin || (found as any).tin_number || (found as any).tin || '').replace(/\D/g, '').slice(0, 9);
       const formatted9 = rawDigits.length === 9 ? `${rawDigits.slice(0, 3)}-${rawDigits.slice(3, 6)}-${rawDigits.slice(6, 9)}` : (found.client_TIN || found.customer_tin || '');
       setTin(formatted9);
       setBranchCode((found.customer_branch_code || found.tin_branch_code || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5));
@@ -235,12 +255,8 @@ export default function SalesTransactionTab({
   // Live notification if entered customer name matches an existing customer in Directory > Customers
   const nameMatchedCustomer = useMemo(() => {
     if (!customerName.trim()) return null;
-    const norm = customerName.trim().toLowerCase();
-    return customers.find(c => {
-      if (activeCompanyName && c.company_name && c.company_name !== activeCompanyName) return false;
-      const cName = (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase();
-      return cName === norm;
-    }) || null;
+    const norm = normName(customerName);
+    return customers.find(c => isActiveCompanyRow(c) && customerNameKeys(c).includes(norm)) || null;
   }, [customerName, customers, activeCompanyName]);
 
   // Live Formula Calculations
@@ -260,19 +276,22 @@ export default function SalesTransactionTab({
   const openInvoices = useMemo(() => {
     return subsidiarySales.filter(s => {
       if (s.is_cancelled) return false;
-      if (activeCompanyName && s.company_name && s.company_name !== activeCompanyName) return false;
-      // Calculate how much has been collected across the collections book for this invoice
+      if (activeCompanyName && s.company_name && s.company_name.trim().toLowerCase() !== activeCompanyName.trim().toLowerCase()) return false;
+      // Calculate how much has been settled across the collections book for this invoice (Cash + Discount + CWT 2307)
       const matchingCollections = collections.filter(c => 
         !c.is_cancelled && 
         c.invoice_number && 
-        c.invoice_number.trim().toLowerCase() === s.invoice_number.trim().toLowerCase()
+        isActiveCompanyRow(c) &&
+        sameInvoiceNo(c.invoice_number, s.invoice_number)
       );
       const totalCollected = matchingCollections.reduce((sum, c) => {
         const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : (Number(c.amount) || 0);
-        return sum + cashVal;
+        const discVal = Number(c.discount ?? c.discounts) || 0;
+        const wtaxVal = Number(c.amount_withheld_2307 ?? c.tax_withheld ?? c.wtax_2307) || 0;
+        return sum + cashVal + discVal + wtaxVal;
       }, 0);
       const invoiceDue = Number(s.total_amount_due || s.amount) || 0;
-      const isPaid = (s.status === 'Cash' || s.status === 'Paid') && totalCollected >= invoiceDue - 0.05;
+      const isPaid = (s.status === 'Cash' || s.status === 'Paid') || (invoiceDue > 0 && totalCollected >= invoiceDue - 0.05);
       return !isPaid && (s.status === 'On Account' || s.status === 'Partial' || totalCollected < invoiceDue - 0.05);
     });
   }, [subsidiarySales, collections, activeCompanyName]);
@@ -294,8 +313,10 @@ export default function SalesTransactionTab({
     isVariousCustomer: boolean = false,
     overrideTin9?: string,
     overrideBranch5?: string,
-    overrideAddress?: string
+    overrideAddress?: string,
+    overrideName?: string
   ) => {
+    const effectiveName = (overrideName !== undefined ? overrideName : customerName).trim();
     const effectiveTinStr = overrideTin9 !== undefined ? overrideTin9 : tin;
     const effectiveBranchStr = overrideBranch5 !== undefined ? overrideBranch5 : branchCode;
     const effectiveAddressStr = overrideAddress !== undefined ? overrideAddress : address;
@@ -311,8 +332,12 @@ export default function SalesTransactionTab({
     const fullTin14 = finalIsVarious ? '000-000-000-00000' : `${formattedTin9}-${cleanBranch5}`;
 
     // Requirement 3: Save customer to database if user chose to add new customer
-    if (saveAsCustomer && setCustomers && hasValidTin) {
-      const custNameToSave = (newCustomerPrompt?.customerName || customerName).trim();
+    const alreadyRegistered = customers.find(c => isActiveCompanyRow(c) && tin9Of(c) === rawTinDigits);
+    if (saveAsCustomer && alreadyRegistered) {
+      // Customer with this TIN already exists -> reuse it instead of creating a duplicate entity
+      triggerAlert(`Customer "${customerDisplayName(alreadyRegistered)}" already exists in the Customer Masterlist - transaction routed to the existing record.`, 'info');
+    } else if (saveAsCustomer && setCustomers && hasValidTin) {
+      const custNameToSave = (newCustomerPrompt?.customerName || effectiveName).trim();
       const branchToSave = (newCustomerPrompt?.branchCode || cleanBranch5).replace(/\D/g, '').padStart(5, '0').slice(0, 5);
       const nextIdNum = customers.filter(c => c.company_name === activeCompanyName).length + 1;
       const newCustId = `CUST-${String(nextIdNum).padStart(4, '0')}`;
@@ -360,8 +385,8 @@ export default function SalesTransactionTab({
     const saleRecord: UniformBookRecord = {
       id: commonId,
       company_name: activeCompanyName,
-      registered_name: customerName.trim(),
-      customer_name: customerName.trim(),
+      registered_name: effectiveName,
+      customer_name: effectiveName,
       vat_or_nonvat: vatStatus,
       business_tax_type: businessTaxType,
       tin: fullTin14,
@@ -431,8 +456,8 @@ export default function SalesTransactionTab({
       const cashReceiptRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
-        registered_name: customerName.trim(),
-        customer_name: customerName.trim(),
+        registered_name: effectiveName,
+        customer_name: effectiveName,
         vat_or_nonvat: vatStatus,
         business_tax_type: businessTaxType,
         tin: fullTin14,
@@ -494,8 +519,8 @@ export default function SalesTransactionTab({
       const partialCollectionRecord: UniformBookRecord = {
         id: commonId + 1,
         company_name: activeCompanyName,
-        registered_name: customerName.trim(),
-        customer_name: customerName.trim(),
+        registered_name: effectiveName,
+        customer_name: effectiveName,
         vat_or_nonvat: vatStatus,
         business_tax_type: businessTaxType,
         tin: fullTin14,
@@ -607,56 +632,130 @@ export default function SalesTransactionTab({
     const rawTinDigits = tin.replace(/\D/g, '').slice(0, 9);
     const hasValidTin = rawTinDigits.length === 9 && !/^0+$/.test(rawTinDigits);
 
-    // Check if Customer Name already exists in Registered Customers Directory
-    const existingCustomerByName = customers.find(c => {
-      if (activeCompanyName && c.company_name && c.company_name !== activeCompanyName) return false;
-      const cName = (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase();
-      return cName === customerName.trim().toLowerCase();
-    });
+    // Existing customer (this entity only) matched by ANY name field: registered / customer / trade name
+    const existingCustomerByName = customers.find(
+      c => isActiveCompanyRow(c) && customerNameKeys(c).includes(normName(customerName))
+    );
 
     if (hasValidTin) {
-      const existingCustomerWithTin = customers.find(c => {
-        const cDigits = (c.client_TIN || c.customer_tin || '').replace(/\D/g, '').slice(0, 9);
-        return cDigits.length === 9 && cDigits === rawTinDigits;
-      });
+      const existingCustomerWithTin = customers.find(c => isActiveCompanyRow(c) && tin9Of(c) === rawTinDigits);
 
       if (existingCustomerWithTin) {
-        const registeredName = (existingCustomerWithTin.registered_name || existingCustomerWithTin.customer_name || existingCustomerWithTin.trade_name || '').trim();
-        if (registeredName.toLowerCase() !== customerName.trim().toLowerCase()) {
-          triggerAlert(`Validation Error: TIN "${tin}" already exists and is registered under customer "${registeredName}". The transaction is BLOCKED because entered name "${customerName.trim()}" does not match the registered profile.`, 'error');
-          return;
+        // TIN belongs to an already-registered customer -> ROUTE to that customer instead of blocking.
+        const registeredName = customerDisplayName(existingCustomerWithTin);
+        const onFileBranch = (existingCustomerWithTin.customer_branch_code || existingCustomerWithTin.tin_branch_code || branchCode || '00000')
+          .replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+        const onFileAddress =
+          existingCustomerWithTin.address || existingCustomerWithTin.client_Address || existingCustomerWithTin.customer_address || address;
+        const formattedExisting = `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}`;
+
+        if (!customerNameKeys(existingCustomerWithTin).includes(normName(customerName))) {
+          triggerAlert(`TIN ${formattedExisting} belongs to existing customer "${registeredName}". Transaction was routed to that customer record.`, 'info');
         }
-      } else {
-        // Customer has valid 9-digit TIN but is NOT registered in database -> ask if user wants to add to regular customers
-        const formattedTin9 = `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}`;
-        const cleanBranch5 = (branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
-        setNewCustomerPrompt({
-          isOpen: true,
-          customerName: customerName.trim(),
-          tin: formattedTin9,
-          branchCode: cleanBranch5,
-          address: address.trim(),
-          taxType: vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'
-        });
-        return;
-      }
-    } else {
-      // NO VALID TIN ENTERED:
-      // 1. If Customer Name matches an existing customer in Directory > Customers (e.g., "def"),
-      // ask user if this is the same customer. If Yes -> ask for TIN to confirm; if No -> record as Various Customer!
-      if (existingCustomerByName) {
-        setExistingCustomerMatchPrompt({
-          isOpen: true,
-          matchedCustomer: existingCustomerByName,
-          step: 'ask_same',
-          verifyTinInput: '',
-          verifyBranchInput: existingCustomerByName.customer_branch_code || existingCustomerByName.tin_branch_code || '00000',
-          errorText: undefined
-        });
+        setCustomerName(registeredName);
+        setTin(formattedExisting);
+        setBranchCode(onFileBranch);
+        if (!address && onFileAddress) setAddress(onFileAddress);
+        executeRecordSale(false, false, formattedExisting, onFileBranch, onFileAddress, registeredName);
         return;
       }
 
-      // 2. If Customer Name does NOT exist in directory and has no TIN, offer to register as Regular Customer (with TIN) or proceed as Various Customer
+      // Valid TIN, but not in the directory yet.
+      const formattedTin9 = `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}`;
+      const cleanBranch5 = (branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+
+      if (existingCustomerByName) {
+        const onFileTin9 = tin9Of(existingCustomerByName);
+        if (onFileTin9.length === 9 && onFileTin9 === rawTinDigits) {
+          // Exactly matches on-file TIN -> route directly
+          const registeredName = customerDisplayName(existingCustomerByName);
+          const onFileBranch = (existingCustomerByName.customer_branch_code || existingCustomerByName.tin_branch_code || cleanBranch5).replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+          const onFileAddress = existingCustomerByName.address || existingCustomerByName.client_Address || address;
+          executeRecordSale(false, false, formattedTin9, onFileBranch, onFileAddress, registeredName);
+          return;
+        }
+
+        if (onFileTin9.length === 9 && onFileTin9 !== rawTinDigits) {
+          // Name matches an existing customer, but entered TIN is different -> open routing modal with 1-click options
+          setExistingCustomerMatchPrompt({
+            isOpen: true,
+            matchedCustomer: existingCustomerByName,
+            step: 'ask_same',
+            verifyTinInput: formattedTin9,
+            verifyBranchInput: cleanBranch5,
+            errorText: undefined
+          });
+          return;
+        }
+
+        // Registered customer has NO TIN on file yet -> attach this TIN to the existing entity (no duplicate)
+        if (setCustomers) {
+          setCustomers(prev =>
+            prev.map(c =>
+              c.id === existingCustomerByName.id
+                ? {
+                    ...c,
+                    client_TIN: formattedTin9,
+                    customer_tin: formattedTin9,
+                    tin_number: formattedTin9,
+                    customer_branch_code: cleanBranch5,
+                    tin_branch_code: cleanBranch5
+                  }
+                : c
+            )
+          );
+        }
+        triggerAlert(`TIN ${formattedTin9} saved to existing customer "${customerDisplayName(existingCustomerByName)}".`, 'success');
+        executeRecordSale(false, false, formattedTin9, cleanBranch5, address, customerDisplayName(existingCustomerByName));
+        return;
+      }
+
+      // Brand-new customer with a valid TIN -> ask if user wants to add to regular customers
+      setNewCustomerPrompt({
+        isOpen: true,
+        customerName: customerName.trim(),
+        tin: formattedTin9,
+        branchCode: cleanBranch5,
+        address: address.trim(),
+        taxType: vatStatus === 'VAT' ? 'VAT' : 'Non-VAT'
+      });
+      return;
+    } else {
+      // NO VALID TIN ENTERED (user entered name manually or blank TIN):
+      // 1. Name matches an existing customer -> AUTOMATICALLY ROUTE to the customer record!
+      if (existingCustomerByName) {
+        const onFileTin9 = tin9Of(existingCustomerByName);
+        const registeredName = customerDisplayName(existingCustomerByName);
+        const onFileBranch = (existingCustomerByName.customer_branch_code || existingCustomerByName.tin_branch_code || branchCode || '00000')
+          .replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+        const onFileAddress =
+          existingCustomerByName.address || existingCustomerByName.client_Address || existingCustomerByName.customer_address || address;
+
+        if (onFileTin9.length === 9) {
+          // Customer has registered TIN on file -> Auto-route directly without blocking!
+          const formattedOnFile = `${onFileTin9.slice(0, 3)}-${onFileTin9.slice(3, 6)}-${onFileTin9.slice(6, 9)}`;
+          setCustomerName(registeredName);
+          setTin(formattedOnFile);
+          setBranchCode(onFileBranch);
+          if (!address && onFileAddress) setAddress(onFileAddress);
+          triggerAlert(`Transaction automatically routed to existing registered customer "${registeredName}" (TIN: ${formattedOnFile}).`, 'info');
+          executeRecordSale(false, false, formattedOnFile, onFileBranch, onFileAddress, registeredName);
+          return;
+        } else {
+          // Customer exists in masterlist but has no TIN on file -> prompt 1-click confirmation
+          setExistingCustomerMatchPrompt({
+            isOpen: true,
+            matchedCustomer: existingCustomerByName,
+            step: 'ask_same',
+            verifyTinInput: '',
+            verifyBranchInput: onFileBranch,
+            errorText: undefined
+          });
+          return;
+        }
+      }
+
+      // 2. Unknown name and no TIN -> offer to register as Regular Customer (with TIN) or Various Customer
       setNewCustomerPrompt({
         isOpen: true,
         customerName: customerName.trim(),
@@ -667,9 +766,6 @@ export default function SalesTransactionTab({
       });
       return;
     }
-
-    // If customer already registered and TIN matches, proceed directly:
-    executeRecordSale(false, false);
   };
 
   // EXECUTE COLLECTION ON AN OPEN INVOICE
@@ -694,7 +790,8 @@ export default function SalesTransactionTab({
     const existingMatching = collections.filter(c => 
       !c.is_cancelled && 
       c.invoice_number && 
-      c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase()
+      isActiveCompanyRow(c) &&
+      sameInvoiceNo(c.invoice_number, inv.invoice_number)
     );
 
     const prevCashCollected = existingMatching.reduce((sum, c) => {
@@ -780,14 +877,14 @@ export default function SalesTransactionTab({
     setCollections(prev => {
       // Remove any 0-amount "On Account" placeholder row for this invoice, keep all actual payment rows intact with their original amounts, and add the new payment row
       const withoutZeroPlaceholder = prev.filter(c => {
-        const isSameInv = !c.is_cancelled && c.invoice_number && c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase();
+        const isSameInv = !c.is_cancelled && c.invoice_number && isActiveCompanyRow(c) && sameInvoiceNo(c.invoice_number, inv.invoice_number);
         if (!isSameInv) return true;
         const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
         return cashVal > 0;
       });
       // Update status on sibling rows of the same invoice if now Paid, while strictly preserving each row's individual amount_collected!
       const updatedSiblings = withoutZeroPlaceholder.map(c => {
-        const isSameInv = !c.is_cancelled && c.invoice_number && c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase();
+        const isSameInv = !c.is_cancelled && c.invoice_number && isActiveCompanyRow(c) && sameInvoiceNo(c.invoice_number, inv.invoice_number);
         if (isSameInv && isNowFullyCollected) {
           return { ...c, status: 'Paid' as const };
         }
@@ -796,12 +893,15 @@ export default function SalesTransactionTab({
       return [newCollectionRec, ...updatedSiblings];
     });
 
-    // 2. Update status in Subsidiary Sales (6.2: status "Paid" when full payment is completed)
+    // 2. Update status and pending balance in Subsidiary Sales (6.2: status "Paid" when full payment is completed)
     setSubsidiarySales(prev => prev.map(s => {
-      if (s.invoice_number === inv.invoice_number) {
+      if (sameInvoiceNo(s.invoice_number, inv.invoice_number) && isActiveCompanyRow(s)) {
         return {
           ...s,
-          status: isNowFullyCollected ? 'Paid' : 'Partial'
+          status: isNowFullyCollected ? 'Paid' : 'Partial',
+          sales_status: isNowFullyCollected ? 'Paid' : 'Partial',
+          amount_collected: newTotalCashCollected,
+          pending_balance: isNowFullyCollected ? 0 : pendingBal
         };
       }
       return s;
@@ -826,7 +926,7 @@ export default function SalesTransactionTab({
         particulars: `Full Settlement Completed via Collections Book: Invoice #${inv.invoice_number} (${inv.registered_name})`
       };
       setCashReceipts(prev => {
-        const filtered = prev.filter(cr => cr.invoice_number.trim().toLowerCase() !== inv.invoice_number.trim().toLowerCase());
+        const filtered = prev.filter(cr => !(isActiveCompanyRow(cr) && sameInvoiceNo(cr.invoice_number, inv.invoice_number)));
         return [fullCashReceipt, ...filtered];
       });
 
@@ -1665,7 +1765,8 @@ export default function SalesTransactionTab({
                     const matchingColls = collections.filter(c => 
                       !c.is_cancelled && 
                       c.invoice_number && 
-                      c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase()
+                      isActiveCompanyRow(c) &&
+                      sameInvoiceNo(c.invoice_number, inv.invoice_number)
                     );
                     const collectedSoFar = matchingColls.reduce((sum, c) => {
                       const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
@@ -1734,8 +1835,8 @@ export default function SalesTransactionTab({
                                   onDeleteRecord('subsidiary_sales', inv);
                                 } else {
                                   setSubsidiarySales(prev => prev.filter(s => s.id !== inv.id));
-                                  setCollections(prev => prev.filter(c => !(c.invoice_number && c.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase())));
-                                  setCashReceipts(prev => prev.filter(cr => !(cr.invoice_number && cr.invoice_number.trim().toLowerCase() === inv.invoice_number.trim().toLowerCase())));
+                                  setCollections(prev => prev.filter(c => !(c.invoice_number && isActiveCompanyRow(c) && sameInvoiceNo(c.invoice_number, inv.invoice_number))));
+                                  setCashReceipts(prev => prev.filter(cr => !(cr.invoice_number && isActiveCompanyRow(cr) && sameInvoiceNo(cr.invoice_number, inv.invoice_number))));
                                   triggerAlert(`Deleted sale transaction Invoice #${inv.invoice_number} and all related collections.`, 'info');
                                 }
                               }}
@@ -1762,7 +1863,8 @@ export default function SalesTransactionTab({
         const matchingCollsModal = collections.filter(c =>
           !c.is_cancelled &&
           c.invoice_number &&
-          c.invoice_number.trim().toLowerCase() === selectedInvoiceToCollect.invoice_number.trim().toLowerCase() &&
+          isActiveCompanyRow(c) &&
+          sameInvoiceNo(c.invoice_number, selectedInvoiceToCollect.invoice_number) &&
           (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0
         );
         const collectedSoFarModal = matchingCollsModal.reduce((sum, c) => sum + (Number(c.amount_collected) || 0) + (Number(c.discount) || 0), 0);
@@ -2107,17 +2209,32 @@ export default function SalesTransactionTab({
                     type="button"
                     onClick={() => {
                       const enteredDigits = existingCustomerMatchPrompt.verifyTinInput.replace(/\D/g, '').slice(0, 9);
-                      const expectedDigits = (
-                        existingCustomerMatchPrompt.matchedCustomer.customer_tin ||
-                        existingCustomerMatchPrompt.matchedCustomer.client_TIN ||
-                        ''
-                      ).replace(/\D/g, '').slice(0, 9);
+                      const expectedDigits = tin9Of(existingCustomerMatchPrompt.matchedCustomer);
 
                       if (enteredDigits.length !== 9) {
                         setExistingCustomerMatchPrompt({
                           ...existingCustomerMatchPrompt,
                           errorText: 'Please enter the 9-digit TIN to confirm.'
                         });
+                        return;
+                      }
+
+                      const matchedCust = existingCustomerMatchPrompt.matchedCustomer;
+                      if (expectedDigits.length !== 9 && setCustomers) {
+                        // Registered customer has no usable TIN on file: adopt the entered TIN (and keep the same entity)
+                        const fmtNew = `${enteredDigits.slice(0, 3)}-${enteredDigits.slice(3, 6)}-${enteredDigits.slice(6, 9)}`;
+                        const brNew = (existingCustomerMatchPrompt.verifyBranchInput || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+                        setCustomers(prev => prev.map(c => c.id === matchedCust.id ? {
+                          ...c,
+                          client_TIN: fmtNew,
+                          customer_tin: fmtNew,
+                          tin_number: fmtNew,
+                          customer_branch_code: brNew,
+                          tin_branch_code: brNew
+                        } : c));
+                        setTin(fmtNew);
+                        setBranchCode(brNew);
+                        executeRecordSale(false, false, fmtNew, brNew, matchedCust.customer_address || matchedCust.client_Address || matchedCust.address || address, customerDisplayName(matchedCust));
                         return;
                       }
 
@@ -2135,7 +2252,7 @@ export default function SalesTransactionTab({
                       setTin(fmt9);
                       setBranchCode(br5);
                       if (!address && matchedAddr) setAddress(matchedAddr);
-                      executeRecordSale(false, false, fmt9, br5, matchedAddr);
+                      executeRecordSale(false, false, fmt9, br5, matchedAddr, customerDisplayName(existingCustomerMatchPrompt.matchedCustomer));
                     }}
                     className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-white bg-emerald-600 hover:bg-emerald-500 transition shadow-sm cursor-pointer"
                   >
@@ -2278,7 +2395,7 @@ export default function SalesTransactionTab({
                   const br5 = (newCustomerPrompt.branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
                   setTin(fmt9);
                   setBranchCode(br5);
-                  executeRecordSale(true, false, fmt9, br5, newCustomerPrompt.address);
+                  executeRecordSale(true, false, fmt9, br5, newCustomerPrompt.address, newCustomerPrompt.customerName);
                 }}
                 className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-white bg-cyan-600 hover:bg-cyan-500 transition shadow-sm cursor-pointer"
               >

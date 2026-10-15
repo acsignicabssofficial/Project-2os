@@ -66,6 +66,14 @@ export default function PurchaseTransactionTab({
   onDeleteRecord
 }: PurchaseTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
+  // Company-scoped, blank-safe matching between a payable (voucher / invoice) and its Payments Book rows
+  const normKey = (v?: string) => (v || '').trim().toLowerCase();
+  const isActiveCompanyRow = (r: { company_name?: string }) =>
+    !activeCompanyName || !r.company_name || r.company_name === activeCompanyName;
+  const paymentMatches = (pm: any, rec: any) =>
+    isActiveCompanyRow(pm) &&
+    ((normKey(pm.voucher_number) !== '' && normKey(pm.voucher_number) === normKey(rec.voucher_number)) ||
+      (normKey(pm.invoice_number) !== '' && normKey(pm.invoice_number) === normKey(rec.invoice_number)));
 
   // Compute next sequential Voucher Number: VOUCHER#[YEAR]-0000001
   const computeNextVoucherNumber = (records: UniformBookRecord[]) => {
@@ -258,8 +266,7 @@ export default function PurchaseTransactionTab({
       // Calculate how much has been paid across the payments book for this voucher/purchase
       const matchingPayments = payments.filter(pm => 
         !pm.is_cancelled && 
-        ((pm.voucher_number && p.voucher_number && pm.voucher_number.trim().toLowerCase() === p.voucher_number.trim().toLowerCase()) ||
-         (pm.invoice_number && p.invoice_number && pm.invoice_number.trim().toLowerCase() === p.invoice_number.trim().toLowerCase()))
+        paymentMatches(pm, p)
       );
       const totalPaid = matchingPayments.reduce((sum, pm) => sum + (Number(pm.amount_paid || pm.amount) || 0), 0);
       const purchaseDue = Number(p.total_amount_due || p.amount) || 0;
@@ -596,8 +603,7 @@ export default function PurchaseTransactionTab({
     // Find existing Payments Book records for this voucher
     const existingMatching = payments.filter(pm => 
       !pm.is_cancelled && 
-      ((pm.voucher_number && payRec.voucher_number && pm.voucher_number.trim().toLowerCase() === payRec.voucher_number.trim().toLowerCase()) ||
-       (pm.invoice_number && payRec.invoice_number && pm.invoice_number.trim().toLowerCase() === payRec.invoice_number.trim().toLowerCase()))
+      paymentMatches(pm, payRec)
     );
     const prevPaid = existingMatching.reduce((sum, pm) => sum + (Number(pm.amount_paid) || 0), 0);
     const newTotalPaid = Math.round((prevPaid + paymentAmt) * 100) / 100;
@@ -697,7 +703,7 @@ export default function PurchaseTransactionTab({
 
     // 2. Update status in Subsidiary Purchases
     setSubsidiaryPurchases(prev => prev.map(p => {
-      if (p.voucher_number === payRec.voucher_number) {
+      if (p.id === payRec.id || (p.voucher_number === payRec.voucher_number && isActiveCompanyRow(p))) {
         return {
           ...p,
           status: isNowFullyPaid ? 'Paid' : 'Partial',
@@ -1468,8 +1474,7 @@ export default function PurchaseTransactionTab({
                     const pDue = Number(p.total_amount_due || p.amount) || 0;
                     const matchingPmts = payments.filter(pm => 
                       !pm.is_cancelled && 
-                      ((pm.voucher_number && p.voucher_number && pm.voucher_number.trim().toLowerCase() === p.voucher_number.trim().toLowerCase()) ||
-                       (pm.invoice_number && p.invoice_number && pm.invoice_number.trim().toLowerCase() === p.invoice_number.trim().toLowerCase()))
+                      paymentMatches(pm, p)
                     );
                     const paidSoFar = matchingPmts.reduce((sum, pm) => sum + (Number(pm.amount_paid || pm.amount) || 0), 0);
                     const balance = Math.max(0, pDue - paidSoFar);
@@ -1537,8 +1542,8 @@ export default function PurchaseTransactionTab({
                                   onDeleteRecord('subsidiary_purchases', p);
                                 } else {
                                   setSubsidiaryPurchases(prev => prev.filter(item => item.id !== p.id));
-                                  setPayments(prev => prev.filter(pm => !(pm.voucher_number === p.voucher_number || pm.invoice_number === p.invoice_number)));
-                                  setCashDisbursements(prev => prev.filter(cd => !(cd.voucher_number === p.voucher_number || cd.invoice_number === p.invoice_number)));
+                                  setPayments(prev => prev.filter(pm => !paymentMatches(pm, p)));
+                                  setCashDisbursements(prev => prev.filter(cd => !paymentMatches(cd, p)));
                                   triggerAlert(`Deleted purchase voucher #${p.voucher_number} and all related disbursements.`, 'info');
                                 }
                               }}

@@ -392,9 +392,9 @@ function mapCollectionToUniform(c: any): UniformBookRecord {
   const vat = safeNum(c.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
   const withheld = safeNum(c.tax_withheld) || safeNum(c.amount_withheld_2307);
   const discount = safeNum(c.discount);
-  const totalDue = safeNum(c.total_amount_due) || (amount - discount);
-  const collected = c.amount_collected !== undefined ? safeNum(c.amount_collected) : Math.max(0, totalDue - withheld);
-  const pending = c.pending_balance !== undefined ? safeNum(c.pending_balance) : Math.max(0, Math.round((totalDue - withheld - collected) * 100) / 100);
+  const totalDue = safeNum(c.total_amount_due) || Math.max(0, Math.round((amount - discount - withheld) * 100) / 100);
+  const collected = c.amount_collected !== undefined ? safeNum(c.amount_collected) : totalDue;
+  const pending = c.pending_balance !== undefined ? safeNum(c.pending_balance) : Math.max(0, Math.round((totalDue - collected) * 100) / 100);
 
   return {
     id: c.id || Date.now(),
@@ -439,9 +439,9 @@ function mapPaymentToUniform(p: any): UniformBookRecord {
   const vat = safeNum(p.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
   const withheld = safeNum(p.tax_withheld) || safeNum(p.withholding_tax_2307);
   const discount = safeNum(p.discount);
-  const totalDue = safeNum(p.total_amount_due) || (amount - discount);
-  const paid = p.amount_paid !== undefined ? safeNum(p.amount_paid) : Math.max(0, totalDue - withheld);
-  const pending = p.pending_balance !== undefined ? safeNum(p.pending_balance) : Math.max(0, Math.round((totalDue - withheld - paid) * 100) / 100);
+  const totalDue = safeNum(p.total_amount_due) || Math.max(0, Math.round((amount - discount - withheld) * 100) / 100);
+  const paid = p.amount_paid !== undefined ? safeNum(p.amount_paid) : totalDue;
+  const pending = p.pending_balance !== undefined ? safeNum(p.pending_balance) : Math.max(0, Math.round((totalDue - paid) * 100) / 100);
 
   return {
     id: p.id || Date.now(),
@@ -605,14 +605,17 @@ export default function App() {
           (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0
         );
 
-        const totalRemainingCollected = remainingForInvoice.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+        const totalRemainingCollected = remainingForInvoice.reduce((sum, c) => {
+          const cash = Number(c.amount_collected) || 0;
+          const disc = Number(c.discount ?? c.discounts) || 0;
+          const wtax = Number(c.amount_withheld_2307 ?? c.tax_withheld) || 0;
+          return sum + cash + disc + wtax;
+        }, 0);
 
         // Update Subsidiary Sales status and type_of_transaction
         handleUpdateSubsidiarySales(prev => prev.map(s => {
           if (s.company_name === recComp && normalizeDocNo(s.invoice_number) === invNorm) {
-            const totalDue = Number(s.total_amount_due || s.amount) || 0;
-            const wtax = Number(s.tax_withheld || s.withholding_2307) || 0;
-            const netTarget = Math.max(0, Math.round((totalDue - wtax) * 100) / 100);
+            const netTarget = Number(s.total_amount_due || (Number(s.total_amount_vat_inclusive || s.amount || 0) - Number(s.discount ?? s.less_discount ?? 0) - Number(s.tax_withheld || s.withholding_2307 || 0))) || 0;
             const isStillPaid = totalRemainingCollected >= netTarget - 0.05 && netTarget > 0;
             const nextStatus: 'Paid' | 'Partial' | 'On Account' = isStillPaid
               ? 'Paid'
@@ -688,13 +691,16 @@ export default function App() {
           normalizeDocNo(c.invoice_number) === invNorm &&
           (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0
         );
-        const totalRemainingCollected = activeRemainingForInv.reduce((sum, c) => sum + (Number(c.amount_collected) || 0), 0);
+        const totalRemainingCollected = activeRemainingForInv.reduce((sum, c) => {
+          const cash = Number(c.amount_collected) || 0;
+          const disc = Number(c.discount ?? c.discounts) || 0;
+          const wtax = Number(c.amount_withheld_2307 ?? c.tax_withheld) || 0;
+          return sum + cash + disc + wtax;
+        }, 0);
 
         handleUpdateSubsidiarySales(prev => prev.map(s => {
           if (s.company_name === recComp && normalizeDocNo(s.invoice_number) === invNorm) {
-            const totalDue = Number(s.total_amount_due || s.amount) || 0;
-            const wtax = Number(s.tax_withheld || s.withholding_2307) || 0;
-            const netTarget = Math.max(0, Math.round((totalDue - wtax) * 100) / 100);
+            const netTarget = Number(s.total_amount_due || (Number(s.total_amount_vat_inclusive || s.amount || 0) - Number(s.discount ?? s.less_discount ?? 0) - Number(s.tax_withheld || s.withholding_2307 || 0))) || 0;
             const nextStatus: 'Paid' | 'Partial' | 'On Account' = totalRemainingCollected > 0 ? 'Partial' : 'On Account';
             const nextPending = Math.max(0, Math.round((netTarget - totalRemainingCollected) * 100) / 100);
             return {
@@ -777,13 +783,16 @@ export default function App() {
         matchPurchase(p) &&
         (p.amount_paid !== undefined ? Number(p.amount_paid) : 0) > 0
       );
-      const totalRemainingPaid = remainingForVoucher.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+      const totalRemainingPaid = remainingForVoucher.reduce((sum, p) => {
+        const cash = Number(p.amount_paid) || 0;
+        const disc = Number(p.discount ?? p.discounts ?? p.less_discount) || 0;
+        const wtax = Number(p.tax_withheld ?? p.withholding_2307_2306) || 0;
+        return sum + cash + disc + wtax;
+      }, 0);
 
       handleUpdateSubsidiaryPurchases(prev => prev.map(pur => {
         if (matchPurchase(pur)) {
-          const totalDue = Number(pur.total_amount_due || pur.amount) || 0;
-          const wtax = Number(pur.tax_withheld || pur.withholding_2307_2306) || 0;
-          const netTarget = Math.max(0, Math.round((totalDue - wtax) * 100) / 100);
+          const netTarget = Number(pur.total_amount_due || (Number(pur.total_amount_vat_inclusive || pur.amount || 0) - Number(pur.discount ?? pur.less_discount ?? 0) - Number(pur.tax_withheld || pur.withholding_2307_2306 || 0))) || 0;
           const isStillPaid = totalRemainingPaid >= netTarget - 0.05 && netTarget > 0;
           const nextStatus: 'Paid' | 'Partial' | 'On Account' = isStillPaid
             ? 'Paid'
@@ -848,13 +857,16 @@ export default function App() {
         matchPurchase(p) &&
         (p.amount_paid !== undefined ? Number(p.amount_paid) : 0) > 0
       );
-      const totalRemainingPaid = activeRemainingForVoucher.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+      const totalRemainingPaid = activeRemainingForVoucher.reduce((sum, p) => {
+        const cash = Number(p.amount_paid) || 0;
+        const disc = Number(p.discount ?? p.discounts ?? p.less_discount) || 0;
+        const wtax = Number(p.tax_withheld ?? p.withholding_2307_2306) || 0;
+        return sum + cash + disc + wtax;
+      }, 0);
 
       handleUpdateSubsidiaryPurchases(prev => prev.map(pur => {
         if (matchPurchase(pur)) {
-          const totalDue = Number(pur.total_amount_due || pur.amount) || 0;
-          const wtax = Number(pur.tax_withheld || pur.withholding_2307_2306) || 0;
-          const netTarget = Math.max(0, Math.round((totalDue - wtax) * 100) / 100);
+          const netTarget = Number(pur.total_amount_due || (Number(pur.total_amount_vat_inclusive || pur.amount || 0) - Number(pur.discount ?? pur.less_discount ?? 0) - Number(pur.tax_withheld || pur.withholding_2307_2306 || 0))) || 0;
           const nextStatus: 'Paid' | 'Partial' | 'On Account' = totalRemainingPaid > 0 ? 'Partial' : 'On Account';
           const nextPending = Math.max(0, Math.round((netTarget - totalRemainingPaid) * 100) / 100);
           return {

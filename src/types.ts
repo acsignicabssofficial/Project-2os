@@ -43,6 +43,9 @@ export interface Company {
   withholding_compensation?: boolean | string;
   withholding_fringe_benefit?: boolean | string;
   withholding_final_comp?: boolean | string;
+  // Income tax options (individuals: sole proprietor / professional only)
+  income_tax_type?: 'GRADUATED' | 'EIGHT_PERCENT' | string;
+  expense_deduction_type?: 'ITEMIZED' | 'OSD_40' | string;
   service_bookkeeping?: boolean | string;
   service_tax_filing?: boolean | string;
   service_bir_attachments?: boolean | string;

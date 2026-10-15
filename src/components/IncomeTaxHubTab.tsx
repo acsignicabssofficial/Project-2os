@@ -110,6 +110,14 @@ export default function IncomeTaxHubTab({
   const [deduction1702, setDeduction1702] = useState<'ITEMIZED' | 'OSD_40'>('ITEMIZED');
   const [quarterlyPayments1702, setQuarterlyPayments1702] = useState<number>(0);
 
+  // Default regime / deduction method from the entity's registration (Entity > BIR tab)
+  React.useEffect(() => {
+    const ded = activeCompany?.expense_deduction_type === 'OSD_40' ? 'OSD_40' : 'ITEMIZED';
+    setRegime1701(isIndividual && activeCompany?.income_tax_type === 'EIGHT_PERCENT' ? 'EIGHT_PERCENT' : 'GRADUATED');
+    setDeduction1701(ded);
+    setDeduction1702(ded);
+  }, [activeCompany?.id, activeCompany?.income_tax_type, activeCompany?.expense_deduction_type, isIndividual]);
+
   // 1702EX Exempted Non-Individual State
   const [exemptionBasis, setExemptionBasis] = useState<string>('Sec. 30(E) - Non-stock, Non-profit Charitable Organization');
   const [rulingNumber, setRulingNumber] = useState<string>('BIR-RULING-2024-089');

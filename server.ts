@@ -792,7 +792,21 @@ export function createEntityDirectoryTree(companyName: string, branchCode?: stri
   return createdPaths;
 }
 
-function saveLedgerToSqlite(data: any) {
+// Binds values safely: sql.js throws on `undefined` / NaN, which used to abort the save
+// halfway and leave the transaction open (every later save then failed silently).
+function prepSafe(sql: string) {
+  const st: any = db.prepare(sql);
+  const rawRun = st.run.bind(st);
+  st.run = (vals?: any[]) =>
+    rawRun(
+      Array.isArray(vals)
+        ? vals.map(v => (v === undefined || (typeof v === "number" && !Number.isFinite(v)) ? null : (typeof v === "boolean" ? (v ? 1 : 0) : v)))
+        : vals
+    );
+  return st;
+}
+
+function saveLedgerToSqliteUnsafe(data: any) {
   db.run("BEGIN TRANSACTION;");
 
   // Clear existing rows
@@ -807,7 +821,7 @@ function saveLedgerToSqlite(data: any) {
 
   // 1. Companies
   if (Array.isArray(data.companies)) {
-    const stmt = db.prepare(`INSERT INTO companies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO companies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.companies.forEach((c: any) => {
       const isVat = c.is_vat_registered !== undefined ? Boolean(c.is_vat_registered) : (c.vat_or_non_vat !== "NON-VAT" && c.vat_or_non_vat !== "EXEMPT");
       stmt.run([
@@ -835,7 +849,7 @@ function saveLedgerToSqlite(data: any) {
 
   // 2. Customers
   if (Array.isArray(data.customers)) {
-    const stmt = db.prepare(`INSERT INTO customers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO customers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.customers.forEach((c: any) => {
       stmt.run([
         c.id,
@@ -854,7 +868,7 @@ function saveLedgerToSqlite(data: any) {
 
   // 3. Contractors
   if (Array.isArray(data.contractors)) {
-    const stmt = db.prepare(`INSERT INTO contractors VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO contractors VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.contractors.forEach((c: any) => {
       stmt.run([
         c.id,
@@ -875,7 +889,7 @@ function saveLedgerToSqlite(data: any) {
   // 4. Subsidiary Sales (Uniform Table)
   const salesList = Array.isArray(data.subsidiarySales) ? data.subsidiarySales : (Array.isArray(data.sales) ? data.sales : []);
   if (salesList.length > 0) {
-    const stmt = db.prepare(`INSERT INTO subsidiary_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO subsidiary_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     salesList.forEach((s: any) => {
       stmt.run([
         s.id,
@@ -911,7 +925,7 @@ function saveLedgerToSqlite(data: any) {
 
   // Also populate legacy sales table for backwards compatibility
   if (salesList.length > 0) {
-    const stmt = db.prepare(`INSERT INTO sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     salesList.forEach((s: any) => {
       stmt.run([
         s.id,
@@ -937,7 +951,7 @@ function saveLedgerToSqlite(data: any) {
   // 5. Subsidiary Purchases (Uniform Table)
   const purchasesList = Array.isArray(data.subsidiaryPurchases) ? data.subsidiaryPurchases : (Array.isArray(data.expenses) ? data.expenses : []);
   if (purchasesList.length > 0) {
-    const stmt = db.prepare(`INSERT INTO subsidiary_purchases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO subsidiary_purchases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     purchasesList.forEach((e: any) => {
       stmt.run([
         e.id,
@@ -973,7 +987,7 @@ function saveLedgerToSqlite(data: any) {
 
   // Also populate legacy expenses table for backwards compatibility
   if (purchasesList.length > 0) {
-    const stmt = db.prepare(`INSERT INTO expenses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO expenses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     purchasesList.forEach((e: any) => {
       stmt.run([
         e.id,
@@ -999,7 +1013,7 @@ function saveLedgerToSqlite(data: any) {
   // 6. Cash Receipts (Uniform Table)
   const receiptsList = Array.isArray(data.cashReceipts) ? data.cashReceipts : (Array.isArray(data.collections) ? data.collections : []);
   if (receiptsList.length > 0) {
-    const stmt = db.prepare(`INSERT INTO cash_receipts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO cash_receipts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     receiptsList.forEach((c: any) => {
       stmt.run([
         c.id,
@@ -1035,7 +1049,7 @@ function saveLedgerToSqlite(data: any) {
 
   // Also populate legacy collections table
   if (receiptsList.length > 0) {
-    const stmt = db.prepare(`INSERT INTO collections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO collections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     receiptsList.forEach((c: any) => {
       stmt.run([
         c.id,
@@ -1057,7 +1071,7 @@ function saveLedgerToSqlite(data: any) {
   // 7. Cash Disbursements (Uniform Table)
   const disbList = Array.isArray(data.cashDisbursements) ? data.cashDisbursements : (Array.isArray(data.payments) ? data.payments : []);
   if (disbList.length > 0) {
-    const stmt = db.prepare(`INSERT INTO cash_disbursements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO cash_disbursements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     disbList.forEach((p: any) => {
       stmt.run([
         p.id,
@@ -1093,7 +1107,7 @@ function saveLedgerToSqlite(data: any) {
 
   // Also populate legacy payments table
   if (disbList.length > 0) {
-    const stmt = db.prepare(`INSERT INTO payments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO payments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     disbList.forEach((p: any) => {
       stmt.run([
         p.id,
@@ -1114,7 +1128,7 @@ function saveLedgerToSqlite(data: any) {
 
   // 8. PPE Assets
   if (Array.isArray(data.ppeAssets)) {
-    const stmt = db.prepare(`INSERT INTO ppe_assets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO ppe_assets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.ppeAssets.forEach((p: any) => {
       stmt.run([
         p.id, p.company_name, p.asset_code, p.asset_name, p.category, p.acquisition_date,
@@ -1127,7 +1141,7 @@ function saveLedgerToSqlite(data: any) {
 
   // 9. Account Titles
   if (Array.isArray(data.accountTitles)) {
-    const stmt = db.prepare(`INSERT INTO account_titles VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO account_titles VALUES (?, ?, ?, ?, ?, ?, ?)`);
     data.accountTitles.forEach((a: any) => {
       stmt.run([
         a.id || Math.floor(Math.random() * 1000000), a.code, a.title, a.category,
@@ -1148,7 +1162,7 @@ function saveLedgerToSqlite(data: any) {
         entryNo.startsWith("SJ-DIS-")
       );
     });
-    const stmt = db.prepare(`INSERT INTO special_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO special_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     cleanedSJs.forEach((s: any) => {
       stmt.run([
         s.id, s.company_name, s.entry_number, s.voucher_no, s.entry_date, s.entry_type,
@@ -1160,7 +1174,7 @@ function saveLedgerToSqlite(data: any) {
 
   // 11. Income Tax Records
   if (Array.isArray(data.incomeTaxRecords)) {
-    const stmt = db.prepare(`INSERT INTO income_tax_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO income_tax_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.incomeTaxRecords.forEach((t: any) => {
       stmt.run([
         t.id,
@@ -1187,7 +1201,7 @@ function saveLedgerToSqlite(data: any) {
 
   // 12. Payroll Records
   if (Array.isArray(data.payrollRecords)) {
-    const stmt = db.prepare(`INSERT INTO payroll_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO payroll_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.payrollRecords.forEach((p: any) => {
       stmt.run([
         p.id, p.company_name, p.employee_id, p.employee_name, p.payroll_period,
@@ -1201,7 +1215,7 @@ function saveLedgerToSqlite(data: any) {
 
   // 13. Employees
   if (Array.isArray(data.employees)) {
-    const stmt = db.prepare(`INSERT INTO employees VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const stmt = prepSafe(`INSERT OR REPLACE INTO employees VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     data.employees.forEach((e: any) => {
       stmt.run([
         e.id,
@@ -1225,9 +1239,13 @@ function saveLedgerToSqlite(data: any) {
   }
 
   // 14. App Settings
-  const stmtSettings = db.prepare(`INSERT INTO app_settings VALUES (?, ?)`);
+  const stmtSettings = prepSafe(`INSERT OR REPLACE INTO app_settings VALUES (?, ?)`);
   stmtSettings.run(["activeCompanyId", String(data.activeCompanyId || "")]);
   stmtSettings.run(["theme", String(data.theme || "neon_light")]);
+  // Lossless copy of the whole ledger. The relational tables above cannot hold fields such as
+  // status, amount_collected, pending_balance, installments, the Collections Book / Payments Book
+  // rows, entity tax settings, etc. getLedgerDataFromSqlite() reads this row first.
+  stmtSettings.run(["full_ledger_json", JSON.stringify(data)]);
   stmtSettings.free();
 
   db.run("COMMIT;");
@@ -1240,6 +1258,16 @@ function saveLedgerToSqlite(data: any) {
     fs.writeFileSync(DB_JSON_BACKUP, JSON.stringify(data, null, 2), "utf-8");
   } catch (e) {
     console.error("Failed writing JSON backup:", e);
+  }
+}
+
+function saveLedgerToSqlite(data: any) {
+  try {
+    saveLedgerToSqliteUnsafe(data);
+  } catch (e) {
+    // Never leave a half-open transaction behind - that blocks every subsequent save.
+    try { db.run("ROLLBACK;"); } catch (_) {}
+    throw e;
   }
 }
 

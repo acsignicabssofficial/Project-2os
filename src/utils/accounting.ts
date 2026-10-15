@@ -546,6 +546,19 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       });
     }
 
+    // Trade / Sales discount contrasts sales at invoice time, countering sales and setting net receivable
+    const netReceivable = Math.max(0, Math.round((totalGrossSales - discounts) * 100) / 100);
+    const saleDebits: Array<{ account_code: string; account_title: string; amount: number }> = [
+      { account_code: '1020', account_title: 'Accounts Receivable', amount: netReceivable }
+    ];
+    if (discounts > 0) {
+      saleDebits.push({
+        account_code: '4015',
+        account_title: 'Sales Discounts',
+        amount: discounts
+      });
+    }
+
     entries.push({
       id: idCounter++,
       _sortKey: Number(s.id) || 0,
@@ -555,9 +568,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       ref_type: 'Sales',
       ref_no: s.invoice_number,
       description: `Subsidiary Sales: Invoice #${s.invoice_number} - ${customerName} (${s.status || s.sales_status || 'Recorded'})`,
-      debits: [
-        { account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
-      ],
+      debits: saleDebits,
       credits: entry1Credits
     } as any);
 
@@ -566,36 +577,30 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const matchingColls = collections.filter(c => !c.is_cancelled && normalizeDocNo(c.invoice_number) === normInv);
 
     // Determine if this was a direct Full Cash Sale (5.3) vs Partial/Installment Sale (6.4)
-    const isSaleCashPaid =
-      (s.type_of_transaction || '').toUpperCase().includes('CASH') ||
-      (s.status || '').toLowerCase() === 'paid' ||
-      (s.status || '').toLowerCase() === 'cash' ||
-      (s.sales_status || '').toLowerCase() === 'paid' ||
-      (s.payment_type || '').toLowerCase() === 'paid';
+    const isExplicitCashType = (s.type_of_transaction || '').toUpperCase().includes('CASH') || (s.payment_type || '').toLowerCase() === 'cash';
+    const isExplicitOnAccount = (s.type_of_transaction || '').toUpperCase().includes('ACCOUNT') || (s.payment_type || '').toLowerCase() === 'on_account' || (s.payment_type || '').toLowerCase() === 'partial';
 
     const isPartialOrInstallment =
+      isExplicitOnAccount ||
+      s.settled_via_collections === true ||
       (s.status || '').toLowerCase() === 'partial' ||
       (s.status || '').toLowerCase() === 'on account' ||
       (s.sales_status || '').toLowerCase() === 'partial' ||
       (s.sales_status || '').toLowerCase() === 'on account' ||
-      (s.payment_type || '').toLowerCase() === 'partial' ||
-      (s.payment_type || '').toLowerCase() === 'on_account' ||
-      (Number(s.down_payment) > 0 && Number(s.down_payment) < totalGrossSales - 0.5) ||
+      (Number(s.down_payment) > 0 && Number(s.down_payment) < netReceivable - 0.5) ||
       matchingColls.some(c => Array.isArray(c.installments) && c.installments.length > 1) ||
+      matchingColls.some(c => (c.type_of_transaction || '').toUpperCase().includes('ACCOUNT')) ||
       matchingColls.length > 1;
 
-    const isDirectFullCashSale = isSaleCashPaid && !isPartialOrInstallment;
+    const isDirectFullCashSale = isExplicitCashType && !isPartialOrInstallment && !s.settled_via_collections;
 
     if (isDirectFullCashSale) {
       // 5.3 Cash Receipts Book records the compound journal entry for direct full cash sales:
-      // Journal entry: CASH (DEBIT) 22,767.86; CREDITABLE WITHHOLDING TAX (DEBIT) 2,232.14; A/R (CREDIT) 25,000
-      const cashReceived = Math.max(0, Math.round((totalGrossSales - discounts - w2307) * 100) / 100);
+      // Cash Received = netReceivable - w2307
+      const cashReceived = Math.max(0, Math.round((netReceivable - w2307) * 100) / 100);
       const crDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
       if (cashReceived > 0) {
         crDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashReceived });
-      }
-      if (discounts > 0) {
-        crDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discounts });
       }
       if (w2307 > 0) {
         crDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
@@ -613,7 +618,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
           description: `Cash Receipts Book: Full Cash Collection for Invoice #${s.invoice_number} - ${customerName}`,
           debits: crDebits,
           credits: [
-            { account_code: '1020', account_title: 'Accounts Receivable', amount: totalGrossSales }
+            { account_code: '1020', account_title: 'Accounts Receivable', amount: netReceivable }
           ]
         } as any);
       }
@@ -692,14 +697,19 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         const pmtNo = inst.payment_no || (instIdx + 1);
         const ordinal = pmtNo === 1 ? 'first payment/down payment' : pmtNo === 2 ? 'for 2nd collection' : `for #${pmtNo} collection`;
 
-        const cashAndDisc = Math.round((cashAmt + discountAmt) * 100) / 100;
-        if (cashAndDisc > 0) {
+        // Total credited to Accounts Receivable for this installment counters A/R with Cash + Discount + CWT
+        const totalArOffset = Math.round((cashAmt + discountAmt + w2307Amt) * 100) / 100;
+        if (totalArOffset > 0) {
           const colDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
           if (cashAmt > 0) {
             colDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt });
           }
           if (discountAmt > 0) {
             colDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discountAmt });
+          }
+          if (w2307Amt > 0) {
+            colDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307Amt });
+            if (normInv) cwtRecognizedForInvoice.add(normInv);
           }
           entries.push({
             id: idCounter++,
@@ -712,30 +722,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
             description: `Collections Book — Journal entry ${pmtNo} (${ordinal}): Invoice #${c.invoice_number} - ${customerName}`,
             debits: colDebits,
             credits: [
-              { account_code: '1020', account_title: 'Accounts Receivable', amount: cashAndDisc }
+              { account_code: '1020', account_title: 'Accounts Receivable', amount: totalArOffset }
             ]
           } as any);
-        }
-
-        // Recognize CWT 2307 upon completion of full payment
-        if (w2307Amt > 0 && (inst.is_final || c.status === 'Paid')) {
-          entries.push({
-            id: idCounter++,
-            _sortKey: (Number(c.id) || 0) + (instIdx * 0.01) + 0.15,
-            company_name: c.company_name || companyName,
-            entry_no: '',
-            date: instDate,
-            ref_type: 'Collection',
-            ref_no: c.invoice_number,
-            description: `Collections Book — Journal entry ${pmtNo} (to recognize full payment): Invoice #${c.invoice_number} - ${customerName}`,
-            debits: [
-              { account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307Amt }
-            ],
-            credits: [
-              { account_code: '1020', account_title: 'Accounts Receivable', amount: w2307Amt }
-            ]
-          } as any);
-          if (normInv) cwtRecognizedForInvoice.add(normInv);
         }
       });
       return;
@@ -744,32 +733,54 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     // Per-payment row format (COLLECTION 1, COLLECTION 2, COLLECTION 3...)
     const cashAmt = c.amount_collected !== undefined ? Number(c.amount_collected) : (Number(c.amount) || 0);
     const discountAmt = Number(c.discount ?? c.discounts) || 0;
-    if (cashAmt <= 0 && discountAmt <= 0) {
+    const directWtaxOnRow = Number(c.amount_withheld_2307 ?? c.tax_withheld ?? c.wtax_2307) || 0;
+
+    if (cashAmt <= 0 && discountAmt <= 0 && directWtaxOnRow <= 0) {
       return; // Skip 0-amount On Account tracking rows
     }
 
     const pmtOrder = sameInvColls.findIndex(col => col.id === c.id) + 1 || (idx + 1);
     const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd collection' : `for #${pmtOrder} collection`;
 
+    // Sum all settlements (cash + discount + CWT) for this invoice
     const totalCollectedForInv = sameInvColls.reduce((s, col) => {
       const colCash = col.amount_collected !== undefined ? Number(col.amount_collected) : (Number(col.amount) || 0);
       const colDisc = Number(col.discount ?? col.discounts) || 0;
-      return s + colCash + colDisc;
+      const colWtax = Number(col.amount_withheld_2307 ?? col.tax_withheld ?? col.wtax_2307) || 0;
+      return s + colCash + colDisc + colWtax;
     }, 0);
+
     const invDue = Number(matchingSale?.total_amount_due ?? c.total_amount_due ?? matchingSale?.amount) || 0;
-    const isInvoiceFullyPaid = c.status === 'Paid' || matchingSale?.status === 'Paid' || (invDue > 0 && totalCollectedForInv >= invDue - 0.05);
+    const invoiceGrossNetOfDisc = matchingSale
+      ? Math.max(0, (Number(matchingSale.total_amount_vat_inclusive || matchingSale.amount) || 0) - (Number(matchingSale.discount ?? matchingSale.less_discount) || 0))
+      : invDue;
+    const isInvoiceFullyPaid = c.status === 'Paid' || matchingSale?.status === 'Paid' || (invDue > 0 && totalCollectedForInv >= invDue - 0.05) || (invoiceGrossNetOfDisc > 0 && totalCollectedForInv >= invoiceGrossNetOfDisc - 0.05);
     const isLastPaymentRow = sameInvColls.length === 0 || sameInvColls[sameInvColls.length - 1].id === c.id;
 
-    // 6.4 Journal Entry 1 / 2a (for collection of cash / discount):
-    // Dr Cash (amount received), (Dr Discount), Cr Accounts Receivable
-    const cashAndDisc = Math.round((cashAmt + discountAmt) * 100) / 100;
-    if (cashAndDisc > 0) {
+    // Determine CWT 2307: either specifically specified on this collection row, or recognized upon full invoice settlement
+    const saleWtax = Number(matchingSale?.tax_withheld ?? matchingSale?.withholding_2307) || 0;
+    const cwtAlreadyRecognized = normInv ? cwtRecognizedForInvoice.has(normInv) : false;
+
+    let w2307ForThisEntry = directWtaxOnRow;
+    // If not specified on this individual row, but the invoice has CWT and this is the final/full settlement payment, recognize the invoice CWT
+    if (w2307ForThisEntry <= 0 && saleWtax > 0 && isInvoiceFullyPaid && isLastPaymentRow && !cwtAlreadyRecognized) {
+      w2307ForThisEntry = saleWtax;
+    }
+
+    // 6.4 Journal Entry: Dr Cash, (Dr Sales Discount), (Dr CWT 2307), Cr Accounts Receivable
+    // This strictly counters Accounts Receivable by the combined settlement
+    const totalOffsetAR = Math.round((cashAmt + discountAmt + w2307ForThisEntry) * 100) / 100;
+    if (totalOffsetAR > 0) {
       const colDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
       if (cashAmt > 0) {
         colDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt });
       }
       if (discountAmt > 0) {
         colDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discountAmt });
+      }
+      if (w2307ForThisEntry > 0) {
+        colDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307ForThisEntry });
+        if (normInv) cwtRecognizedForInvoice.add(normInv);
       }
       entries.push({
         id: idCounter++,
@@ -782,32 +793,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         description: `Collections Book — Journal entry ${pmtOrder} (${ordinal}): Invoice #${c.invoice_number} - ${customerName}`,
         debits: colDebits,
         credits: [
-          { account_code: '1020', account_title: 'Accounts Receivable', amount: cashAndDisc }
+          { account_code: '1020', account_title: 'Accounts Receivable', amount: totalOffsetAR }
         ]
       } as any);
-    }
-
-    // 6.4 Journal Entry (to recognize full payment / CWT 2307):
-    // Dr Creditable Withholding Tax (2307), Cr Accounts Receivable
-    const w2307Amt = Number(c.amount_withheld_2307 ?? c.tax_withheld ?? c.wtax_2307 ?? matchingSale?.tax_withheld ?? matchingSale?.withholding_2307) || 0;
-    if (w2307Amt > 0 && isInvoiceFullyPaid && isLastPaymentRow && (!normInv || !cwtRecognizedForInvoice.has(normInv))) {
-      entries.push({
-        id: idCounter++,
-        _sortKey: (Number(c.id) || 0) + 0.2,
-        company_name: c.company_name || companyName,
-        entry_no: '',
-        date: colDate,
-        ref_type: 'Collection',
-        ref_no: c.invoice_number,
-        description: `Collections Book — Journal entry ${pmtOrder} (to recognize full payment): Invoice #${c.invoice_number} - ${customerName}`,
-        debits: [
-          { account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307Amt }
-        ],
-        credits: [
-          { account_code: '1020', account_title: 'Accounts Receivable', amount: w2307Amt }
-        ]
-      } as any);
-      if (normInv) cwtRecognizedForInvoice.add(normInv);
     }
   });
 
@@ -860,21 +848,22 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     // Check if paid in full directly without separate payment records, or via direct cash purchase
     const normVoucher = normalizeDocNo(vNo);
     const matchingPmts = payments.filter(p => !p.is_cancelled && (normalizeDocNo(p.voucher_number) === normVoucher || normalizeDocNo(p.invoice_number) === normVoucher));
-    const isExpCashPaid =
-      (e.type_of_transaction || '').toUpperCase().includes('CASH') ||
-      (e.status || '').toLowerCase() === 'paid' ||
-      (e.expense_status || '').toLowerCase() === 'paid' ||
-      (e.payment_type || '').toLowerCase() === 'paid';
+    const isExplicitExpCash = (e.type_of_transaction || '').toUpperCase().includes('CASH') || (e.payment_type || '').toLowerCase() === 'cash';
+    const isExplicitExpOnAccount = (e.type_of_transaction || '').toUpperCase().includes('ACCOUNT') || (e.payment_type || '').toLowerCase() === 'on_account' || (e.payment_type || '').toLowerCase() === 'partial';
+
     const isExpPartial =
+      isExplicitExpOnAccount ||
+      e.settled_via_collections === true ||
       (e.status || '').toLowerCase() === 'partial' ||
       (e.status || '').toLowerCase() === 'on account' ||
       (e.expense_status || '').toLowerCase() === 'partial' ||
       (e.expense_status || '').toLowerCase() === 'on account' ||
       (Number(e.down_payment) > 0 && Number(e.down_payment) < grossPayable - 0.5) ||
       matchingPmts.some(p => Array.isArray(p.installments) && p.installments.length > 1) ||
+      matchingPmts.some(p => (p.type_of_transaction || '').toUpperCase().includes('ACCOUNT')) ||
       matchingPmts.length > 1;
 
-    const isDirectCashPurchase = isExpCashPaid && !isExpPartial;
+    const isDirectCashPurchase = isExplicitExpCash && !isExpPartial && !e.settled_via_collections;
 
     if (isDirectCashPurchase) {
       const cashPaid = Math.max(0, Math.round((grossPayable - w2307) * 100) / 100);
@@ -1013,7 +1002,10 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     }
 
     const cashPaid = p.amount_paid !== undefined ? Number(p.amount_paid) : (Number(p.amount) || 0);
-    if (cashPaid <= 0) {
+    const discountAmt = Number(p.discount ?? p.discounts ?? p.less_discount) || 0;
+    const directEwtOnRow = Number(p.withholding_tax_2307 ?? p.tax_withheld ?? p.amount_withheld_2307) || 0;
+
+    if (cashPaid <= 0 && discountAmt <= 0 && directEwtOnRow <= 0) {
       return; // Skip 0-amount On Account tracking rows
     }
 
@@ -1022,13 +1014,37 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
 
     const totalPaidForVoucher = sameVoucherPmts.reduce((s, pm) => {
       const pmCash = pm.amount_paid !== undefined ? Number(pm.amount_paid) : (Number(pm.amount) || 0);
-      return s + pmCash;
+      const pmDisc = Number(pm.discount ?? pm.discounts ?? pm.less_discount) || 0;
+      const pmEwt = Number(pm.withholding_tax_2307 ?? pm.tax_withheld ?? pm.amount_withheld_2307) || 0;
+      return s + pmCash + pmDisc + pmEwt;
     }, 0);
+
     const expDue = Number(matchingExp?.total_amount_due ?? p.total_amount_due ?? matchingExp?.amount) || 0;
     const isVoucherFullyPaid = p.status === 'Paid' || matchingExp?.status === 'Paid' || (expDue > 0 && totalPaidForVoucher >= expDue - 0.05);
     const isLastPmtRow = sameVoucherPmts.length === 0 || sameVoucherPmts[sameVoucherPmts.length - 1].id === p.id;
 
-    if (cashPaid > 0) {
+    const expWtax = Number(matchingExp?.tax_withheld ?? matchingExp?.withholding_2307_2306) || 0;
+    const ewtAlreadyRecognized = normVoucher ? ewtRecognizedForVoucher.has(normVoucher) : false;
+
+    let w2307ForThisEntry = directEwtOnRow;
+    if (w2307ForThisEntry <= 0 && expWtax > 0 && isVoucherFullyPaid && isLastPmtRow && !ewtAlreadyRecognized) {
+      w2307ForThisEntry = expWtax;
+    }
+
+    // Dr Accounts Payable (counters AP by Cash + EWT + Discount), Cr Cash, Cr EWT Payable, Cr Purchase Discounts
+    const totalOffsetAP = Math.round((cashPaid + discountAmt + w2307ForThisEntry) * 100) / 100;
+    if (totalOffsetAP > 0) {
+      const pmtCredits: Array<{ account_code: string; account_title: string; amount: number }> = [];
+      if (cashPaid > 0) {
+        pmtCredits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashPaid });
+      }
+      if (w2307ForThisEntry > 0) {
+        pmtCredits.push({ account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: w2307ForThisEntry });
+        if (normVoucher) ewtRecognizedForVoucher.add(normVoucher);
+      }
+      if (discountAmt > 0) {
+        pmtCredits.push({ account_code: '5015', account_title: 'Purchase Discounts', amount: discountAmt });
+      }
       entries.push({
         id: idCounter++,
         _sortKey: (Number(p.id) || 0) + 0.1,
@@ -1039,33 +1055,10 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         ref_no: vNo,
         description: `Payments Book — Journal entry ${pmtOrder} (${ordinal}): Voucher #${vNo} - ${providerName}`,
         debits: [
-          { account_code: '2010', account_title: 'Accounts Payable', amount: cashPaid }
+          { account_code: '2010', account_title: 'Accounts Payable', amount: totalOffsetAP }
         ],
-        credits: [
-          { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashPaid }
-        ]
+        credits: pmtCredits
       } as any);
-    }
-
-    const w2307 = Number(p.withholding_tax_2307 ?? p.tax_withheld ?? matchingExp?.tax_withheld ?? matchingExp?.withholding_2307_2306) || 0;
-    if (w2307 > 0 && isVoucherFullyPaid && isLastPmtRow && (!normVoucher || !ewtRecognizedForVoucher.has(normVoucher))) {
-      entries.push({
-        id: idCounter++,
-        _sortKey: (Number(p.id) || 0) + 0.2,
-        company_name: p.company_name || companyName,
-        entry_no: '',
-        date: payDate,
-        ref_type: 'Payment',
-        ref_no: vNo,
-        description: `Payments Book — Journal entry ${pmtOrder} (to recognize full payment): Voucher #${vNo} - ${providerName}`,
-        debits: [
-          { account_code: '2010', account_title: 'Accounts Payable', amount: w2307 }
-        ],
-        credits: [
-          { account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: w2307 }
-        ]
-      } as any);
-      if (normVoucher) ewtRecognizedForVoucher.add(normVoucher);
     }
   });
 
