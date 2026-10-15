@@ -1,0 +1,4 @@
+# 2OS Accounting Desktop App - Requirements
+# NOTE: The app runs 100% offline out-of-the-box using the built-in Microsoft Edge App Mode without installing any pip packages!
+# Installing pywebview is purely optional if you prefer a native OS WebView2 window:
+pywebview>=5.0.0
