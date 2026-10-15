@@ -1316,11 +1316,21 @@ export default function App() {
   };
 
   const totalSalesDue = companySales.reduce((sum, s) => sum + (Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount) || 0), 0);
-  const totalColls = companyCollections.reduce((sum, c) => sum + (Number(c.amount_collected ?? (c as any).amount) || 0), 0);
+  const totalColls = companyCollections.reduce((sum, c) => {
+    const cash = Number(c.amount_collected ?? (c as any).amount) || 0;
+    const disc = Number(c.discount ?? (c as any).discounts) || 0;
+    const wtax = Number(c.amount_withheld_2307 ?? c.tax_withheld) || 0;
+    return sum + cash + disc + wtax;
+  }, 0);
   const overdueAR = Math.max(0, totalSalesDue - totalColls);
 
   const totalExpDue = companyExpenses.reduce((sum, e) => sum + (Number(e.expense_invoice_amount ?? (e as any).total_amount_vat_inclusive ?? (e as any).amount) || 0), 0);
-  const totalPaid = companyPayments.reduce((sum, p) => sum + (Number(p.amount_paid ?? (p as any).amount) || 0), 0);
+  const totalPaid = companyPayments.reduce((sum, p) => {
+    const cash = Number(p.amount_paid ?? (p as any).amount) || 0;
+    const disc = Number(p.discount ?? (p as any).discounts) || 0;
+    const ewt = Number(p.tax_withheld ?? (p as any).withholding_2307_2306) || 0;
+    return sum + cash + disc + ewt;
+  }, 0);
   const outstandingAP = Math.max(0, totalExpDue - totalPaid);
   
   const netVatPayable = Math.max(0, 

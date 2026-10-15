@@ -153,6 +153,7 @@ export default function RelatedPartiesTab({
           setSubsidiarySales={setSubsidiarySales || (() => {})}
           collections={collectionsRecords}
           setCollections={setCollectionsRecords || (() => {})}
+          setCashReceipts={setCashReceipts as any}
           customers={customers}
           setCustomers={setCustomers}
           activeCompany={activeCompany}

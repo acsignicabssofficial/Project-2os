@@ -242,7 +242,12 @@ export default function ProvidersTab({
     });
 
     const totalPurchases = matchingExpenses.reduce((sum, e) => sum + (Number(e.total_amount_due || e.expense_invoice_amount || e.amount) || 0), 0);
-    const totalPaid = matchingPayments.reduce((sum, p) => sum + (Number(p.amount_paid || p.net_paid || p.voucher_amount) || 0), 0);
+    const totalPaid = matchingPayments.reduce((sum, p) => {
+      const cash = Number(p.amount_paid || p.net_paid || p.voucher_amount) || 0;
+      const wtax = Number((p as any).withholding_tax_2307 ?? (p as any).tax_withheld) || 0;
+      const disc = Number((p as any).discount ?? (p as any).discounts) || 0;
+      return sum + cash + wtax + disc;
+    }, 0);
     const balance = Math.max(0, totalPurchases - totalPaid);
 
     return {

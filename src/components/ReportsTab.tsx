@@ -196,6 +196,24 @@ export default function ReportsTab({
     }, 0);
   }, [periodFilteredPayments]);
 
+  const totalSettlementAR = useMemo(() => {
+    return periodFilteredCollections.reduce((acc, c) => {
+      const cash = safeNum(c.amount_collected ?? (c as any).amount);
+      const disc = safeNum(c.discount ?? (c as any).discounts);
+      const wtax = safeNum(c.amount_withheld_2307 ?? (c as any).tax_withheld);
+      return acc + cash + disc + wtax;
+    }, 0);
+  }, [periodFilteredCollections]);
+
+  const totalSettlementAP = useMemo(() => {
+    return periodFilteredPayments.reduce((acc, p) => {
+      const cash = safeNum(p.amount_paid ?? (p as any).amount);
+      const disc = safeNum((p as any).discount ?? (p as any).discounts);
+      const ewt = safeNum(p.tax_withheld ?? (p as any).withholding_tax_2307 ?? (p as any).withholding_2307_2306);
+      return acc + cash + disc + ewt;
+    }, 0);
+  }, [periodFilteredPayments]);
+
   // Cost of Sales & Profitability (Strictly real Cost of Goods Sold from actual purchases / expenses)
   const costOfSales = useMemo(() => {
     const directCost = periodFilteredExpenses
@@ -217,16 +235,16 @@ export default function ReportsTab({
   const incomeTaxExpense = operatingIncome > 0 ? operatingIncome * 0.20 : 0; // 20% CREATE RCIT
   const netIncome = operatingIncome - incomeTaxExpense;
 
-  // Balance sheet metrics for working capital & ratios
+  // Balance sheet metrics for working capital & ratios (CWT & Discounts counter AR & AP)
   const cashAndEquivalents = Math.max(0, totalCollections - totalPayments);
-  const accountsReceivable = Math.max(0, totalSales - totalCollections);
-  const merchandiseInventory = Math.max(0, costOfSales * 0.65);
+  const accountsReceivable = Math.max(0, Math.round((totalSales - totalSettlementAR) * 100) / 100);
+  const merchandiseInventory = costOfSales > 0 ? Math.max(0, Math.round(costOfSales * 0.65 * 100) / 100) : 0;
   const totalCurrentAssets = cashAndEquivalents + accountsReceivable + merchandiseInventory;
 
   const ppeNetBookValue = ppeAssets.reduce((sum, p) => sum + (Number(p.acquisition_cost) || 0) - (Number(p.accumulated_depreciation) || 0), 0);
   const totalAssets = totalCurrentAssets + ppeNetBookValue;
 
-  const accountsPayable = Math.max(0, totalExpenses - totalPayments);
+  const accountsPayable = Math.max(0, Math.round((totalExpenses - totalSettlementAP) * 100) / 100);
   const accruedTaxes = incomeTaxExpense;
   const totalCurrentLiabilities = accountsPayable + accruedTaxes;
   const longTermDebt = 0;

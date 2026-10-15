@@ -172,7 +172,22 @@ export default function PaymentsTab({
 
     const amtP = parseFloat(amountPaid) || 0;
     const w2307 = parseFloat(withheld2307) || 0;
-    const remBalance = Math.max(0, vAmount - amtP - w2307);
+    const currentSettlement = amtP + w2307;
+
+    const priorPayments = payments.filter(p =>
+      !p.is_cancelled &&
+      p.id !== editingId &&
+      normalizeDocNo(p.voucher_number) === normalizeDocNo(voucherNo)
+    );
+    const priorSettled = priorPayments.reduce((sum, p) => {
+      const cash = Number(p.amount_paid) || 0;
+      const wtax = Number(p.withholding_tax_2307 ?? (p as any).tax_withheld) || 0;
+      const disc = Number((p as any).discount ?? (p as any).discounts) || 0;
+      return sum + cash + wtax + disc;
+    }, 0);
+
+    const cumulativeSettled = Math.round((priorSettled + currentSettlement) * 100) / 100;
+    const remBalance = Math.max(0, Math.round((vAmount - cumulativeSettled) * 100) / 100);
 
     const newPaymentItem: Payment = {
       id: editingId !== null ? editingId : Date.now(),
@@ -198,11 +213,19 @@ export default function PaymentsTab({
       setPayments(prev => [newPaymentItem, ...prev]);
 
       if (selectedExpense) {
-        const newStatus = remBalance <= 0.01 ? 'Paid' : 'Unpaid';
-        setExpenses(prev => prev.map(e => e.id === selectedExpense.id ? { ...e, payment_status: newStatus } : e));
+        const isPaid = remBalance <= 0.05 || cumulativeSettled >= (vAmount - 0.05);
+        const newStatus = isPaid ? 'Paid' : 'Partial';
+        setExpenses(prev => prev.map(e => e.id === selectedExpense.id ? { 
+          ...e, 
+          payment_status: newStatus,
+          status: newStatus,
+          expense_status: newStatus,
+          amount_paid: cumulativeSettled,
+          pending_balance: isPaid ? 0 : remBalance
+        } : e));
       }
 
-      triggerAlert(`Recorded Payment Entry #${disbursementNo} successfully!`, 'success');
+      triggerAlert(`Recorded Payment #${disbursementNo} successfully (Total Settled: ₱${cumulativeSettled.toLocaleString(undefined, { minimumFractionDigits: 2 })} | Remaining: ₱${remBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })})!`, 'success');
       setVoucherNo('');
       setAmountPaid('');
       setWithheld2307('0');

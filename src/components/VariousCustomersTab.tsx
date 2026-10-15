@@ -22,6 +22,8 @@ interface VariousCustomersTabProps {
   setSubsidiarySales: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
   collections: UniformBookRecord[];
   setCollections: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
+  cashReceipts?: UniformBookRecord[];
+  setCashReceipts?: (updater: (prev: UniformBookRecord[]) => UniformBookRecord[]) => void;
   customers: Customer[];
   setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>;
   activeCompany: Company | null;
@@ -36,6 +38,8 @@ export default function VariousCustomersTab({
   setSubsidiarySales,
   collections,
   setCollections,
+  cashReceipts,
+  setCashReceipts,
   customers,
   setCustomers,
   activeCompany,
@@ -279,6 +283,23 @@ export default function VariousCustomersTab({
       }
       return c;
     }));
+
+    if (setCashReceipts) {
+      setCashReceipts(prev => prev.map(cr => {
+        if (cr.invoice_number && cr.invoice_number.trim().toLowerCase() === reroutingRecord.invoice_number.trim().toLowerCase()) {
+          return {
+            ...cr,
+            registered_name: targetCustName,
+            customer_name: targetCustName,
+            tin: targetTin,
+            customer_tin: targetTin,
+            address: targetAddress || cr.address,
+            is_various: false
+          };
+        }
+        return cr;
+      }));
+    }
 
     triggerAlert(
       `Transaction ${reroutingRecord.invoice_number} successfully rerouted from Various Customer to regular customer "${targetCustName}" (TIN: ${targetTin})!`,

@@ -19,6 +19,7 @@ export interface AutoSuggestInputProps<T> {
   categoryLabel?: 'Customer' | 'Provider' | 'Employee' | string;
   minQueryLength?: number;
   autoFocus?: boolean;
+  onBlur?: () => void;
   name?: string;
   id?: string;
 }
@@ -62,6 +63,7 @@ export default function AutoSuggestInput<T>({
   categoryLabel = 'Party',
   minQueryLength = 1,
   autoFocus = false,
+  onBlur,
   name,
   id
 }: AutoSuggestInputProps<T>) {
@@ -180,6 +182,7 @@ export default function AutoSuggestInput<T>({
             }
           }}
           onKeyDown={handleKeyDown}
+          onBlur={onBlur}
           placeholder={placeholder}
           required={required}
           disabled={disabled}

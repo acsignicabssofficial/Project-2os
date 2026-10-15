@@ -176,8 +176,22 @@ export default function CollectionsTab({
     const amtCol = parseFloat(collAmt) || 0;
     const discountAmt = parseFloat(collDiscount) || 0;
     const w2307 = parseFloat(collWithheld) || 0;
-    const totalSettled = amtCol + discountAmt + w2307;
-    const remBalance = Math.max(0, invoiceAmt - totalSettled);
+    const currentSettlement = amtCol + discountAmt + w2307;
+
+    const priorColls = collections.filter(c => 
+      !c.is_cancelled &&
+      c.id !== editingId &&
+      normalizeDocNo(c.invoice_number) === normalizeDocNo(collInvNo)
+    );
+    const priorSettled = priorColls.reduce((sum, c) => {
+      const cash = Number(c.amount_collected) || 0;
+      const disc = Number(c.discount ?? c.discounts) || 0;
+      const wtax = Number(c.amount_withheld_2307 ?? c.tax_withheld) || 0;
+      return sum + cash + disc + wtax;
+    }, 0);
+
+    const cumulativeSettled = Math.round((priorSettled + currentSettlement) * 100) / 100;
+    const remBalance = Math.max(0, Math.round((invoiceAmt - cumulativeSettled) * 100) / 100);
 
     const newCollItem: Collection = {
       id: editingId !== null ? editingId : Date.now(),
@@ -206,13 +220,21 @@ export default function CollectionsTab({
     } else {
       setCollections(prev => [newCollItem, ...prev]);
 
-      // Update Sales collection status if fully paid
+      // Update Sales collection status if fully paid (CWT & Discounts counter AR)
       if (selectedSale) {
-        const newStatus = remBalance <= 0.01 ? 'Paid' : 'Partial';
-        setSales(prev => prev.map(s => s.id === selectedSale.id ? { ...s, collection_status: newStatus } : s));
+        const isPaid = remBalance <= 0.05 || cumulativeSettled >= (invoiceAmt - 0.05);
+        const newStatus = isPaid ? 'Paid' : 'Partial';
+        setSales(prev => prev.map(s => s.id === selectedSale.id ? { 
+          ...s, 
+          collection_status: newStatus,
+          status: newStatus,
+          sales_status: newStatus,
+          amount_collected: cumulativeSettled,
+          pending_balance: isPaid ? 0 : remBalance
+        } : s));
       }
 
-      triggerAlert(`Recorded Collection with Entry #${collEntryNo} successfully (Total Settled: ₱${totalSettled.toLocaleString()})!`, 'success');
+      triggerAlert(`Recorded Collection #${collEntryNo} successfully (Total Settled: ₱${cumulativeSettled.toLocaleString(undefined, { minimumFractionDigits: 2 })} | Remaining: ₱${remBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })})!`, 'success');
       setCollInvNo('');
       setCollAmt('');
       setCollDiscount('0');

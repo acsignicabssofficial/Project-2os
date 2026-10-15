@@ -345,12 +345,12 @@ export default function CustomersTab({
           // Fully paid sale: full invoice amount is settled (cash received + 2307 + discount)
           totalCollected += grossSaleAmt;
         } else if (collsForInvoice.length > 0) {
-          const cashCollectedSum = collsForInvoice.reduce((sum: number, col: any) => {
-            const cVal = col.amount_collected !== undefined ? Number(col.amount_collected) : 0;
-            return sum + cVal;
-          }, 0);
-          const isFullyCollectedNow = cashCollectedSum >= netTargetCash - 0.05 && netTargetCash > 0;
-          totalCollected += cashCollectedSum + discOnSale + (isFullyCollectedNow ? w2307OnSale : 0);
+          const colCashSum = collsForInvoice.reduce((sum: number, col: any) => sum + (col.amount_collected !== undefined ? Number(col.amount_collected) : 0), 0);
+          const colDiscSum = collsForInvoice.reduce((sum: number, col: any) => sum + (Number(col.discount ?? col.discounts) || 0), 0) || discOnSale;
+          const colWtaxSum = collsForInvoice.reduce((sum: number, col: any) => sum + (Number(col.amount_withheld_2307 ?? col.tax_withheld) || 0), 0);
+          const isFullyCollectedNow = s.status === 'Paid' || s.sales_status === 'Paid' || (colCashSum + colDiscSum + (colWtaxSum || w2307OnSale)) >= grossSaleAmt - 0.05 || (netTargetCash > 0 && colCashSum >= netTargetCash - 0.05);
+          const effectiveWtax = colWtaxSum > 0 ? colWtaxSum : (isFullyCollectedNow ? w2307OnSale : 0);
+          totalCollected += (colCashSum + colDiscSum + effectiveWtax);
         } else {
           totalCollected += (Number(s.down_payment || s.amount_collected) || 0);
         }
