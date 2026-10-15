@@ -253,9 +253,12 @@ export default function VariousCustomersTab({
       setCustomers(prev => [newCustRecord, ...prev]);
     }
 
+    const normRerouteInv = (reroutingRecord.invoice_number || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
     // Update Transaction across books
     setSubsidiarySales(prev => prev.map(s => {
-      if (s.id === reroutingRecord.id || s.invoice_number === reroutingRecord.invoice_number) {
+      const sInv = (s.invoice_number || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (s.id === reroutingRecord.id || (normRerouteInv && sInv === normRerouteInv)) {
         return {
           ...s,
           registered_name: targetCustName,

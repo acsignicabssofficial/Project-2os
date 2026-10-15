@@ -315,13 +315,19 @@ export default function CustomersTab({
     companyCustomers.forEach(c => {
       const custTin9 = normalizeTin9(c.customer_tin || c.client_TIN);
       const custNameNorm = (c.customer_name || c.registered_name || '').trim().toLowerCase();
+      const hasValidCustTin = custTin9.length === 9 && !/^0+$/.test(custTin9);
 
       const customerSales = activeSales.filter((s: any) => {
         if (s.is_various === true) return false;
         const sTin9 = normalizeTin9(s.customer_tin || s.tin);
         const hasValidSaleTin = sTin9.length === 9 && !/^0+$/.test(sTin9);
-        if (hasValidSaleTin) {
-          return custTin9 && sTin9 === custTin9;
+        if (hasValidSaleTin && hasValidCustTin && sTin9 === custTin9) {
+          return true;
+        }
+        if (custNameNorm) {
+          const sName1 = (s.registered_name || '').trim().toLowerCase();
+          const sName2 = (s.customer_name || '').trim().toLowerCase();
+          if (sName1 === custNameNorm || sName2 === custNameNorm) return true;
         }
         return false;
       });
@@ -361,18 +367,26 @@ export default function CustomersTab({
         if (col.is_various === true) return false;
         const cTin9 = normalizeTin9(col.customer_tin || col.tin);
         const hasValidCollTin = cTin9.length === 9 && !/^0+$/.test(cTin9);
-        const matchesCustomer = hasValidCollTin && custTin9 && cTin9 === custTin9;
+        const colName1 = (col.registered_name || '').trim().toLowerCase();
+        const colName2 = (col.customer_name || '').trim().toLowerCase();
+        const matchesCustomer = (hasValidCollTin && hasValidCustTin && cTin9 === custTin9) ||
+          (custNameNorm && (colName1 === custNameNorm || colName2 === custNameNorm));
         if (!matchesCustomer) return false;
         const normInv = normalizeDocNo(col.invoice_number);
         return !customerSales.some((s: any) => normalizeDocNo(s.invoice_number) === normInv);
       });
       totalCollected += orphanColls.reduce((sum: number, col: any) => sum + (Number(col.amount_collected) || 0), 0);
 
-      stats[c.customer_tin] = {
+      const customerStatObj = {
         totalSales: Math.round(totalSales * 100) / 100,
         totalCollected: Math.round(totalCollected * 100) / 100,
         balance: Math.round((totalSales - totalCollected) * 100) / 100
       };
+      if (c.customer_tin) stats[c.customer_tin] = customerStatObj;
+      if (c.client_TIN) stats[c.client_TIN] = customerStatObj;
+      stats[String(c.id)] = customerStatObj;
+      if (c.registered_name) stats[c.registered_name] = customerStatObj;
+      if (c.customer_name) stats[c.customer_name] = customerStatObj;
     });
 
     return stats;
@@ -395,12 +409,21 @@ export default function CustomersTab({
     const custTin9 = normalizeTin9(tin || drilldownCust.client_TIN);
     const normalizeDocNo = (num: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
+    const custNameNorm = (drilldownCust.customer_name || drilldownCust.registered_name || '').trim().toLowerCase();
+    const hasValidCustTin = custTin9.length === 9 && !/^0+$/.test(custTin9);
+
     const rawSales = sales.filter((s: any) => {
       if (!activeCompanyName || s.company_name !== activeCompanyName || s.is_cancelled) return false;
       if (s.is_various === true) return false;
       const sTin9 = normalizeTin9(s.customer_tin || s.tin);
       const hasValidSaleTin = sTin9.length === 9 && !/^0+$/.test(sTin9);
-      return hasValidSaleTin && custTin9 && sTin9 === custTin9;
+      if (hasValidSaleTin && hasValidCustTin && sTin9 === custTin9) return true;
+      if (custNameNorm) {
+        const sName1 = (s.registered_name || '').trim().toLowerCase();
+        const sName2 = (s.customer_name || '').trim().toLowerCase();
+        if (sName1 === custNameNorm || sName2 === custNameNorm) return true;
+      }
+      return false;
     });
 
     const customerSales = rawSales.map((s: any) => {
@@ -430,12 +453,15 @@ export default function CustomersTab({
       if (c.is_various === true) return false;
       const cTin9 = normalizeTin9(c.customer_tin || c.tin);
       const hasValidCollTin = cTin9.length === 9 && !/^0+$/.test(cTin9);
-      const matchesCust = hasValidCollTin && custTin9 && cTin9 === custTin9;
+      const colName1 = (c.registered_name || '').trim().toLowerCase();
+      const colName2 = (c.customer_name || '').trim().toLowerCase();
+      const matchesCust = (hasValidCollTin && hasValidCustTin && cTin9 === custTin9) ||
+        (custNameNorm && (colName1 === custNameNorm || colName2 === custNameNorm));
       const matchesInvoice = customerSales.some((s: any) => normalizeDocNo(s.invoice_number) === normalizeDocNo(c.invoice_number));
       return matchesCust || matchesInvoice;
     });
 
-    const totals = customerStats[tin] || { totalSales: 0, totalCollected: 0, balance: 0 };
+    const totals = customerStats[tin] || customerStats[drilldownCust.client_TIN] || customerStats[String(drilldownCust.id)] || customerStats[drilldownCust.customer_name] || customerStats[drilldownCust.registered_name] || { totalSales: 0, totalCollected: 0, balance: 0 };
 
     // Sort collections chronologically by ID so COLLECTION 1, COLLECTION 2 appear in exact order
     const sortedRawCollections = [...rawCollections]

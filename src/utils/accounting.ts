@@ -646,12 +646,12 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const rawInvLower = (c.invoice_number || '').trim().toLowerCase();
     const normVoucher = normalizeDocNo(c.voucher_number);
 
-    // 5.4 Collections book also records a cash sale, but NO duplicate journal entry (already journalized in 5.3 Cash Receipts)
+    // 5.4 Collections book records cash sales and collections
+    // Skip ONLY if this invoice was an upfront direct full-cash sale already journalized by Cash Receipts Book above
     if (
       (normInv && directCashReceiptInvoices.has(normInv)) ||
       (rawInvLower && directCashReceiptInvoices.has(rawInvLower)) ||
-      (normVoucher && directCashReceiptInvoices.has(normVoucher)) ||
-      c.settled_via_collections === true
+      (normVoucher && directCashReceiptInvoices.has(normVoucher))
     ) {
       return;
     }
@@ -661,25 +661,15 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       if (col.is_cancelled || normalizeDocNo(col.invoice_number) !== normInv) return false;
       const colCash = col.amount_collected !== undefined ? Number(col.amount_collected) : (Number(col.amount) || 0);
       const colDisc = Number(col.discount ?? col.discounts) || 0;
+      const colWtax = Number(col.amount_withheld_2307 ?? col.tax_withheld) || 0;
       const hasInst = Array.isArray(col.installments) && col.installments.length > 0;
-      return colCash > 0 || colDisc > 0 || hasInst;
+      return colCash > 0 || colDisc > 0 || colWtax > 0 || hasInst;
     });
 
     if (matchingSale) {
-      const isSaleCashPaid =
-        (matchingSale.type_of_transaction || '').toUpperCase().includes('CASH') ||
-        (matchingSale.status || '').toLowerCase() === 'paid' ||
-        (matchingSale.sales_status || '').toLowerCase() === 'paid';
-      const isNotPartial =
-        !matchingSale.down_payment ||
-        Number(matchingSale.down_payment) <= 0 ||
-        Number(matchingSale.down_payment) >= (Number(matchingSale.total_amount_vat_inclusive || matchingSale.amount) || 0) - 0.5;
-      const isSingleCollection =
-        sameInvColls.length <= 1 &&
-        (!Array.isArray(c.installments) || c.installments.length <= 1);
-
-      if (isSaleCashPaid && isNotPartial && isSingleCollection) {
-        // Direct cash sale already accounted for; do not duplicate in Collections Book
+      const isDirectCashSale = (matchingSale.type_of_transaction || '').toUpperCase() === 'CASH' && !matchingSale.settled_via_collections;
+      if (isDirectCashSale && (normInv && directCashReceiptInvoices.has(normInv))) {
+        // Direct cash sale already accounted for in Cash Receipts; do not duplicate
         return;
       }
     }
@@ -921,8 +911,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       (normVoucher && directCashDisbursementVouchers.has(normVoucher)) ||
       (rawVoucherLower && directCashDisbursementVouchers.has(rawVoucherLower)) ||
       (normVoucherNo && directCashDisbursementVouchers.has(normVoucherNo)) ||
-      (normInvNo && directCashDisbursementVouchers.has(normInvNo)) ||
-      p.settled_via_collections === true
+      (normInvNo && directCashDisbursementVouchers.has(normInvNo))
     ) {
       return; // Already journalized in Cash Disbursements Book above; do not duplicate in Payments Book
     }
@@ -931,25 +920,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const sameVoucherPmts = sortedPayments.filter(pm => {
       if (pm.is_cancelled || (normalizeDocNo(pm.voucher_number) !== normVoucher && normalizeDocNo(pm.invoice_number) !== normVoucher)) return false;
       const pmCash = pm.amount_paid !== undefined ? Number(pm.amount_paid) : (Number(pm.amount) || 0);
+      const pmWtax = Number(pm.withholding_tax_2307 ?? (pm as any).tax_withheld) || 0;
+      const pmDisc = Number((pm as any).discount ?? (pm as any).discounts) || 0;
       const hasInst = Array.isArray(pm.installments) && pm.installments.length > 0;
-      return pmCash > 0 || hasInst;
+      return pmCash > 0 || pmWtax > 0 || pmDisc > 0 || hasInst;
     });
 
     if (matchingExp) {
-      const isExpCashPaid =
-        (matchingExp.type_of_transaction || '').toUpperCase().includes('CASH') ||
-        (matchingExp.status || '').toLowerCase() === 'paid' ||
-        (matchingExp.expense_status || '').toLowerCase() === 'paid';
-      const isNotPartial =
-        !matchingExp.down_payment ||
-        Number(matchingExp.down_payment) <= 0 ||
-        Number(matchingExp.down_payment) >= (Number(matchingExp.total_amount_vat_inclusive || matchingExp.amount) || 0) - 0.5;
-      const isSinglePayment =
-        sameVoucherPmts.length <= 1 &&
-        (!Array.isArray(p.installments) || p.installments.length <= 1);
-
-      if (isExpCashPaid && isNotPartial && isSinglePayment) {
-        return; // Direct cash purchase already accounted for
+      const isDirectCashPurchase = (matchingExp.type_of_transaction || '').toUpperCase() === 'CASH' && !matchingExp.settled_via_collections;
+      if (isDirectCashPurchase && ((normVoucher && directCashDisbursementVouchers.has(normVoucher)) || (normVoucherNo && directCashDisbursementVouchers.has(normVoucherNo)))) {
+        return; // Direct cash purchase already accounted for in Cash Disbursements
       }
     }
 

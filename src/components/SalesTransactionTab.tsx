@@ -204,23 +204,56 @@ export default function SalesTransactionTab({
   }, [tinMatchCustomer, customerName]);
 
   // Auto-fill TIN & Customer details
-  const handleSelectCustomer = (custName: string) => {
-    setCustomerName(custName);
-    const norm = normName(custName);
-    const rawLower = custName.trim().toLowerCase();
-    const found = customers.find(c => 
-      customerNameKeys(c).includes(norm) ||
-      customerNameKeys(c).includes(rawLower) ||
-      (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase() === rawLower
-    );
+  const handleSelectCustomer = (custInput: string | Customer) => {
+    let found: Customer | undefined;
+    if (typeof custInput === 'object' && custInput !== null) {
+      found = custInput;
+    } else {
+      const custName = custInput;
+      setCustomerName(custName);
+      const norm = normName(custName);
+      const rawLower = custName.trim().toLowerCase();
+      found = customers.find(c => 
+        customerNameKeys(c).includes(norm) ||
+        customerNameKeys(c).includes(rawLower) ||
+        (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase() === rawLower ||
+        (rawLower.length >= 2 && (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase().includes(rawLower))
+      );
+      if (!found) {
+        // Fallback to checking previous sales records in case customer was recorded in Subsidiary Sales or rerouted
+        const matchingSale = subsidiarySales.find(s => 
+          (s.registered_name || '').trim().toLowerCase() === rawLower ||
+          (s.customer_name || '').trim().toLowerCase() === rawLower ||
+          normName(s.registered_name) === norm
+        );
+        if (matchingSale) {
+          const rawDigits = (matchingSale.tin || '').replace(/\D/g, '').slice(0, 9);
+          const formatted9 = rawDigits.length === 9 ? `${rawDigits.slice(0, 3)}-${rawDigits.slice(3, 6)}-${rawDigits.slice(6, 9)}` : (matchingSale.customer_tin || matchingSale.tin || '');
+          const br = (matchingSale.tin || '').replace(/\D/g, '').slice(9, 14) || '00000';
+          setCustomerName(matchingSale.registered_name || custName);
+          if (formatted9) setTin(formatted9);
+          setBranchCode(br.padStart(5, '0'));
+          if (matchingSale.address) setAddress(matchingSale.address);
+          if (matchingSale.vat_or_nonvat) {
+            const isNonVat = (matchingSale.vat_or_nonvat || '').toUpperCase().includes('NON');
+            setVatStatus(isNonVat ? 'NONVAT' : 'VAT');
+            setBusinessTaxType(isNonVat ? 'non-vatable' : 'vatable');
+          }
+          return;
+        }
+      }
+    }
+
     if (found) {
+      const name = customerDisplayName(found);
+      setCustomerName(name);
       const rawDigits = (found.client_TIN || found.customer_tin || (found as any).tin_number || (found as any).tin || '').replace(/\D/g, '').slice(0, 9);
       const formatted9 = rawDigits.length === 9 ? `${rawDigits.slice(0, 3)}-${rawDigits.slice(3, 6)}-${rawDigits.slice(6, 9)}` : (found.client_TIN || found.customer_tin || '');
       setTin(formatted9);
       setBranchCode((found.customer_branch_code || found.tin_branch_code || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5));
       setAddress(found.address || found.client_Address || found.customer_address || '');
-      if (found.vat_status) {
-        const isNonVat = (found.vat_status || '').toUpperCase().includes('NON');
+      if (found.vat_status || found.tax_type) {
+        const isNonVat = (found.vat_status || found.tax_type || '').toUpperCase().includes('NON');
         setVatStatus(isNonVat ? 'NONVAT' : 'VAT');
         setBusinessTaxType(isNonVat ? 'non-vatable' : 'vatable');
       }
@@ -297,7 +330,7 @@ export default function SalesTransactionTab({
       );
 
       let totalCashCollected = 0;
-      let totalDiscountSettled = invDisc;
+      let totalDiscountSettled = 0;
       let totalWtaxSettled = 0;
 
       matchingCollections.forEach(c => {
@@ -306,13 +339,13 @@ export default function SalesTransactionTab({
         const discVal = Number(c.discount ?? c.discounts) || 0;
         if (discVal > 0) totalDiscountSettled += discVal;
         const wtaxVal = Number(c.amount_withheld_2307 ?? c.tax_withheld ?? c.wtax_2307) || 0;
-        if (wtaxVal > 0) totalWtaxSettled += wtaxVal;
+        if (wtaxVal > 0 && cashVal > 0) totalWtaxSettled += wtaxVal;
       });
 
       const effectiveWtax = totalWtaxSettled > 0 ? totalWtaxSettled : invWtax;
-      const totalOffsetCreditedToAR = Math.round((totalCashCollected + effectiveWtax) * 100) / 100;
+      const totalOffsetCreditedToAR = Math.round((totalCashCollected + totalDiscountSettled + effectiveWtax) * 100) / 100;
       const remainingAR = Math.max(0, Math.round((netReceivable - totalOffsetCreditedToAR) * 100) / 100);
-      const remainingCash = Math.max(0, Math.round((netCashDue - totalCashCollected) * 100) / 100);
+      const remainingCash = Math.max(0, Math.round((netCashDue - totalCashCollected - totalDiscountSettled) * 100) / 100);
 
       const isPaid = remainingAR <= 0.05 || remainingCash <= 0.05;
       return !isPaid;
@@ -346,12 +379,31 @@ export default function SalesTransactionTab({
 
     const rawTinDigits = effectiveTinStr.replace(/\D/g, '').slice(0, 9);
     const hasValidTin = rawTinDigits.length === 9 && !/^0+$/.test(rawTinDigits);
-    const finalIsVarious = isVariousCustomer || !hasValidTin;
 
-    const formattedTin9 = hasValidTin
-      ? `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}`
-      : '000-000-000';
-    const cleanBranch5 = (effectiveBranchStr || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+    // Check if customer exists in Customer Directory (by name, trade name, or registered name)
+    const matchedRegisteredCust = customers.find(c => {
+      const keys = customerNameKeys(c);
+      const cleanEff = effectiveName.toLowerCase();
+      const normEff = normName(effectiveName);
+      if (keys.includes(cleanEff) || keys.includes(normEff)) return true;
+      const cTin = tin9Of(c);
+      if (hasValidTin && cTin.length === 9 && cTin === rawTinDigits) return true;
+      return false;
+    });
+    const isCustomerInDirectory = Boolean(matchedRegisteredCust);
+
+    // If customer is in directory or user chose to link to regular customer, DO NOT force to various customer
+    const finalIsVarious = isVariousCustomer || (!hasValidTin && !isCustomerInDirectory);
+
+    // Adopt on-file TIN if customer was in directory but entered without typing TIN
+    const effectiveCustTin = hasValidTin
+      ? rawTinDigits
+      : (matchedRegisteredCust ? tin9Of(matchedRegisteredCust) : '');
+
+    const formattedTin9 = effectiveCustTin.length === 9
+      ? `${effectiveCustTin.slice(0, 3)}-${effectiveCustTin.slice(3, 6)}-${effectiveCustTin.slice(6, 9)}`
+      : (hasValidTin ? `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}` : '000-000-000');
+    const cleanBranch5 = (effectiveBranchStr || matchedRegisteredCust?.customer_branch_code || matchedRegisteredCust?.tin_branch_code || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
     const fullTin14 = finalIsVarious ? '000-000-000-00000' : `${formattedTin9}-${cleanBranch5}`;
 
     // Requirement 3: Save customer to database if user chose to add new customer
@@ -606,10 +658,19 @@ export default function SalesTransactionTab({
     const currentSeq = extractInvoiceSeqNum(invoiceNo);
     const nextSeq = currentSeq !== null ? String(currentSeq + 1) : String(( parseInt(nextSequentialInvoiceNo, 10) || 1) + 1);
     setInvoiceNo(nextSeq);
-    setCollectionRef(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
+    setCustomerName('');
+    setTin('');
+    setBranchCode('00000');
+    setAddress('');
     setParticulars('');
+    setQty('1');
     setUnitPrice('');
+    setDiscount('0');
+    setTaxWithheld('0');
+    setZeroRated('0');
+    setVatExempt('0');
     setDownPaymentAmount('');
+    setCollectionRef(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
     setNewCustomerPrompt(null);
     setExistingCustomerMatchPrompt(null);
   };
@@ -824,17 +885,23 @@ export default function SalesTransactionTab({
       sameInvoiceNo(c.invoice_number, inv.invoice_number)
     );
 
-    const prevCashCollected = existingMatching.reduce((sum, c) => {
+    // Only count actual payment rows, not 0-amount on-account placeholder rows
+    const actualMatching = existingMatching.filter(c => 
+      (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0 || 
+      (Number(c.discount ?? c.discounts) || 0) > 0
+    );
+
+    const prevCashCollected = actualMatching.reduce((sum, c) => {
       const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
       return sum + cashVal;
     }, 0);
-    const prevCollectionDiscounts = existingMatching.reduce((sum, c) => {
+    const prevCollectionDiscounts = actualMatching.reduce((sum, c) => {
       const isInitial = c.particulars?.includes('Down Payment') || c.id === inv.id + 1;
       const dVal = Number(c.discount ?? c.discounts) || 0;
       return sum + (isInitial ? 0 : dVal);
     }, 0);
-    const prevInstallmentWtax = existingMatching.reduce((sum, c) => {
-      return sum + (Number(c.amount_withheld_2307 ?? c.tax_withheld) || 0);
+    const prevInstallmentWtax = actualMatching.reduce((sum, c) => {
+      return sum + (Number(c.amount_withheld_2307) || 0);
     }, 0);
 
     // Remaining cash that the customer needs to pay
@@ -850,7 +917,7 @@ export default function SalesTransactionTab({
 
     const newTotalCashCollected = Math.round((prevCashCollected + paymentAmt) * 100) / 100;
     const newTotalSettled = Math.round((newTotalCashCollected + prevCollectionDiscounts + discountAmt) * 100) / 100;
-    const isNowFullyCollected = newTotalSettled >= (netCashDue - 0.05);
+    const isNowFullyCollected = newTotalSettled >= (netCashDue - 0.05) || (newTotalCashCollected + prevCollectionDiscounts + discountAmt + (manualWtaxAmt || invWtax)) >= (netReceivable - 0.05);
 
     // Upon full collection completion, recognize the remaining invoice 2307 CWT (or manualWtaxAmt)
     const wtaxForThisInstallment = manualWtaxAmt > 0
@@ -1296,21 +1363,34 @@ export default function SalesTransactionTab({
                     value={customerName}
                     onChange={(val) => {
                       setCustomerName(val);
-                      const clean = val.trim().toLowerCase();
-                      if (clean.length >= 2) {
+                      const rawLower = val.trim().toLowerCase();
+                      const norm = normName(val);
+                      if (rawLower.length >= 2) {
+                        const direct = customers.find(c => 
+                          customerDisplayName(c).toLowerCase() === rawLower ||
+                          (c.registered_name || '').toLowerCase() === rawLower ||
+                          (c.trade_name || '').toLowerCase() === rawLower ||
+                          normName(customerDisplayName(c)) === norm
+                        );
+                        if (direct) {
+                          handleSelectCustomer(direct);
+                        }
+                      }
+                    }}
+                    onBlur={() => {
+                      const clean = customerName.trim().toLowerCase();
+                      if (clean) {
                         const match = customers.find(c => {
                           const names = [c.registered_name, c.customer_name, c.trade_name].filter(Boolean).map(s => s!.toLowerCase());
-                          return names.some(n => n === clean || (clean.length >= 3 && n.includes(clean)));
+                          return names.some(n => n === clean || normName(n) === normName(clean));
                         });
                         if (match) {
-                          handleSelectCustomer(customerDisplayName(match));
+                          handleSelectCustomer(match);
                         }
                       }
                     }}
                     onSelect={(c) => {
-                      const name = customerDisplayName(c);
-                      setCustomerName(name);
-                      handleSelectCustomer(name);
+                      handleSelectCustomer(c);
                     }}
                     items={customers}
                     categoryLabel="Customer"
@@ -1337,17 +1417,20 @@ export default function SalesTransactionTab({
                   </label>
                   <select
                     onChange={(e) => {
-                      if (e.target.value) handleSelectCustomer(e.target.value);
+                      if (e.target.value) {
+                        const found = customers.find(c => String(c.id) === e.target.value || customerDisplayName(c) === e.target.value);
+                        if (found) handleSelectCustomer(found);
+                      }
                     }}
                     value=""
-                    className={`w-full px-3 py-2 text-xs rounded-xl border ${isDark ? 'bg-zinc-900 text-zinc-300' : 'bg-white text-slate-800 shadow-xs'} ${theme.borderInput} cursor-pointer focus:ring-1 focus:ring-cyan-500`}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900 shadow-xs'} ${theme.borderInput} cursor-pointer focus:ring-1 focus:ring-cyan-500`}
                   >
                     <option value="" className={isDark ? 'bg-zinc-900 text-zinc-400' : 'bg-white text-slate-500'}>
                       {customers.length > 0 ? `Select Customer (${customers.length})` : 'No Customers Saved'}
                     </option>
                     {customers.map((c, idx) => (
-                      <option key={idx} value={customerDisplayName(c)} className={isDark ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>
-                        {customerDisplayName(c)}
+                      <option key={idx} value={String(c.id)} className={isDark ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>
+                        {customerDisplayName(c)} {c.client_TIN || c.customer_tin ? `(${c.client_TIN || c.customer_tin})` : ''}
                       </option>
                     ))}
                   </select>
@@ -1807,18 +1890,20 @@ export default function SalesTransactionTab({
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="border-b border-zinc-800 text-zinc-400 uppercase font-bold text-[10px] tracking-wider">
+                  <tr className={`border-b uppercase font-bold text-[10px] tracking-wider ${
+                    isDark ? 'border-zinc-800 text-zinc-400 bg-zinc-900/50' : 'border-slate-300 text-slate-700 bg-slate-100'
+                  }`}>
                     <th className="p-3">Invoice #</th>
                     <th className="p-3">Date</th>
                     <th className="p-3">Customer Name</th>
                     <th className="p-3 text-right">Invoice Total</th>
                     <th className="p-3 text-right">Collected to Date</th>
-                    <th className="p-3 text-right text-amber-400">Balance Due</th>
+                    <th className="p-3 text-right text-amber-600 dark:text-amber-400 font-bold">Balance Due</th>
                     <th className="p-3 text-center">Status</th>
                     <th className="p-3 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800/60">
+                <tbody className={`divide-y ${isDark ? 'divide-zinc-800/60' : 'divide-slate-200'}`}>
                   {filteredOpenInvoices.map((inv) => {
                     const invDue = Number(inv.total_amount_due || inv.amount) || 0;
                     const matchingColls = collections.filter(c => 
@@ -1827,40 +1912,48 @@ export default function SalesTransactionTab({
                       isActiveCompanyRow(c) &&
                       sameInvoiceNo(c.invoice_number, inv.invoice_number)
                     );
-                    const collectedSoFar = matchingColls.reduce((sum, c) => {
+                    const collectedCashSoFar = matchingColls.reduce((sum, c) => {
                       const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
                       return sum + cashVal;
                     }, 0);
-                    const balance = Math.max(0, Math.round((invDue - collectedSoFar) * 100) / 100);
+                    const collectedDiscSoFar = matchingColls.reduce((sum, c) => {
+                      const dVal = Number(c.discount ?? c.discounts) || 0;
+                      return sum + dVal;
+                    }, 0);
+                    const totalCollectedSoFar = Math.round((collectedCashSoFar + collectedDiscSoFar) * 100) / 100;
+                    const balance = Math.max(0, Math.round((invDue - totalCollectedSoFar) * 100) / 100);
                     const actualPaymentCount = matchingColls.filter(c => (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0).length;
 
                     return (
-                      <tr key={inv.id} className="hover:bg-zinc-800/30 transition">
-                        <td className="p-3 font-mono font-bold text-cyan-400">{inv.invoice_number}</td>
-                        <td className="p-3 font-mono text-zinc-400">{inv.date}</td>
-                        <td className="p-3 font-medium text-zinc-200">
-                          <div>{inv.registered_name}</div>
-                          <div className="text-[10px] font-mono text-zinc-500">{inv.tin}</div>
+                      <tr key={inv.id} className={`transition ${isDark ? 'hover:bg-zinc-800/30' : 'hover:bg-slate-50'}`}>
+                        <td className="p-3 font-mono font-bold text-cyan-600 dark:text-cyan-400">{inv.invoice_number}</td>
+                        <td className={`p-3 font-mono ${isDark ? 'text-zinc-400' : 'text-slate-600'}`}>{inv.date}</td>
+                        <td className={`p-3 font-medium ${isDark ? 'text-zinc-200' : 'text-slate-900'}`}>
+                          <div className="font-semibold">{inv.registered_name}</div>
+                          <div className={`text-[10px] font-mono ${isDark ? 'text-zinc-500' : 'text-slate-500'}`}>{inv.tin}</div>
                         </td>
-                        <td className="p-3 text-right font-mono font-bold text-zinc-200">
+                        <td className={`p-3 text-right font-mono font-bold ${isDark ? 'text-zinc-200' : 'text-slate-900'}`}>
                           ₱{invDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="p-3 text-right font-mono text-emerald-400">
-                          <div>₱{collectedSoFar.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                        <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                          <div>₱{totalCollectedSoFar.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                          {collectedDiscSoFar > 0 && (
+                            <div className="text-[10px] text-rose-500 font-normal">incl. ₱{collectedDiscSoFar.toLocaleString(undefined, { minimumFractionDigits: 2 })} disc</div>
+                          )}
                           {actualPaymentCount > 0 && (
-                            <div className="text-[10px] text-zinc-400">{actualPaymentCount} collection(s)</div>
+                            <div className={`text-[10px] ${isDark ? 'text-zinc-400' : 'text-slate-500'}`}>{actualPaymentCount} collection(s)</div>
                           )}
                         </td>
-                        <td className="p-3 text-right font-mono font-extrabold text-amber-400">
+                        <td className="p-3 text-right font-mono font-black text-amber-600 dark:text-amber-400">
                           ₱{balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                         <td className="p-3 text-center">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            inv.status === 'Partial' || collectedSoFar > 0
-                              ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' 
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            inv.status === 'Partial' || totalCollectedSoFar > 0
+                              ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30' 
+                              : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30'
                           }`}>
-                            {collectedSoFar > 0 ? 'Partial' : (inv.status || 'On Account')}
+                            {totalCollectedSoFar > 0 ? 'Partial' : (inv.status || 'On Account')}
                           </span>
                         </td>
                         <td className="p-3 text-right">
