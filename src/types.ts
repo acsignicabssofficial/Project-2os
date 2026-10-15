@@ -305,6 +305,7 @@ export interface Collection {
   balance?: number;
   discount?: number;
   discounts?: number;
+  tax_withheld?: number;
   total_amount_due?: number;
 }
 
@@ -654,6 +655,7 @@ export interface UniformBookRecord {
 
   // Status & metadata
   status?: 'Cash' | 'On Account' | 'Partial' | 'Paid' | 'Unpaid' | string;
+  sales_status?: 'Cash' | 'On Account' | 'Partial' | 'Paid' | 'Unpaid' | string;
   is_cancelled?: boolean;
   created_at?: string;
   installments?: PaymentInstallment[];
@@ -661,6 +663,8 @@ export interface UniformBookRecord {
   settled_via_collections?: boolean;
   is_various_customer?: boolean;
   is_various?: boolean;
+  wtax_2307?: number;
+  is_initial_downpayment?: boolean;
 
   // Inter-compatibility properties for existing components/reports
   customer_id?: string;

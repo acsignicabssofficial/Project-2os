@@ -65,6 +65,7 @@ export default function SalesTransactionTab({
   onDeleteRecord
 }: SalesTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
+  const isDark = !theme || !theme.isLight;
 
   // Tab mode: 'new_sale' or 'collect_open'
   const [hubTab, setHubTab] = useState<'new_sale' | 'collect_open'>('new_sale');
@@ -277,22 +278,44 @@ export default function SalesTransactionTab({
     return subsidiarySales.filter(s => {
       if (s.is_cancelled) return false;
       if (activeCompanyName && s.company_name && s.company_name.trim().toLowerCase() !== activeCompanyName.trim().toLowerCase()) return false;
-      // Calculate how much has been settled across the collections book for this invoice (Cash + Discount + CWT 2307)
+      
+      // If already explicitly marked as Cash or Paid
+      if (s.status === 'Cash' || s.status === 'Paid' || s.sales_status === 'Paid') return false;
+
+      const grossInv = Number(s.total_amount_vat_inclusive || s.amount) || 0;
+      const invDisc = Number(s.discount ?? s.less_discount ?? s.discounts) || 0;
+      const invWtax = Number(s.tax_withheld ?? s.withholding_2307 ?? s.amount_withheld_2307 ?? s.less_withholding_tax) || 0;
+      const netReceivable = Math.max(0, Math.round((grossInv - invDisc) * 100) / 100);
+      const netCashDue = Number(s.total_amount_due) > 0 ? Number(s.total_amount_due) : Math.max(0, Math.round((netReceivable - invWtax) * 100) / 100);
+
+      // Find all matching collections
       const matchingCollections = collections.filter(c => 
         !c.is_cancelled && 
         c.invoice_number && 
         isActiveCompanyRow(c) &&
         sameInvoiceNo(c.invoice_number, s.invoice_number)
       );
-      const totalCollected = matchingCollections.reduce((sum, c) => {
-        const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : (Number(c.amount) || 0);
+
+      let totalCashCollected = 0;
+      let totalDiscountSettled = invDisc;
+      let totalWtaxSettled = 0;
+
+      matchingCollections.forEach(c => {
+        const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
+        totalCashCollected += cashVal;
         const discVal = Number(c.discount ?? c.discounts) || 0;
+        if (discVal > 0) totalDiscountSettled += discVal;
         const wtaxVal = Number(c.amount_withheld_2307 ?? c.tax_withheld ?? c.wtax_2307) || 0;
-        return sum + cashVal + discVal + wtaxVal;
-      }, 0);
-      const invoiceDue = Number(s.total_amount_due || s.amount) || 0;
-      const isPaid = (s.status === 'Cash' || s.status === 'Paid') || (invoiceDue > 0 && totalCollected >= invoiceDue - 0.05);
-      return !isPaid && (s.status === 'On Account' || s.status === 'Partial' || totalCollected < invoiceDue - 0.05);
+        if (wtaxVal > 0) totalWtaxSettled += wtaxVal;
+      });
+
+      const effectiveWtax = totalWtaxSettled > 0 ? totalWtaxSettled : invWtax;
+      const totalOffsetCreditedToAR = Math.round((totalCashCollected + effectiveWtax) * 100) / 100;
+      const remainingAR = Math.max(0, Math.round((netReceivable - totalOffsetCreditedToAR) * 100) / 100);
+      const remainingCash = Math.max(0, Math.round((netCashDue - totalCashCollected) * 100) / 100);
+
+      const isPaid = remainingAR <= 0.05 || remainingCash <= 0.05;
+      return !isPaid;
     });
   }, [subsidiarySales, collections, activeCompanyName]);
 
@@ -541,7 +564,7 @@ export default function SalesTransactionTab({
         vat_exempt_amount: liveFormulas.vat_exempt,
         total_amount_vat_inclusive: liveFormulas.total_sale_vat_inclusive,
         total_amount_net_of_vat: liveFormulas.amount_net_of_vat,
-        discount: liveFormulas.less_discount,
+        discount: 0, // Invoice trade discount is already booked in Sales recognition (dr 4015); collections only track subsequent cash settlement discounts
         tax_withheld: liveFormulas.less_withholding_tax,
         total_amount_due: totalDue,
         amount_collected: downPmt,
@@ -550,6 +573,7 @@ export default function SalesTransactionTab({
         status: pendingBal <= 0.01 ? 'Paid' : 'Partial',
         is_cancelled: false,
         is_various: finalIsVarious,
+        is_initial_downpayment: true as any,
         created_at: nowIso
       };
 
@@ -631,17 +655,31 @@ export default function SalesTransactionTab({
 
     const rawTinDigits = tin.replace(/\D/g, '').slice(0, 9);
     const hasValidTin = rawTinDigits.length === 9 && !/^0+$/.test(rawTinDigits);
+    const cleanCustomerName = customerName.trim().toLowerCase();
+    const normalizedCustomer = normName(customerName);
 
-    // Existing customer (this entity only) matched by ANY name field: registered / customer / trade name
-    const existingCustomerByName = customers.find(
-      c => isActiveCompanyRow(c) && customerNameKeys(c).includes(normName(customerName))
-    );
+    // Existing customer search: check active company first, then fallback to all registered customers
+    const matchCustomerInList = (list: Customer[]) => {
+      return list.find(c => {
+        const keys = customerNameKeys(c);
+        if (keys.includes(normalizedCustomer) || keys.some(k => k === cleanCustomerName)) return true;
+        const disp = customerDisplayName(c).toLowerCase();
+        if (disp === cleanCustomerName) return true;
+        if (cleanCustomerName.length >= 3 && disp.includes(cleanCustomerName)) return true;
+        if (disp.length >= 3 && cleanCustomerName.includes(disp)) return true;
+        return false;
+      });
+    };
+
+    const existingCustomerByName = 
+      matchCustomerInList(customers.filter(c => isActiveCompanyRow(c))) ||
+      matchCustomerInList(customers);
 
     if (hasValidTin) {
-      const existingCustomerWithTin = customers.find(c => isActiveCompanyRow(c) && tin9Of(c) === rawTinDigits);
+      const existingCustomerWithTin = customers.find(c => tin9Of(c) === rawTinDigits);
 
       if (existingCustomerWithTin) {
-        // TIN belongs to an already-registered customer -> ROUTE to that customer instead of blocking.
+        // TIN belongs to an already-registered customer -> ROUTE to that customer directly
         const registeredName = customerDisplayName(existingCustomerWithTin);
         const onFileBranch = (existingCustomerWithTin.customer_branch_code || existingCustomerWithTin.tin_branch_code || branchCode || '00000')
           .replace(/\D/g, '').padStart(5, '0').slice(0, 5);
@@ -650,7 +688,7 @@ export default function SalesTransactionTab({
         const formattedExisting = `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}`;
 
         if (!customerNameKeys(existingCustomerWithTin).includes(normName(customerName))) {
-          triggerAlert(`TIN ${formattedExisting} belongs to existing customer "${registeredName}". Transaction was routed to that customer record.`, 'info');
+          triggerAlert(`TIN ${formattedExisting} belongs to customer "${registeredName}". Transaction was routed to that customer record.`, 'info');
         }
         setCustomerName(registeredName);
         setTin(formattedExisting);
@@ -660,14 +698,14 @@ export default function SalesTransactionTab({
         return;
       }
 
-      // Valid TIN, but not in the directory yet.
+      // Valid TIN, check if customer name matches an existing profile
       const formattedTin9 = `${rawTinDigits.slice(0, 3)}-${rawTinDigits.slice(3, 6)}-${rawTinDigits.slice(6, 9)}`;
       const cleanBranch5 = (branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
 
       if (existingCustomerByName) {
         const onFileTin9 = tin9Of(existingCustomerByName);
         if (onFileTin9.length === 9 && onFileTin9 === rawTinDigits) {
-          // Exactly matches on-file TIN -> route directly
+          // Matches on-file TIN -> route directly
           const registeredName = customerDisplayName(existingCustomerByName);
           const onFileBranch = (existingCustomerByName.customer_branch_code || existingCustomerByName.tin_branch_code || cleanBranch5).replace(/\D/g, '').padStart(5, '0').slice(0, 5);
           const onFileAddress = existingCustomerByName.address || existingCustomerByName.client_Address || address;
@@ -676,7 +714,7 @@ export default function SalesTransactionTab({
         }
 
         if (onFileTin9.length === 9 && onFileTin9 !== rawTinDigits) {
-          // Name matches an existing customer, but entered TIN is different -> open routing modal with 1-click options
+          // Name matches an existing customer, but entered TIN is different
           setExistingCustomerMatchPrompt({
             isOpen: true,
             matchedCustomer: existingCustomerByName,
@@ -688,7 +726,7 @@ export default function SalesTransactionTab({
           return;
         }
 
-        // Registered customer has NO TIN on file yet -> attach this TIN to the existing entity (no duplicate)
+        // Registered customer has NO TIN on file yet -> attach this TIN to the existing entity
         if (setCustomers) {
           setCustomers(prev =>
             prev.map(c =>
@@ -710,7 +748,7 @@ export default function SalesTransactionTab({
         return;
       }
 
-      // Brand-new customer with a valid TIN -> ask if user wants to add to regular customers
+      // Brand-new customer with a valid TIN
       setNewCustomerPrompt({
         isOpen: true,
         customerName: customerName.trim(),
@@ -722,7 +760,7 @@ export default function SalesTransactionTab({
       return;
     } else {
       // NO VALID TIN ENTERED (user entered name manually or blank TIN):
-      // 1. Name matches an existing customer -> AUTOMATICALLY ROUTE to the customer record!
+      // If name matches an existing customer -> AUTOMATICALLY ROUTE TO EXISTING CUSTOMER DIRECTLY
       if (existingCustomerByName) {
         const onFileTin9 = tin9Of(existingCustomerByName);
         const registeredName = customerDisplayName(existingCustomerByName);
@@ -731,31 +769,20 @@ export default function SalesTransactionTab({
         const onFileAddress =
           existingCustomerByName.address || existingCustomerByName.client_Address || existingCustomerByName.customer_address || address;
 
-        if (onFileTin9.length === 9) {
-          // Customer has registered TIN on file -> Auto-route directly without blocking!
-          const formattedOnFile = `${onFileTin9.slice(0, 3)}-${onFileTin9.slice(3, 6)}-${onFileTin9.slice(6, 9)}`;
-          setCustomerName(registeredName);
-          setTin(formattedOnFile);
-          setBranchCode(onFileBranch);
-          if (!address && onFileAddress) setAddress(onFileAddress);
-          triggerAlert(`Transaction automatically routed to existing registered customer "${registeredName}" (TIN: ${formattedOnFile}).`, 'info');
-          executeRecordSale(false, false, formattedOnFile, onFileBranch, onFileAddress, registeredName);
-          return;
-        } else {
-          // Customer exists in masterlist but has no TIN on file -> prompt 1-click confirmation
-          setExistingCustomerMatchPrompt({
-            isOpen: true,
-            matchedCustomer: existingCustomerByName,
-            step: 'ask_same',
-            verifyTinInput: '',
-            verifyBranchInput: onFileBranch,
-            errorText: undefined
-          });
-          return;
-        }
+        const formattedOnFile = onFileTin9.length === 9
+          ? `${onFileTin9.slice(0, 3)}-${onFileTin9.slice(3, 6)}-${onFileTin9.slice(6, 9)}`
+          : '000-000-000';
+
+        setCustomerName(registeredName);
+        setTin(formattedOnFile);
+        setBranchCode(onFileBranch);
+        if (!address && onFileAddress) setAddress(onFileAddress);
+        triggerAlert(`Transaction automatically linked and routed to existing customer "${registeredName}".`, 'info');
+        executeRecordSale(false, false, formattedOnFile, onFileBranch, onFileAddress, registeredName);
+        return;
       }
 
-      // 2. Unknown name and no TIN -> offer to register as Regular Customer (with TIN) or Various Customer
+      // Unknown name and no TIN -> offer to register as Regular Customer or Various Customer
       setNewCustomerPrompt({
         isOpen: true,
         customerName: customerName.trim(),
@@ -783,8 +810,11 @@ export default function SalesTransactionTab({
     }
 
     const inv = selectedInvoiceToCollect;
-    const invTotalDue = Number(inv.total_amount_due || inv.amount) || 0;
-    const invWtax = Number(inv.tax_withheld || inv.withholding_2307) || 0;
+    const invGross = Number(inv.total_amount_vat_inclusive || inv.amount) || 0;
+    const invTradeDiscount = Number(inv.discount ?? inv.less_discount ?? inv.discounts) || 0;
+    const netReceivable = Math.max(0, Math.round((invGross - invTradeDiscount) * 100) / 100);
+    const invWtax = Number(inv.tax_withheld ?? inv.withholding_2307 ?? inv.amount_withheld_2307 ?? inv.less_withholding_tax) || 0;
+    const netCashDue = Number(inv.total_amount_due) > 0 ? Number(inv.total_amount_due) : Math.max(0, Math.round((netReceivable - invWtax) * 100) / 100);
 
     // Check existing collection record(s) for this invoice
     const existingMatching = collections.filter(c => 
@@ -798,43 +828,38 @@ export default function SalesTransactionTab({
       const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
       return sum + cashVal;
     }, 0);
-    const prevDiscount = existingMatching.reduce((sum, c) => {
-      if (Array.isArray(c.installments) && c.installments.length > 0) {
-        return sum + c.installments.reduce((s, inst) => s + (Number(inst.discount) || 0), 0);
-      }
-      return sum;
+    const prevCollectionDiscounts = existingMatching.reduce((sum, c) => {
+      const isInitial = c.particulars?.includes('Down Payment') || c.id === inv.id + 1;
+      const dVal = Number(c.discount ?? c.discounts) || 0;
+      return sum + (isInitial ? 0 : dVal);
     }, 0);
     const prevInstallmentWtax = existingMatching.reduce((sum, c) => {
-      if (Array.isArray(c.installments) && c.installments.length > 0) {
-        return sum + c.installments.reduce((s, inst) => s + (Number(inst.wtax_2307) || 0), 0);
-      }
-      return sum + (Number(c.amount_withheld_2307) || 0);
+      return sum + (Number(c.amount_withheld_2307 ?? c.tax_withheld) || 0);
     }, 0);
 
-    const remainingBalanceBeforeThis = Math.max(0, Math.round((invTotalDue - prevCashCollected - prevDiscount) * 100) / 100);
-    const currentSettlementAttempt = Math.round((paymentAmt + discountAmt + (invWtax === 0 ? manualWtaxAmt : 0)) * 100) / 100;
+    // Remaining cash that the customer needs to pay
+    const remainingCashBeforeThis = Math.max(0, Math.round((netCashDue - prevCashCollected - prevCollectionDiscounts) * 100) / 100);
 
-    // ISSUE 1: Precaution against Customer Overpayment
-    if (currentSettlementAttempt > remainingBalanceBeforeThis + 0.01) {
+    if (paymentAmt > remainingCashBeforeThis + 0.05) {
       triggerAlert(
-        `Overpayment Precaution: Collection amount (₱${currentSettlementAttempt.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining balance due of ₱${remainingBalanceBeforeThis.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${inv.invoice_number}. Customer overpayment is blocked.`,
+        `Overpayment Precaution: Collection cash amount (₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining cash balance of ₱${remainingCashBeforeThis.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${inv.invoice_number}. Customer overpayment is blocked.`,
         'error'
       );
       return;
     }
 
     const newTotalCashCollected = Math.round((prevCashCollected + paymentAmt) * 100) / 100;
-    const newTotalSettledTowardsDue = Math.round((newTotalCashCollected + prevDiscount + discountAmt + (invWtax === 0 ? manualWtaxAmt : 0)) * 100) / 100;
-    const isNowFullyCollected = newTotalSettledTowardsDue >= (invTotalDue - 0.05);
+    const newTotalSettled = Math.round((newTotalCashCollected + prevCollectionDiscounts + discountAmt) * 100) / 100;
+    const isNowFullyCollected = newTotalSettled >= (netCashDue - 0.05);
 
-    // Upon full collection completion, recognize the invoice's 2307 withholding tax (or manualWtaxAmt)
+    // Upon full collection completion, recognize the remaining invoice 2307 CWT (or manualWtaxAmt)
     const wtaxForThisInstallment = manualWtaxAmt > 0
       ? manualWtaxAmt
       : (isNowFullyCollected ? Math.max(0, Math.round((invWtax - prevInstallmentWtax) * 100) / 100) : 0);
 
     const commonId = Date.now();
     const nowIso = new Date().toISOString();
-    const pendingBal = Math.max(0, Math.round((invTotalDue - newTotalSettledTowardsDue) * 100) / 100);
+    const pendingBal = Math.max(0, Math.round((netCashDue - newTotalSettled) * 100) / 100);
 
     // Count existing actual payments (where amount_collected > 0) to determine COLLECTION 1, COLLECTION 2, COLLECTION 3...
     const existingActualPayments = existingMatching.filter(c => (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0);
@@ -866,7 +891,7 @@ export default function SalesTransactionTab({
       discount: discountAmt,
       tax_withheld: wtaxForThisInstallment,
       amount_withheld_2307: wtaxForThisInstallment,
-      total_amount_due: invTotalDue,
+      total_amount_due: inv.total_amount_due || netCashDue,
       amount_collected: paymentAmt,
       pending_balance: pendingBal,
       status: isNowFullyCollected ? 'Paid' : 'Partial',
@@ -1269,9 +1294,21 @@ export default function SalesTransactionTab({
                   </label>
                   <AutoSuggestInput<Customer>
                     value={customerName}
-                    onChange={setCustomerName}
+                    onChange={(val) => {
+                      setCustomerName(val);
+                      const clean = val.trim().toLowerCase();
+                      if (clean.length >= 2) {
+                        const match = customers.find(c => {
+                          const names = [c.registered_name, c.customer_name, c.trade_name].filter(Boolean).map(s => s!.toLowerCase());
+                          return names.some(n => n === clean || (clean.length >= 3 && n.includes(clean)));
+                        });
+                        if (match) {
+                          handleSelectCustomer(customerDisplayName(match));
+                        }
+                      }
+                    }}
                     onSelect={(c) => {
-                      const name = c.registered_name || c.customer_name || c.trade_name || '';
+                      const name = customerDisplayName(c);
                       setCustomerName(name);
                       handleSelectCustomer(name);
                     }}
@@ -1280,7 +1317,7 @@ export default function SalesTransactionTab({
                     theme={theme}
                     required
                     placeholder="Enter customer registered trade name (e.g. ABC, BAB, DAB)..."
-                    getItemLabel={(c) => c.registered_name || c.customer_name || c.trade_name || ''}
+                    getItemLabel={(c) => customerDisplayName(c)}
                     getItemSublabel={(c) => `TIN: ${c.client_TIN || c.customer_tin || 'N/A'} • ${c.address || c.client_Address || 'No address'}`}
                     getItemBadge={(c) => c.customer_branch_code || 'Customer'}
                     getSearchFields={(c) => [
@@ -1290,7 +1327,7 @@ export default function SalesTransactionTab({
                       c.client_TIN || '',
                       c.customer_tin || ''
                     ]}
-                    inputClassName={`w-full px-3.5 py-2 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
+                    inputClassName={`w-full px-3.5 py-2 text-xs rounded-xl border font-medium ${isDark ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900 shadow-xs'} ${theme.borderInput} focus:ring-1 focus:ring-cyan-500`}
                   />
                 </div>
 
@@ -1303,14 +1340,14 @@ export default function SalesTransactionTab({
                       if (e.target.value) handleSelectCustomer(e.target.value);
                     }}
                     value=""
-                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent text-zinc-400 ${theme.borderInput} cursor-pointer focus:ring-1 focus:ring-cyan-500`}
+                    className={`w-full px-3 py-2 text-xs rounded-xl border ${isDark ? 'bg-zinc-900 text-zinc-300' : 'bg-white text-slate-800 shadow-xs'} ${theme.borderInput} cursor-pointer focus:ring-1 focus:ring-cyan-500`}
                   >
-                    <option value="" className="bg-zinc-900 text-zinc-400">
+                    <option value="" className={isDark ? 'bg-zinc-900 text-zinc-400' : 'bg-white text-slate-500'}>
                       {customers.length > 0 ? `Select Customer (${customers.length})` : 'No Customers Saved'}
                     </option>
                     {customers.map((c, idx) => (
-                      <option key={idx} value={c.registered_name || c.customer_name || c.trade_name} className="bg-zinc-900 text-white">
-                        {c.registered_name || c.customer_name || c.trade_name}
+                      <option key={idx} value={customerDisplayName(c)} className={isDark ? 'bg-zinc-900 text-white' : 'bg-white text-slate-900'}>
+                        {customerDisplayName(c)}
                       </option>
                     ))}
                   </select>
@@ -1474,10 +1511,10 @@ export default function SalesTransactionTab({
               {/* Row B: CWT 2307, Zero-Rated & VAT-Exempt in a balanced 3-column layout */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
                 {/* Column 1: CWT 2307 */}
-                <div className="flex flex-col gap-1.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/40">
+                <div className={`flex flex-col gap-1.5 p-3 rounded-xl border ${isDark ? 'border-zinc-800/80 bg-zinc-900/40' : 'border-slate-200 bg-slate-50/80'}`}>
                   <div className="flex items-center justify-between">
                     <label className={`text-[11px] font-bold ${theme.textMuted}`}>CWT 2307 Withheld (₱)</label>
-                    <span className="text-[10px] text-amber-400 font-mono">
+                    <span className="text-[10px] text-amber-500 font-mono">
                       {liveFormulas.vatable_sales > 0 && `(10% = ₱${(Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2)})`}
                     </span>
                   </div>
@@ -1488,42 +1525,52 @@ export default function SalesTransactionTab({
                     placeholder="0.00"
                     value={taxWithheld}
                     onChange={(e) => setTaxWithheld(e.target.value)}
-                    className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-zinc-900 font-mono text-amber-400 ${theme.borderInput}`}
+                    className={`w-full px-3 py-1.5 text-xs rounded-lg border font-mono font-bold ${
+                      isDark ? 'bg-zinc-900 text-amber-400 border-zinc-700' : 'bg-white text-amber-700 border-slate-300 shadow-xs'
+                    }`}
                   />
                   <div className="flex flex-wrap items-center gap-1 mt-0.5">
-                    <span className="text-[9px] text-zinc-500 font-bold uppercase">Rate:</span>
+                    <span className={`text-[9px] font-bold uppercase ${isDark ? 'text-zinc-500' : 'text-slate-500'}`}>Rate:</span>
                     <button
                       type="button"
                       onClick={() => setTaxWithheld('0')}
-                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono transition cursor-pointer"
+                      className={`px-1.5 py-0.5 rounded text-[9.5px] font-mono transition cursor-pointer ${
+                        isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                      }`}
                     >
                       0%
                     </button>
                     <button
                       type="button"
                       onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.01 * 100) / 100).toFixed(2))}
-                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition cursor-pointer"
+                      className={`px-1.5 py-0.5 rounded text-[9.5px] font-mono transition cursor-pointer ${
+                        isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-amber-300' : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                      }`}
                     >
                       1%
                     </button>
                     <button
                       type="button"
                       onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.02 * 100) / 100).toFixed(2))}
-                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition cursor-pointer"
+                      className={`px-1.5 py-0.5 rounded text-[9.5px] font-mono transition cursor-pointer ${
+                        isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-amber-300' : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                      }`}
                     >
                       2%
                     </button>
                     <button
                       type="button"
                       onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.05 * 100) / 100).toFixed(2))}
-                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-mono transition cursor-pointer"
+                      className={`px-1.5 py-0.5 rounded text-[9.5px] font-mono transition cursor-pointer ${
+                        isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-amber-300' : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                      }`}
                     >
                       5%
                     </button>
                     <button
                       type="button"
                       onClick={() => setTaxWithheld((Math.round(liveFormulas.vatable_sales * 0.10 * 100) / 100).toFixed(2))}
-                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono font-bold border border-amber-500/40 transition cursor-pointer"
+                      className="px-1.5 py-0.5 rounded text-[9.5px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 font-mono font-bold border border-amber-500/40 transition cursor-pointer"
                     >
                       10%
                     </button>
@@ -1531,10 +1578,10 @@ export default function SalesTransactionTab({
                 </div>
 
                 {/* Column 2: Zero-Rated */}
-                <div className="flex flex-col gap-1.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/40">
+                <div className={`flex flex-col gap-1.5 p-3 rounded-xl border ${isDark ? 'border-zinc-800/80 bg-zinc-900/40' : 'border-slate-200 bg-slate-50/80'}`}>
                   <div className="flex items-center justify-between">
                     <label className={`text-[11px] font-bold ${theme.textMuted}`}>Zero-Rated Amount (₱)</label>
-                    <span className="text-[10px] text-zinc-500 font-mono">0% VAT</span>
+                    <span className={`text-[10px] font-mono ${isDark ? 'text-zinc-500' : 'text-slate-500'}`}>0% VAT</span>
                   </div>
                   <input
                     type="number"
@@ -1543,16 +1590,18 @@ export default function SalesTransactionTab({
                     placeholder="0.00"
                     value={zeroRated}
                     onChange={(e) => setZeroRated(e.target.value)}
-                    className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-zinc-900 font-mono ${theme.borderInput} ${theme.textMain}`}
+                    className={`w-full px-3 py-1.5 text-xs rounded-lg border font-mono ${
+                      isDark ? 'bg-zinc-900 text-white border-zinc-700' : 'bg-white text-slate-900 border-slate-300 shadow-xs'
+                    }`}
                   />
-                  <p className="text-[10px] text-zinc-500 mt-1">Export sales / PEZA registered</p>
+                  <p className={`text-[10px] mt-1 ${isDark ? 'text-zinc-500' : 'text-slate-500'}`}>Export sales / PEZA registered</p>
                 </div>
 
                 {/* Column 3: VAT-Exempt */}
-                <div className="flex flex-col gap-1.5 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/40">
+                <div className={`flex flex-col gap-1.5 p-3 rounded-xl border ${isDark ? 'border-zinc-800/80 bg-zinc-900/40' : 'border-slate-200 bg-slate-50/80'}`}>
                   <div className="flex items-center justify-between">
                     <label className={`text-[11px] font-bold ${theme.textMuted}`}>VAT-Exempt Amount (₱)</label>
-                    <span className="text-[10px] text-zinc-500 font-mono">Sec. 109</span>
+                    <span className={`text-[10px] font-mono ${isDark ? 'text-zinc-500' : 'text-slate-500'}`}>Sec. 109</span>
                   </div>
                   <input
                     type="number"
@@ -1561,9 +1610,11 @@ export default function SalesTransactionTab({
                     placeholder="0.00"
                     value={vatExempt}
                     onChange={(e) => setVatExempt(e.target.value)}
-                    className={`w-full px-3 py-1.5 text-xs rounded-lg border bg-zinc-900 font-mono ${theme.borderInput} ${theme.textMain}`}
+                    className={`w-full px-3 py-1.5 text-xs rounded-lg border font-mono ${
+                      isDark ? 'bg-zinc-900 text-white border-zinc-700' : 'bg-white text-slate-900 border-slate-300 shadow-xs'
+                    }`}
                   />
-                  <p className="text-[10px] text-zinc-500 mt-1">Exempt goods & services under law</p>
+                  <p className={`text-[10px] mt-1 ${isDark ? 'text-zinc-500' : 'text-slate-500'}`}>Exempt goods &amp; services under law</p>
                 </div>
               </div>
             </div>
@@ -1573,53 +1624,59 @@ export default function SalesTransactionTab({
           {/* RIGHT 1 COLUMN: LIVE COMPUTATION & SUBMISSION */}
           <div className="flex flex-col gap-5">
             <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl p-6 shadow-xs flex flex-col gap-4 sticky top-4`}>
-              <h3 className={`text-xs font-bold uppercase tracking-wider ${theme.textTitle} flex items-center gap-2 border-b border-zinc-800 pb-3`}>
+              <h3 className={`text-xs font-bold uppercase tracking-wider ${theme.textTitle} flex items-center gap-2 border-b ${isDark ? 'border-zinc-800' : 'border-slate-200'} pb-3`}>
                 <BadgePercent className="w-4 h-4 text-emerald-400" />
-                <span>Live Tax & Financial Math</span>
+                <span>Live Tax &amp; Financial Math</span>
               </h3>
 
               <div className="flex flex-col gap-2 text-xs font-mono">
-                <div className="flex justify-between py-1 border-b border-zinc-800/40">
+                <div className={`flex justify-between py-1 border-b ${isDark ? 'border-zinc-800/40' : 'border-slate-200'}`}>
                   <span className={theme.textMuted}>Gross Amount:</span>
-                  <span className="font-bold text-zinc-200">₱{liveFormulas.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span className={`font-bold ${isDark ? 'text-zinc-200' : 'text-slate-900'}`}>₱{liveFormulas.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
 
-                <div className="flex justify-between py-1 border-b border-zinc-800/40">
+                <div className={`flex justify-between py-1 border-b ${isDark ? 'border-zinc-800/40' : 'border-slate-200'}`}>
                   <span className={theme.textMuted}>Vatable Sales (Base):</span>
-                  <span className="font-bold text-emerald-400">₱{liveFormulas.vatable_sales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span className="font-bold text-emerald-500">₱{liveFormulas.vatable_sales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
 
-                <div className="flex justify-between py-1 border-b border-zinc-800/40">
+                <div className={`flex justify-between py-1 border-b ${isDark ? 'border-zinc-800/40' : 'border-slate-200'}`}>
                   <span className={theme.textMuted}>Output VAT (12%):</span>
-                  <span className="font-bold text-cyan-400">₱{liveFormulas.vat.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span className="font-bold text-cyan-500">₱{liveFormulas.vat.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
 
                 {liveFormulas.less_discount > 0 && (
-                  <div className="flex justify-between py-1 border-b border-zinc-800/40 text-rose-400">
+                  <div className={`flex justify-between py-1 border-b ${isDark ? 'border-zinc-800/40' : 'border-slate-200'} text-rose-500`}>
                     <span>Less Discount:</span>
                     <span>-₱{liveFormulas.less_discount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
 
                 {liveFormulas.less_withholding_tax > 0 && (
-                  <div className="flex justify-between py-1 border-b border-zinc-800/40 text-amber-400">
+                  <div className={`flex justify-between py-1 border-b ${isDark ? 'border-zinc-800/40' : 'border-slate-200'} text-amber-500`}>
                     <span>Less Withheld (2307):</span>
                     <span>-₱{liveFormulas.less_withholding_tax.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
 
-                <div className="flex justify-between items-baseline py-2.5 px-3 rounded-xl bg-zinc-900/80 border border-zinc-800 mt-1">
-                  <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wide">TOTAL DUE:</span>
-                  <span className="text-base font-black text-amber-400">₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <div className={`flex justify-between items-baseline py-2.5 px-3 rounded-xl border mt-1 ${
+                  isDark ? 'bg-zinc-900/80 border-zinc-800' : 'bg-emerald-50 border-emerald-200'
+                }`}>
+                  <span className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-zinc-300' : 'text-slate-700'}`}>TOTAL DUE:</span>
+                  <span className="text-base font-black text-emerald-600 dark:text-emerald-400">₱{liveFormulas.total_amount_due.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
 
                 {saleMode === 'ON PARTIAL' && (
-                  <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 flex flex-col gap-1 text-[11px] mt-1">
-                    <div className="flex justify-between text-cyan-300">
+                  <div className={`p-3 rounded-xl border flex flex-col gap-1 text-[11px] mt-1 ${
+                    isDark ? 'bg-cyan-950/40 border-cyan-500/30' : 'bg-cyan-50 border-cyan-200'
+                  }`}>
+                    <div className={`flex justify-between ${isDark ? 'text-cyan-300' : 'text-cyan-900 font-semibold'}`}>
                       <span>Initial Down Payment:</span>
                       <span className="font-bold">₱{(parseFloat(downPaymentAmount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </div>
-                    <div className="flex justify-between text-amber-300 font-bold border-t border-cyan-800/50 pt-1">
+                    <div className={`flex justify-between font-bold border-t pt-1 ${
+                      isDark ? 'text-amber-300 border-cyan-800/50' : 'text-amber-800 border-cyan-200'
+                    }`}>
                       <span>Remaining A/R Balance:</span>
                       <span>₱{Math.max(0, liveFormulas.total_amount_due - (parseFloat(downPaymentAmount) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </div>
@@ -1628,15 +1685,17 @@ export default function SalesTransactionTab({
               </div>
 
               {/* ROUTING SUMMARY BOX */}
-              <div className="p-3 rounded-xl border border-zinc-800 bg-zinc-900/60 flex flex-col gap-1.5 text-[11px]">
-                <span className="font-bold text-zinc-400 uppercase tracking-wider text-[10px]">Destination Books:</span>
-                <div className="flex items-center gap-1.5 text-emerald-400">
+              <div className={`p-3 rounded-xl border flex flex-col gap-1.5 text-[11px] ${
+                isDark ? 'border-zinc-800 bg-zinc-900/60' : 'border-slate-200 bg-slate-50'
+              }`}>
+                <span className={`font-bold uppercase tracking-wider text-[10px] ${isDark ? 'text-zinc-400' : 'text-slate-600'}`}>Destination Books:</span>
+                <div className="flex items-center gap-1.5 text-emerald-500 font-medium">
                   <Check className="w-3.5 h-3.5 shrink-0" />
                   <span>Subsidiary Sales ({saleMode === 'ON CASH' ? 'Paid' : saleMode === 'ON PARTIAL' ? 'Partial' : 'On Account'})</span>
                 </div>
                 {saleMode === 'ON CASH' && (
                   <>
-                    <div className="flex items-center gap-1.5 text-cyan-400">
+                    <div className="flex items-center gap-1.5 text-cyan-500 font-medium">
                       <Check className="w-3.5 h-3.5 shrink-0" />
                       <span>Cash Receipts Book (Cash Sales Settlement)</span>
                     </div>
@@ -2109,16 +2168,26 @@ export default function SalesTransactionTab({
                 <div className="flex flex-col gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      setExistingCustomerMatchPrompt({
-                        ...existingCustomerMatchPrompt,
-                        step: 'verify_tin',
-                        errorText: undefined
-                      })
-                    }
-                    className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-white bg-cyan-600 hover:bg-cyan-500 transition shadow-sm cursor-pointer"
+                    onClick={() => {
+                      const matched = existingCustomerMatchPrompt.matchedCustomer;
+                      const regName = customerDisplayName(matched);
+                      const onFileTin = tin9Of(matched);
+                      const fmt = onFileTin.length === 9
+                        ? `${onFileTin.slice(0, 3)}-${onFileTin.slice(3, 6)}-${onFileTin.slice(6, 9)}`
+                        : (tin.replace(/\D/g, '').length === 9 ? tin : '000-000-000');
+                      const br5 = (matched.customer_branch_code || matched.tin_branch_code || branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+                      const addr = matched.address || matched.client_Address || matched.customer_address || address;
+
+                      setCustomerName(regName);
+                      setTin(fmt);
+                      setBranchCode(br5);
+                      if (!address && addr) setAddress(addr);
+                      setExistingCustomerMatchPrompt(null);
+                      executeRecordSale(false, false, fmt, br5, addr, regName);
+                    }}
+                    className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-white bg-emerald-600 hover:bg-emerald-500 transition shadow-sm cursor-pointer"
                   >
-                    ✓ Yes, Same Customer (Enter TIN to Confirm Identity)
+                    ✓ Yes, Same Customer (Route & Record to Existing Profile)
                   </button>
 
                   <button

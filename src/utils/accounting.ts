@@ -732,8 +732,15 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
 
     // Per-payment row format (COLLECTION 1, COLLECTION 2, COLLECTION 3...)
     const cashAmt = c.amount_collected !== undefined ? Number(c.amount_collected) : (Number(c.amount) || 0);
-    const discountAmt = Number(c.discount ?? c.discounts) || 0;
+    const rawDiscountAmt = Number(c.discount ?? c.discounts) || 0;
     const directWtaxOnRow = Number(c.amount_withheld_2307 ?? c.tax_withheld ?? c.wtax_2307) || 0;
+
+    // Do not double-count initial invoice trade discount if it was already booked in the Sales recognition entry
+    const isInitialSaleTradeDiscount = matchingSale && 
+      (Number(matchingSale.discount ?? matchingSale.less_discount) || 0) > 0 &&
+      (Number(matchingSale.discount ?? matchingSale.less_discount) || 0) === rawDiscountAmt &&
+      (c.particulars?.includes('Down Payment') || c.id === matchingSale.id + 1);
+    const discountAmt = isInitialSaleTradeDiscount ? 0 : rawDiscountAmt;
 
     if (cashAmt <= 0 && discountAmt <= 0 && directWtaxOnRow <= 0) {
       return; // Skip 0-amount On Account tracking rows
@@ -742,27 +749,25 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const pmtOrder = sameInvColls.findIndex(col => col.id === c.id) + 1 || (idx + 1);
     const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd collection' : `for #${pmtOrder} collection`;
 
-    // Sum all settlements (cash + discount + CWT) for this invoice
-    const totalCollectedForInv = sameInvColls.reduce((s, col) => {
+    // Sum all cash collected for this invoice across installments
+    const totalCashCollectedForInv = sameInvColls.reduce((s, col) => {
       const colCash = col.amount_collected !== undefined ? Number(col.amount_collected) : (Number(col.amount) || 0);
-      const colDisc = Number(col.discount ?? col.discounts) || 0;
-      const colWtax = Number(col.amount_withheld_2307 ?? col.tax_withheld ?? col.wtax_2307) || 0;
-      return s + colCash + colDisc + colWtax;
+      return s + colCash;
     }, 0);
 
-    const invDue = Number(matchingSale?.total_amount_due ?? c.total_amount_due ?? matchingSale?.amount) || 0;
-    const invoiceGrossNetOfDisc = matchingSale
-      ? Math.max(0, (Number(matchingSale.total_amount_vat_inclusive || matchingSale.amount) || 0) - (Number(matchingSale.discount ?? matchingSale.less_discount) || 0))
-      : invDue;
-    const isInvoiceFullyPaid = c.status === 'Paid' || matchingSale?.status === 'Paid' || (invDue > 0 && totalCollectedForInv >= invDue - 0.05) || (invoiceGrossNetOfDisc > 0 && totalCollectedForInv >= invoiceGrossNetOfDisc - 0.05);
+    const saleWtax = Number(matchingSale?.tax_withheld ?? matchingSale?.withholding_2307 ?? matchingSale?.amount_withheld_2307) || 0;
+    const invGross = Number(matchingSale?.total_amount_vat_inclusive || matchingSale?.amount) || 0;
+    const invDisc = Number(matchingSale?.discount ?? matchingSale?.less_discount) || 0;
+    const netAR = Math.max(0, Math.round((invGross - invDisc) * 100) / 100);
+    const netCashDue = Number(matchingSale?.total_amount_due) > 0 ? Number(matchingSale.total_amount_due) : Math.max(0, Math.round((netAR - saleWtax) * 100) / 100);
+
+    const isInvoiceFullyPaid = c.status === 'Paid' || matchingSale?.status === 'Paid' || (netCashDue > 0 && totalCashCollectedForInv >= netCashDue - 0.05);
     const isLastPaymentRow = sameInvColls.length === 0 || sameInvColls[sameInvColls.length - 1].id === c.id;
 
-    // Determine CWT 2307: either specifically specified on this collection row, or recognized upon full invoice settlement
-    const saleWtax = Number(matchingSale?.tax_withheld ?? matchingSale?.withholding_2307) || 0;
     const cwtAlreadyRecognized = normInv ? cwtRecognizedForInvoice.has(normInv) : false;
 
     let w2307ForThisEntry = directWtaxOnRow;
-    // If not specified on this individual row, but the invoice has CWT and this is the final/full settlement payment, recognize the invoice CWT
+    // If not specified on this individual row, but the invoice has CWT and this invoice is fully collected or this is the final payment, recognize the invoice CWT
     if (w2307ForThisEntry <= 0 && saleWtax > 0 && isInvoiceFullyPaid && isLastPaymentRow && !cwtAlreadyRecognized) {
       w2307ForThisEntry = saleWtax;
     }
@@ -1002,8 +1007,15 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     }
 
     const cashPaid = p.amount_paid !== undefined ? Number(p.amount_paid) : (Number(p.amount) || 0);
-    const discountAmt = Number(p.discount ?? p.discounts ?? p.less_discount) || 0;
+    const rawDiscountAmt = Number(p.discount ?? p.discounts ?? p.less_discount) || 0;
     const directEwtOnRow = Number(p.withholding_tax_2307 ?? p.tax_withheld ?? p.amount_withheld_2307) || 0;
+
+    // Do not double-count initial invoice trade discount if it was already booked in the Purchases recognition entry
+    const isInitialPurchaseDiscount = matchingExp && 
+      (Number(matchingExp.discount ?? matchingExp.less_discount) || 0) > 0 &&
+      (Number(matchingExp.discount ?? matchingExp.less_discount) || 0) === rawDiscountAmt &&
+      (p.particulars?.includes('Down Payment') || p.id === matchingExp.id + 1);
+    const discountAmt = isInitialPurchaseDiscount ? 0 : rawDiscountAmt;
 
     if (cashPaid <= 0 && discountAmt <= 0 && directEwtOnRow <= 0) {
       return; // Skip 0-amount On Account tracking rows
@@ -1012,18 +1024,21 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const pmtOrder = sameVoucherPmts.findIndex(pm => pm.id === p.id) + 1 || (idx + 1);
     const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd payment' : `for #${pmtOrder} payment`;
 
-    const totalPaidForVoucher = sameVoucherPmts.reduce((s, pm) => {
+    // Sum all cash paid for this voucher across installments
+    const totalCashPaidForVoucher = sameVoucherPmts.reduce((s, pm) => {
       const pmCash = pm.amount_paid !== undefined ? Number(pm.amount_paid) : (Number(pm.amount) || 0);
-      const pmDisc = Number(pm.discount ?? pm.discounts ?? pm.less_discount) || 0;
-      const pmEwt = Number(pm.withholding_tax_2307 ?? pm.tax_withheld ?? pm.amount_withheld_2307) || 0;
-      return s + pmCash + pmDisc + pmEwt;
+      return s + pmCash;
     }, 0);
 
-    const expDue = Number(matchingExp?.total_amount_due ?? p.total_amount_due ?? matchingExp?.amount) || 0;
-    const isVoucherFullyPaid = p.status === 'Paid' || matchingExp?.status === 'Paid' || (expDue > 0 && totalPaidForVoucher >= expDue - 0.05);
+    const expWtax = Number(matchingExp?.tax_withheld ?? matchingExp?.withholding_2307_2306) || 0;
+    const expGross = Number(matchingExp?.total_amount_vat_inclusive ?? matchingExp?.amount) || 0;
+    const expDisc = Number(matchingExp?.discount ?? matchingExp?.less_discount) || 0;
+    const netAP = Math.max(0, Math.round((expGross - expDisc) * 100) / 100);
+    const netCashDue = Number(matchingExp?.total_amount_due) > 0 ? Number(matchingExp.total_amount_due) : Math.max(0, Math.round((netAP - expWtax) * 100) / 100);
+
+    const isVoucherFullyPaid = p.status === 'Paid' || matchingExp?.status === 'Paid' || (netCashDue > 0 && totalCashPaidForVoucher >= netCashDue - 0.05);
     const isLastPmtRow = sameVoucherPmts.length === 0 || sameVoucherPmts[sameVoucherPmts.length - 1].id === p.id;
 
-    const expWtax = Number(matchingExp?.tax_withheld ?? matchingExp?.withholding_2307_2306) || 0;
     const ewtAlreadyRecognized = normVoucher ? ewtRecognizedForVoucher.has(normVoucher) : false;
 
     let w2307ForThisEntry = directEwtOnRow;
