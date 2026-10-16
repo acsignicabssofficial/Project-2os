@@ -382,6 +382,346 @@ export function normalizeDocNo(num?: string): string {
   return (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 }
 
+// ============================================================================
+// SETTLEMENT ENGINE — SINGLE SOURCE OF TRUTH FOR A/R & A/P CLEARING
+// ----------------------------------------------------------------------------
+// Rules (used by the journal engine, the Sales/Purchase hubs, the books and the
+// dashboards so that every screen agrees):
+//
+//  1. TRADE DISCOUNT is booked at invoice time. It contrasts the Sales (Dr Sales
+//     Discounts) / the Expense (expense is recorded net), so the A/R (A/P) that
+//     is booked is already NET of the trade discount.
+//        booked (A/R or A/P)  = gross VAT-inclusive − trade discount
+//  2. WITHHOLDING TAX (CWT 2307 on sales / EWT on purchases) is NOT cash. It
+//     contrasts the A/R (A/P) when the settlement is completed.
+//        cash due             = booked − withholding
+//        (total_amount_due on the records is ALREADY net of discount AND tax)
+//  3. A settlement-time (prompt-payment) discount given on a collection also
+//     counters A/R, and counts toward the cash due.
+//  4. An invoice is PAID when  cash + settlement discount + withholding = booked.
+//     If the cash due is fully settled the withholding is recognised
+//     automatically (the "plug"), so a fully-paid invoice can never leave an
+//     A/R (A/P) residual behind.
+// ============================================================================
+
+const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+const numOf = (v: any): number => {
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
+};
+/** first value that is not undefined/null/'' (mirrors the `??` chains used across the app) */
+const firstDefined = (...vals: any[]): any => {
+  for (const v of vals) {
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  return undefined;
+};
+
+export interface SettlementEvent {
+  date: string;
+  cash: number;
+  discount: number;
+  withholding: number;
+  sourceId: number;
+  seq: number;
+  installmentNo: number;
+}
+
+export interface SettlementSummary {
+  booked: number;               // A/R (A/P) booked at recognition (net of trade discount)
+  withholdingExpected: number;  // CWT / EWT on the invoice
+  cashDue: number;              // booked − withholding
+  cash: number;                 // cash collected / paid
+  discount: number;             // settlement-time discounts
+  withholdingExplicit: number;  // CWT / EWT already carried on payment rows
+  withholdingRecognized: number;// CWT / EWT counted against A/R (A/P)
+  withholdingPlug: number;      // CWT / EWT that still needs its own journal entry
+  offset: number;               // total credited to A/R (A/P)
+  remaining: number;            // open A/R (A/P)
+  remainingCash: number;        // cash still to collect / pay
+  isPaid: boolean;
+  status: 'Paid' | 'Partial' | 'On Account';
+  events: SettlementEvent[];
+}
+
+export function summarizeSettlement(bookedIn: number, withholdingIn: number, events: SettlementEvent[]): SettlementSummary {
+  const booked = r2(Math.max(0, bookedIn));
+  const withholdingExpected = r2(Math.min(Math.max(0, withholdingIn), booked));
+  const cashDue = r2(booked - withholdingExpected);
+
+  const cash = r2(events.reduce((s, e) => s + e.cash, 0));
+  const discount = r2(events.reduce((s, e) => s + e.discount, 0));
+  const withholdingExplicit = r2(events.reduce((s, e) => s + e.withholding, 0));
+  const settledCash = r2(cash + discount);
+
+  const hasActivity = events.length > 0 && (cash + discount + withholdingExplicit) > 0;
+  const cashFullySettled = hasActivity && settledCash >= cashDue - 0.05;
+
+  const withholdingRecognized = cashFullySettled
+    ? Math.max(withholdingExplicit, r2(Math.max(0, booked - settledCash)))
+    : withholdingExplicit;
+  const withholdingPlug = Math.max(0, r2(withholdingRecognized - withholdingExplicit));
+
+  const offset = r2(settledCash + withholdingRecognized);
+  const remaining = Math.max(0, r2(booked - offset));
+  const isPaid = hasActivity && remaining <= 0.05;
+  const status: 'Paid' | 'Partial' | 'On Account' = isPaid ? 'Paid' : (offset > 0 ? 'Partial' : 'On Account');
+  const remainingCash = isPaid ? 0 : Math.max(0, r2(cashDue - settledCash));
+
+  return {
+    booked, withholdingExpected, cashDue, cash, discount, withholdingExplicit,
+    withholdingRecognized, withholdingPlug, offset, remaining, remainingCash,
+    isPaid, status, events
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SALES — what the Subsidiary Sales book recognises (A/R after trade discount)
+// ---------------------------------------------------------------------------
+export function getSaleBookedAmounts(s: any) {
+  const isVat = s.vat_or_nonvat === 'VAT' || s.vat_status === 'VAT' || (s.output_vat !== undefined && Number(s.output_vat) > 0) || (s.vat_amount !== undefined && Number(s.vat_amount) > 0);
+
+  const zeroRated = Number(s.zero_rated_amount ?? s.zero_rated) || 0;
+  const vatExempt = Number(s.vat_exempt_amount ?? s.vat_exempt) || 0;
+  const discounts = Number(s.discount ?? s.discounts ?? s.less_discount) || 0;
+  const w2307 = Number(s.tax_withheld ?? s.withholding_2307 ?? s.amount_withheld_2307 ?? s.less_withholding_tax) || 0;
+
+  const rawInvoiceAmt = Number(s.total_amount_vat_inclusive ?? s.amount ?? s.invoice_amount) || 0;
+  let vatableSales = Number(s.vatable_amount ?? s.vatable_sales) || 0;
+  let vatOutput = Number(s.vat_amount ?? s.output_vat ?? s.vat) || 0;
+
+  if (isVat) {
+    if (!vatableSales && rawInvoiceAmt > 0) {
+      const grossSubjectToVat = Math.max(0, rawInvoiceAmt - zeroRated - vatExempt);
+      vatableSales = Math.round((grossSubjectToVat / 1.12) * 100) / 100;
+      vatOutput = Math.round((grossSubjectToVat - vatableSales) * 100) / 100;
+    }
+  } else {
+    vatableSales = Math.max(0, rawInvoiceAmt - zeroRated - vatExempt);
+    vatOutput = 0;
+  }
+
+  const totalGrossSales = Math.round((vatableSales + vatOutput + zeroRated + vatExempt) * 100) / 100 || rawInvoiceAmt;
+  const netReceivable = Math.max(0, Math.round((totalGrossSales - discounts) * 100) / 100);
+
+  return { isVat, zeroRated, vatExempt, discounts, w2307, rawInvoiceAmt, vatableSales, vatOutput, totalGrossSales, netReceivable };
+}
+
+/** A collection row that merely mirrors the invoice (placeholder / down-payment / cash copy). */
+const SALE_COPY_PARTICULARS_RX = /down payment|receivable tracking|full cash settlement|full settlement completed|reverted/i;
+
+export function getSaleSettlementEvents(sale: any, collections: any[]): SettlementEvent[] {
+  const normInv = normalizeDocNo(sale.invoice_number);
+  if (!normInv) return [];
+  const tradeDiscount = getSaleBookedAmounts(sale).discounts;
+
+  const rows = collections
+    .filter(c => !c.is_cancelled && normalizeDocNo(c.invoice_number) === normInv)
+    .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+
+  const events: SettlementEvent[] = [];
+  rows.forEach(c => {
+    const particulars = String(c.particulars || '');
+    // Zero-amount "Receivable Tracking" placeholders never settle anything
+    if (/receivable tracking/i.test(particulars)) return;
+    const colDate = c.date || c.collection_date || '';
+
+    if (Array.isArray(c.installments) && c.installments.length > 0) {
+      c.installments.forEach((inst: any, i: number) => {
+        const cash = numOf(inst.cash_amount);
+        const discount = numOf(inst.discount);
+        const withholding = numOf(inst.wtax_2307);
+        if (cash <= 0 && discount <= 0 && withholding <= 0) return;
+        events.push({
+          date: inst.date || colDate,
+          cash, discount, withholding,
+          sourceId: Number(c.id) || 0,
+          seq: i,
+          installmentNo: Number(inst.payment_no) || i + 1
+        });
+      });
+      return;
+    }
+
+    const cash = c.amount_collected !== undefined ? numOf(c.amount_collected) : numOf(c.amount);
+    const rawDiscount = numOf(firstDefined(c.discount, c.discounts));
+    // The invoice trade discount was already booked at sale recognition. Rows that just mirror it must not discount again.
+    const idOffset = (Number(c.id) || 0) - (Number(sale.id) || 0);
+    const isTradeDiscountCopy =
+      rawDiscount > 0 &&
+      Math.abs(rawDiscount - tradeDiscount) < 0.005 &&
+      (cash <= 0 || SALE_COPY_PARTICULARS_RX.test(particulars) || idOffset === 1 || idOffset === 2);
+    const discount = isTradeDiscountCopy ? 0 : rawDiscount;
+    const withholding = numOf(firstDefined(c.amount_withheld_2307, c.tax_withheld, c.wtax_2307));
+
+    if (cash <= 0 && discount <= 0 && withholding <= 0) return;
+    events.push({
+      date: colDate,
+      cash, discount, withholding,
+      sourceId: Number(c.id) || 0,
+      seq: 0,
+      installmentNo: events.length + 1
+    });
+  });
+  return events;
+}
+
+/** A sale that was paid in full at the time of sale (Cash Receipts Book posts the compound entry). */
+export function isDirectFullCashSale(s: any, collections: any[]): boolean {
+  const { netReceivable } = getSaleBookedAmounts(s);
+  const normInv = normalizeDocNo(s.invoice_number);
+  const matchingColls = collections.filter(c => !c.is_cancelled && normalizeDocNo(c.invoice_number) === normInv);
+
+  const isExplicitCashType = (s.type_of_transaction || '').toUpperCase().includes('CASH') || (s.payment_type || '').toLowerCase() === 'cash';
+  const isExplicitOnAccount = (s.type_of_transaction || '').toUpperCase().includes('ACCOUNT') || (s.payment_type || '').toLowerCase() === 'on_account' || (s.payment_type || '').toLowerCase() === 'partial';
+
+  const isPartialOrInstallment =
+    isExplicitOnAccount ||
+    s.settled_via_collections === true ||
+    (s.status || '').toLowerCase() === 'partial' ||
+    (s.status || '').toLowerCase() === 'on account' ||
+    (s.sales_status || '').toLowerCase() === 'partial' ||
+    (s.sales_status || '').toLowerCase() === 'on account' ||
+    (Number(s.down_payment) > 0 && Number(s.down_payment) < netReceivable - 0.5) ||
+    matchingColls.some(c => Array.isArray(c.installments) && c.installments.length > 1) ||
+    matchingColls.some(c => (c.type_of_transaction || '').toUpperCase().includes('ACCOUNT')) ||
+    matchingColls.filter(c => !/receivable tracking/i.test(String(c.particulars || ''))).length > 1;
+
+  return isExplicitCashType && !isPartialOrInstallment && !s.settled_via_collections;
+}
+
+export function computeSaleSettlement(sale: any, collections: any[]): SettlementSummary {
+  const b = getSaleBookedAmounts(sale);
+  if (isDirectFullCashSale(sale, collections)) {
+    const cashDue = Math.max(0, r2(b.netReceivable - b.w2307));
+    return summarizeSettlement(b.netReceivable, b.w2307, [{
+      date: sale.date || '', cash: cashDue, discount: 0, withholding: b.w2307, sourceId: Number(sale.id) || 0, seq: 0, installmentNo: 1
+    }]);
+  }
+  return summarizeSettlement(b.netReceivable, b.w2307, getSaleSettlementEvents(sale, collections));
+}
+
+// ---------------------------------------------------------------------------
+// PURCHASES — what the Subsidiary Purchases book recognises (A/P after trade discount)
+// ---------------------------------------------------------------------------
+export function getPurchaseBookedAmounts(e: any) {
+  const isVat = e.vat_or_nonvat === 'VAT' || e.nonvat_or_vat === 'VAT' || e.business_tax_type === 'vatable' || (Number(e.vat_amount || e.vat_input_amount) > 0);
+  const discounts = Number(e.discount ?? e.discounts ?? e.less_discount) || 0;
+  const w2307 = Number(e.tax_withheld ?? e.withholding_2307_2306 ?? e.less_withholding_tax) || 0;
+  const due = Number(e.total_amount_due) || 0;
+  const rawGross = Number(e.amount ?? e.expense_invoice_amount ?? e.total_amount_vat_inclusive) || 0;
+
+  // total_amount_due is already (gross − trade discount − EWT) → add the EWT back to get the A/P that is booked
+  const netPayable = due > 0
+    ? r2(due + w2307)
+    : Math.max(0, r2(rawGross - discounts));
+
+  let expBase = netPayable;
+  let inputVat = 0;
+  if (isVat) {
+    expBase = r2(netPayable / 1.12);
+    inputVat = r2(netPayable - expBase);
+  }
+  return { isVat, discounts, w2307, netPayable, expBase, inputVat };
+}
+
+export function purchasePaymentMatches(p: any, e: any): boolean {
+  const vNo = normalizeDocNo(e.voucher_number || e.invoice_number || `EXP-${e.id}`);
+  const vOnly = normalizeDocNo(e.voucher_number);
+  const iOnly = normalizeDocNo(e.invoice_number);
+  const pv = normalizeDocNo(p.voucher_number);
+  const pi = normalizeDocNo(p.invoice_number);
+  const keys = [vNo, vOnly, iOnly].filter(Boolean);
+  return keys.some(k => k === pv || k === pi);
+}
+
+export function getPurchaseSettlementEvents(exp: any, payments: any[]): SettlementEvent[] {
+  const tradeDiscount = getPurchaseBookedAmounts(exp).discounts;
+  const rows = payments
+    .filter(p => !p.is_cancelled && purchasePaymentMatches(p, exp))
+    .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+
+  const events: SettlementEvent[] = [];
+  rows.forEach(p => {
+    const payDate = p.date || p.payment_date || '';
+    if (Array.isArray(p.installments) && p.installments.length > 0) {
+      p.installments.forEach((inst: any, i: number) => {
+        const cash = numOf(inst.cash_amount);
+        const discount = numOf(inst.discount);
+        const withholding = numOf(inst.wtax_2307);
+        if (cash <= 0 && discount <= 0 && withholding <= 0) return;
+        events.push({
+          date: inst.date || payDate,
+          cash, discount, withholding,
+          sourceId: Number(p.id) || 0,
+          seq: i,
+          installmentNo: Number(inst.payment_no) || i + 1
+        });
+      });
+      return;
+    }
+    const cash = p.amount_paid !== undefined ? numOf(p.amount_paid) : numOf(p.amount);
+    const rawDiscount = numOf(firstDefined(p.discount, p.discounts, p.less_discount));
+    // Payment rows only mirror the invoice trade discount (already booked as a reduced expense) — never discount twice
+    const isTradeDiscountCopy = rawDiscount > 0 && Math.abs(rawDiscount - tradeDiscount) < 0.005;
+    const discount = isTradeDiscountCopy ? 0 : rawDiscount;
+    const withholding = numOf(firstDefined(p.withholding_tax_2307, p.tax_withheld, p.amount_withheld_2307));
+    if (cash <= 0 && discount <= 0 && withholding <= 0) return;
+    events.push({
+      date: payDate, cash, discount, withholding,
+      sourceId: Number(p.id) || 0, seq: 0, installmentNo: events.length + 1
+    });
+  });
+  return events;
+}
+
+export function isDirectFullCashPurchase(e: any, payments: any[]): boolean {
+  const { netPayable } = getPurchaseBookedAmounts(e);
+  const vNo = e.voucher_number || e.invoice_number || `EXP-${e.id}`;
+  const matchingPmts = payments.filter(p => !p.is_cancelled && purchasePaymentMatches(p, e));
+  const isExplicitExpCash = (e.type_of_transaction || '').toUpperCase().includes('CASH') || (e.payment_type || '').toLowerCase() === 'cash';
+  const isExplicitExpOnAccount = (e.type_of_transaction || '').toUpperCase().includes('ACCOUNT') || (e.payment_type || '').toLowerCase() === 'on_account' || (e.payment_type || '').toLowerCase() === 'partial';
+
+  const isExpPartial =
+    isExplicitExpOnAccount ||
+    e.settled_via_collections === true ||
+    (e.status || '').toLowerCase() === 'partial' ||
+    (e.status || '').toLowerCase() === 'on account' ||
+    (e.expense_status || '').toLowerCase() === 'partial' ||
+    (e.expense_status || '').toLowerCase() === 'on account' ||
+    (Number(e.down_payment) > 0 && Number(e.down_payment) < netPayable - 0.5) ||
+    matchingPmts.some(p => Array.isArray(p.installments) && p.installments.length > 1) ||
+    matchingPmts.some(p => (p.type_of_transaction || '').toUpperCase().includes('ACCOUNT')) ||
+    matchingPmts.length > 1;
+
+  void vNo;
+  return isExplicitExpCash && !isExpPartial && !e.settled_via_collections;
+}
+
+export function computePurchaseSettlement(exp: any, payments: any[]): SettlementSummary {
+  const b = getPurchaseBookedAmounts(exp);
+  if (isDirectFullCashPurchase(exp, payments)) {
+    const cashDue = Math.max(0, r2(b.netPayable - b.w2307));
+    return summarizeSettlement(b.netPayable, b.w2307, [{
+      date: exp.date || '', cash: cashDue, discount: 0, withholding: b.w2307, sourceId: Number(exp.id) || 0, seq: 0, installmentNo: 1
+    }]);
+  }
+  return summarizeSettlement(b.netPayable, b.w2307, getPurchaseSettlementEvents(exp, payments));
+}
+
+/** Lists every journal entry whose debits and credits differ by more than a centavo (for audit / UI warnings). */
+export function getJournalImbalances(entries: JournalEntry[]) {
+  const out: Array<{ entry_no: string; description: string; debit: number; credit: number; difference: number }> = [];
+  entries.forEach(e => {
+    const dr = r2((e.debits || []).reduce((s, l) => s + (Number(l.amount) || 0), 0));
+    const cr = r2((e.credits || []).reduce((s, l) => s + (Number(l.amount) || 0), 0));
+    if (Math.abs(dr - cr) > 0.009) {
+      out.push({ entry_no: (e as any).entry_no, description: (e as any).description, debit: dr, credit: cr, difference: r2(dr - cr) });
+    }
+  });
+  return out;
+}
+
 export interface MasterJournalInput {
   sales: any[];
   collections: any[];
@@ -445,10 +785,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     return `GJ${sjCounter++}`;
   };
 
-  // Track invoices and vouchers already journalized by Cash Receipts / Cash Disbursements
-  // to strictly prevent double-counting in Collections Book and Payments Book (Clarifications 5.4 & 6.3)
-  const directCashReceiptInvoices = new Set<string>();
-  const directCashDisbursementVouchers = new Set<string>();
+  // Direct full cash sales / purchases are journalized by the Cash Receipts / Cash Disbursements books and are
+  // skipped by the Collections / Payments books through isDirectFullCashSale() / isDirectFullCashPurchase()
+  // (Clarifications 5.4 & 6.3: no duplicate journal entry).
 
   // Filter out any legacy auto-generated SJ-SLS / SJ-COL / SJ-PUR / SJ-DIS special entries to prevent double-counting
   const manualSpecialEntries = [...specialEntries].filter(s => {
@@ -476,87 +815,47 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
   const sortedExpenses = [...expenses].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
 
   // 1. SUBSIDIARY SALES -> Always generates Sales Recognition Journal Entry:
-  // Dr Accounts Receivable (Gross VAT-inclusive)
+  // Dr Accounts Receivable (Gross VAT-inclusive less trade discount), Dr Sales Discounts
   // Cr Vatable Sales, Cr Output VAT Payable (and Zero-Rated / VAT-Exempt)
+  // The trade discount contrasts SALES here; the A/R that is booked is therefore already net of discount.
+  const recognizedSaleInvoices = new Set<string>();
+
   sortedSales.forEach(s => {
     if (s.is_cancelled || s.sales_status === 'Cancelled') return;
 
     const customerName = s.registered_name || s.customer_name || s.client_name || 'Customer';
-    const isVat = s.vat_or_nonvat === 'VAT' || s.vat_status === 'VAT' || (s.output_vat !== undefined && Number(s.output_vat) > 0) || (s.vat_amount !== undefined && Number(s.vat_amount) > 0);
-
-    const zeroRated = Number(s.zero_rated_amount ?? s.zero_rated) || 0;
-    const vatExempt = Number(s.vat_exempt_amount ?? s.vat_exempt) || 0;
-    const discounts = Number(s.discount ?? s.discounts ?? s.less_discount) || 0;
-    const w2307 = Number(s.tax_withheld ?? s.withholding_2307 ?? s.amount_withheld_2307 ?? s.less_withholding_tax) || 0;
-
-    const rawInvoiceAmt = Number(s.total_amount_vat_inclusive ?? s.amount ?? s.invoice_amount) || 0;
-    let vatableSales = Number(s.vatable_amount ?? s.vatable_sales) || 0;
-    let vatOutput = Number(s.vat_amount ?? s.output_vat ?? s.vat) || 0;
-
-    if (isVat) {
-      if (!vatableSales && rawInvoiceAmt > 0) {
-        const grossSubjectToVat = Math.max(0, rawInvoiceAmt - zeroRated - vatExempt);
-        vatableSales = Math.round((grossSubjectToVat / 1.12) * 100) / 100;
-        vatOutput = Math.round((grossSubjectToVat - vatableSales) * 100) / 100;
-      }
-    } else {
-      vatableSales = Math.max(0, rawInvoiceAmt - zeroRated - vatExempt);
-      vatOutput = 0;
-    }
-
-    const totalGrossSales = Math.round((vatableSales + vatOutput + zeroRated + vatExempt) * 100) / 100 || rawInvoiceAmt;
+    const booked = getSaleBookedAmounts(s);
+    const { isVat, zeroRated, vatExempt, discounts, vatableSales, vatOutput, totalGrossSales, netReceivable } = booked;
+    const w2307 = Math.min(booked.w2307, netReceivable);
     if (totalGrossSales <= 0) return;
+
+    const normInvRecognized = normalizeDocNo(s.invoice_number);
+    if (normInvRecognized) recognizedSaleInvoices.add(normInvRecognized);
 
     const saleDate = s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0];
 
     const entry1Credits: Array<{ account_code: string; account_title: string; amount: number }> = [];
     if (vatableSales > 0) {
-      entry1Credits.push({
-        account_code: '4010',
-        account_title: isVat ? 'Vatable Sales' : 'Sales Revenue',
-        amount: vatableSales
-      });
+      entry1Credits.push({ account_code: '4010', account_title: isVat ? 'Vatable Sales' : 'Sales Revenue', amount: vatableSales });
     }
     if (vatOutput > 0) {
-      entry1Credits.push({
-        account_code: '2020',
-        account_title: 'Output VAT Payable',
-        amount: vatOutput
-      });
+      entry1Credits.push({ account_code: '2020', account_title: 'Output VAT Payable', amount: vatOutput });
     }
     if (zeroRated > 0) {
-      entry1Credits.push({
-        account_code: '4020',
-        account_title: 'Zero-Rated Sales',
-        amount: zeroRated
-      });
+      entry1Credits.push({ account_code: '4020', account_title: 'Zero-Rated Sales', amount: zeroRated });
     }
     if (vatExempt > 0) {
-      entry1Credits.push({
-        account_code: '4030',
-        account_title: 'VAT-Exempt Sales',
-        amount: vatExempt
-      });
+      entry1Credits.push({ account_code: '4030', account_title: 'VAT-Exempt Sales', amount: vatExempt });
     }
     if (entry1Credits.length === 0) {
-      entry1Credits.push({
-        account_code: '4010',
-        account_title: 'Sales Revenue',
-        amount: totalGrossSales
-      });
+      entry1Credits.push({ account_code: '4010', account_title: 'Sales Revenue', amount: totalGrossSales });
     }
 
-    // Trade / Sales discount contrasts sales at invoice time, countering sales and setting net receivable
-    const netReceivable = Math.max(0, Math.round((totalGrossSales - discounts) * 100) / 100);
     const saleDebits: Array<{ account_code: string; account_title: string; amount: number }> = [
       { account_code: '1020', account_title: 'Accounts Receivable', amount: netReceivable }
     ];
     if (discounts > 0) {
-      saleDebits.push({
-        account_code: '4015',
-        account_title: 'Sales Discounts',
-        amount: discounts
-      });
+      saleDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: Math.min(discounts, totalGrossSales) });
     }
 
     entries.push({
@@ -572,31 +871,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       credits: entry1Credits
     } as any);
 
-    // Check how this sale is paid/collected:
-    const normInv = normalizeDocNo(s.invoice_number);
-    const matchingColls = collections.filter(c => !c.is_cancelled && normalizeDocNo(c.invoice_number) === normInv);
-
-    // Determine if this was a direct Full Cash Sale (5.3) vs Partial/Installment Sale (6.4)
-    const isExplicitCashType = (s.type_of_transaction || '').toUpperCase().includes('CASH') || (s.payment_type || '').toLowerCase() === 'cash';
-    const isExplicitOnAccount = (s.type_of_transaction || '').toUpperCase().includes('ACCOUNT') || (s.payment_type || '').toLowerCase() === 'on_account' || (s.payment_type || '').toLowerCase() === 'partial';
-
-    const isPartialOrInstallment =
-      isExplicitOnAccount ||
-      s.settled_via_collections === true ||
-      (s.status || '').toLowerCase() === 'partial' ||
-      (s.status || '').toLowerCase() === 'on account' ||
-      (s.sales_status || '').toLowerCase() === 'partial' ||
-      (s.sales_status || '').toLowerCase() === 'on account' ||
-      (Number(s.down_payment) > 0 && Number(s.down_payment) < netReceivable - 0.5) ||
-      matchingColls.some(c => Array.isArray(c.installments) && c.installments.length > 1) ||
-      matchingColls.some(c => (c.type_of_transaction || '').toUpperCase().includes('ACCOUNT')) ||
-      matchingColls.length > 1;
-
-    const isDirectFullCashSale = isExplicitCashType && !isPartialOrInstallment && !s.settled_via_collections;
-
-    if (isDirectFullCashSale) {
-      // 5.3 Cash Receipts Book records the compound journal entry for direct full cash sales:
-      // Cash Received = netReceivable - w2307
+    // 5.3 Direct full cash sale -> Cash Receipts Book posts ONE compound entry:
+    // Dr Cash (net received), Dr Creditable Withholding Tax (2307), Cr Accounts Receivable
+    if (isDirectFullCashSale(s, collections)) {
       const cashReceived = Math.max(0, Math.round((netReceivable - w2307) * 100) / 100);
       const crDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
       if (cashReceived > 0) {
@@ -605,7 +882,6 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       if (w2307 > 0) {
         crDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
       }
-
       if (crDebits.length > 0) {
         entries.push({
           id: idCounter++,
@@ -617,198 +893,142 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
           ref_no: s.invoice_number,
           description: `Cash Receipts Book: Full Cash Collection for Invoice #${s.invoice_number} - ${customerName}`,
           debits: crDebits,
-          credits: [
-            { account_code: '1020', account_title: 'Accounts Receivable', amount: netReceivable }
-          ]
+          credits: [{ account_code: '1020', account_title: 'Accounts Receivable', amount: netReceivable }]
         } as any);
-      }
-
-      if (normInv) {
-        directCashReceiptInvoices.add(normInv);
-      }
-      if (s.invoice_number) {
-        directCashReceiptInvoices.add(s.invoice_number.trim().toLowerCase());
-      }
-      if (s.voucher_number) {
-        directCashReceiptInvoices.add(normalizeDocNo(s.voucher_number));
       }
     }
   });
 
   // 2. COLLECTIONS BOOK -> Journalizes installment / partial / on-account payments (6.4)
-  // Note: Direct full-cash sales already journalized by Cash Receipts Book above are skipped here (5.4).
-  const sortedCollections = [...collections].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
-  const cwtRecognizedForInvoice = new Set<string>();
+  //   Entry 2a (each collection):      Dr Cash, (Dr Sales Discounts), Cr Accounts Receivable
+  //   Entry 2b (CWT 2307 recognition): Dr Creditable Withholding Tax, Cr Accounts Receivable
+  // Every invoice is settled through computeSaleSettlement(), so A/R always clears to zero once the invoice is paid.
+  const ordinalOf = (n: number, word: string) =>
+    n === 1 ? 'first payment/down payment' : n === 2 ? `for 2nd ${word}` : `for #${n} ${word}`;
 
-  sortedCollections.forEach((c, idx) => {
-    if (c.is_cancelled) return;
-    const normInv = normalizeDocNo(c.invoice_number);
-    const rawInvLower = (c.invoice_number || '').trim().toLowerCase();
-    const normVoucher = normalizeDocNo(c.voucher_number);
-
-    // 5.4 Collections book records cash sales and collections
-    // Skip ONLY if this invoice was an upfront direct full-cash sale already journalized by Cash Receipts Book above
-    if (
-      (normInv && directCashReceiptInvoices.has(normInv)) ||
-      (rawInvLower && directCashReceiptInvoices.has(rawInvLower)) ||
-      (normVoucher && directCashReceiptInvoices.has(normVoucher))
-    ) {
-      return;
-    }
-
-    const matchingSale = sales.find(s => !s.is_cancelled && normalizeDocNo(s.invoice_number) === normInv);
-    const sameInvColls = sortedCollections.filter(col => {
-      if (col.is_cancelled || normalizeDocNo(col.invoice_number) !== normInv) return false;
-      const colCash = col.amount_collected !== undefined ? Number(col.amount_collected) : (Number(col.amount) || 0);
-      const colDisc = Number(col.discount ?? col.discounts) || 0;
-      const colWtax = Number(col.amount_withheld_2307 ?? col.tax_withheld) || 0;
-      const hasInst = Array.isArray(col.installments) && col.installments.length > 0;
-      return colCash > 0 || colDisc > 0 || colWtax > 0 || hasInst;
+  const emitSaleSettlementEntries = (
+    invoiceNo: string,
+    customerName: string,
+    entryCompany: string,
+    events: SettlementEvent[],
+    cwtPlug: number
+  ) => {
+    events.forEach((ev, i) => {
+      const n = i + 1;
+      const base = (Number(ev.sourceId) || 0) + ev.seq * 0.001;
+      const date = ev.date || new Date().toISOString().split('T')[0];
+      const colDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
+      if (ev.cash > 0) colDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: ev.cash });
+      if (ev.discount > 0) colDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: ev.discount });
+      const arOffset = Math.round((ev.cash + ev.discount) * 100) / 100;
+      if (arOffset > 0) {
+        entries.push({
+          id: idCounter++,
+          _sortKey: base + 0.1,
+          company_name: entryCompany,
+          entry_no: '',
+          date,
+          ref_type: 'Collection',
+          ref_no: invoiceNo,
+          description: `Collections Book — Journal entry ${n} (${ordinalOf(n, 'collection')}): Invoice #${invoiceNo} - ${customerName}`,
+          debits: colDebits,
+          credits: [{ account_code: '1020', account_title: 'Accounts Receivable', amount: arOffset }]
+        } as any);
+      }
+      if (ev.withholding > 0) {
+        entries.push({
+          id: idCounter++,
+          _sortKey: base + 0.102,
+          company_name: entryCompany,
+          entry_no: '',
+          date,
+          ref_type: 'Collection',
+          ref_no: invoiceNo,
+          description: `Collections Book — Journal entry ${n} (to recognize CWT 2307): Invoice #${invoiceNo} - ${customerName}`,
+          debits: [{ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: ev.withholding }],
+          credits: [{ account_code: '1020', account_title: 'Accounts Receivable', amount: ev.withholding }]
+        } as any);
+      }
     });
 
-    if (matchingSale) {
-      const isDirectCashSale = (matchingSale.type_of_transaction || '').toUpperCase() === 'CASH' && !matchingSale.settled_via_collections;
-      if (isDirectCashSale && (normInv && directCashReceiptInvoices.has(normInv))) {
-        // Direct cash sale already accounted for in Cash Receipts; do not duplicate
-        return;
-      }
-    }
-
-    const customerName = c.registered_name || c.customer_name || c.client_name || matchingSale?.registered_name || matchingSale?.customer_name || 'Customer';
-    const colDate = c.date || c.collection_date || new Date().toISOString().split('T')[0];
-
-    // If this Collection Book record tracks installments (legacy array format)
-    if (Array.isArray(c.installments) && c.installments.length > 0) {
-      c.installments.forEach((inst: any, instIdx: number) => {
-        const cashAmt = Number(inst.cash_amount) || 0;
-        const discountAmt = Number(inst.discount) || 0;
-        const w2307Amt = Number(inst.wtax_2307) || 0;
-        const instDate = inst.date || colDate;
-        const pmtNo = inst.payment_no || (instIdx + 1);
-        const ordinal = pmtNo === 1 ? 'first payment/down payment' : pmtNo === 2 ? 'for 2nd collection' : `for #${pmtNo} collection`;
-
-        // Total credited to Accounts Receivable for this installment counters A/R with Cash + Discount + CWT
-        const totalArOffset = Math.round((cashAmt + discountAmt + w2307Amt) * 100) / 100;
-        if (totalArOffset > 0) {
-          const colDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-          if (cashAmt > 0) {
-            colDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt });
-          }
-          if (discountAmt > 0) {
-            colDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discountAmt });
-          }
-          if (w2307Amt > 0) {
-            colDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307Amt });
-            if (normInv) cwtRecognizedForInvoice.add(normInv);
-          }
-          entries.push({
-            id: idCounter++,
-            _sortKey: (Number(c.id) || 0) + (instIdx * 0.01) + 0.1,
-            company_name: c.company_name || companyName,
-            entry_no: '',
-            date: instDate,
-            ref_type: 'Collection',
-            ref_no: c.invoice_number,
-            description: `Collections Book — Journal entry ${pmtNo} (${ordinal}): Invoice #${c.invoice_number} - ${customerName}`,
-            debits: colDebits,
-            credits: [
-              { account_code: '1020', account_title: 'Accounts Receivable', amount: totalArOffset }
-            ]
-          } as any);
-        }
-      });
-      return;
-    }
-
-    // Per-payment row format (COLLECTION 1, COLLECTION 2, COLLECTION 3...)
-    const cashAmt = c.amount_collected !== undefined ? Number(c.amount_collected) : (Number(c.amount) || 0);
-    const rawDiscountAmt = Number(c.discount ?? c.discounts) || 0;
-    const directWtaxOnRow = Number(c.amount_withheld_2307 ?? c.tax_withheld ?? c.wtax_2307) || 0;
-
-    // Do not double-count initial invoice trade discount if it was already booked in the Sales recognition entry
-    const isInitialSaleTradeDiscount = matchingSale && 
-      (Number(matchingSale.discount ?? matchingSale.less_discount) || 0) > 0 &&
-      (Number(matchingSale.discount ?? matchingSale.less_discount) || 0) === rawDiscountAmt &&
-      (c.particulars?.includes('Down Payment') || c.id === matchingSale.id + 1);
-    const discountAmt = isInitialSaleTradeDiscount ? 0 : rawDiscountAmt;
-
-    if (cashAmt <= 0 && discountAmt <= 0 && directWtaxOnRow <= 0) {
-      return; // Skip 0-amount On Account tracking rows
-    }
-
-    const pmtOrder = sameInvColls.findIndex(col => col.id === c.id) + 1 || (idx + 1);
-    const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd collection' : `for #${pmtOrder} collection`;
-
-    // Sum all cash collected for this invoice across installments
-    const totalCashCollectedForInv = sameInvColls.reduce((s, col) => {
-      const colCash = col.amount_collected !== undefined ? Number(col.amount_collected) : (Number(col.amount) || 0);
-      return s + colCash;
-    }, 0);
-
-    const saleWtax = Number(matchingSale?.tax_withheld ?? matchingSale?.withholding_2307 ?? matchingSale?.amount_withheld_2307) || 0;
-    const invGross = Number(matchingSale?.total_amount_vat_inclusive || matchingSale?.amount) || 0;
-    const invDisc = Number(matchingSale?.discount ?? matchingSale?.less_discount) || 0;
-    const netAR = Math.max(0, Math.round((invGross - invDisc) * 100) / 100);
-    const netCashDue = Number(matchingSale?.total_amount_due) > 0 ? Number(matchingSale.total_amount_due) : Math.max(0, Math.round((netAR - saleWtax) * 100) / 100);
-
-    const isInvoiceFullyPaid = c.status === 'Paid' || matchingSale?.status === 'Paid' || (netCashDue > 0 && totalCashCollectedForInv >= netCashDue - 0.05);
-    const isLastPaymentRow = sameInvColls.length === 0 || sameInvColls[sameInvColls.length - 1].id === c.id;
-
-    const cwtAlreadyRecognized = normInv ? cwtRecognizedForInvoice.has(normInv) : false;
-
-    let w2307ForThisEntry = directWtaxOnRow;
-    // If not specified on this individual row, but the invoice has CWT and this invoice is fully collected or this is the final payment, recognize the invoice CWT
-    if (w2307ForThisEntry <= 0 && saleWtax > 0 && isInvoiceFullyPaid && isLastPaymentRow && !cwtAlreadyRecognized) {
-      w2307ForThisEntry = saleWtax;
-    }
-
-    // 6.4 Journal Entry: Dr Cash, (Dr Sales Discount), (Dr CWT 2307), Cr Accounts Receivable
-    // This strictly counters Accounts Receivable by the combined settlement
-    const totalOffsetAR = Math.round((cashAmt + discountAmt + w2307ForThisEntry) * 100) / 100;
-    if (totalOffsetAR > 0) {
-      const colDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-      if (cashAmt > 0) {
-        colDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashAmt });
-      }
-      if (discountAmt > 0) {
-        colDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: discountAmt });
-      }
-      if (w2307ForThisEntry > 0) {
-        colDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307ForThisEntry });
-        if (normInv) cwtRecognizedForInvoice.add(normInv);
-      }
+    if (cwtPlug > 0.005 && events.length > 0) {
+      const last = events[events.length - 1];
       entries.push({
         id: idCounter++,
-        _sortKey: (Number(c.id) || 0) + 0.1,
-        company_name: c.company_name || companyName,
+        _sortKey: (Number(last.sourceId) || 0) + last.seq * 0.001 + 0.104,
+        company_name: entryCompany,
         entry_no: '',
-        date: colDate,
+        date: last.date || new Date().toISOString().split('T')[0],
         ref_type: 'Collection',
-        ref_no: c.invoice_number,
-        description: `Collections Book — Journal entry ${pmtOrder} (${ordinal}): Invoice #${c.invoice_number} - ${customerName}`,
-        debits: colDebits,
-        credits: [
-          { account_code: '1020', account_title: 'Accounts Receivable', amount: totalOffsetAR }
-        ]
+        ref_no: invoiceNo,
+        description: `Collections Book — Journal entry ${events.length} (to recognize full payment CWT 2307): Invoice #${invoiceNo} - ${customerName}`,
+        debits: [{ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: cwtPlug }],
+        credits: [{ account_code: '1020', account_title: 'Accounts Receivable', amount: cwtPlug }]
       } as any);
     }
+  };
+
+  sortedSales.forEach(s => {
+    if (s.is_cancelled || s.sales_status === 'Cancelled') return;
+    const normInv = normalizeDocNo(s.invoice_number);
+    if (!normInv || !recognizedSaleInvoices.has(normInv)) return;
+    if (isDirectFullCashSale(s, collections)) return; // already posted by the Cash Receipts Book (5.4: no duplicate)
+
+    const settlement = computeSaleSettlement(s, collections);
+    if (settlement.events.length === 0) return;
+    const customerName = s.registered_name || s.customer_name || s.client_name || 'Customer';
+    emitSaleSettlementEntries(
+      s.invoice_number,
+      customerName,
+      s.company_name || companyName,
+      settlement.events,
+      settlement.withholdingPlug
+    );
+  });
+
+  // Collections whose invoice is not in Subsidiary Sales (stand-alone / imported collections): post them as recorded
+  const sortedCollections = [...collections].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  const orphanGroups = new Map<string, any[]>();
+  sortedCollections.forEach(c => {
+    if (c.is_cancelled) return;
+    const normInv = normalizeDocNo(c.invoice_number);
+    if (normInv && recognizedSaleInvoices.has(normInv)) return;
+    const key = normInv || `row-${c.id}`;
+    if (!orphanGroups.has(key)) orphanGroups.set(key, []);
+    orphanGroups.get(key)!.push(c);
+  });
+  orphanGroups.forEach(rows => {
+    const first = rows[0];
+    const pseudoSale = { invoice_number: first.invoice_number, id: -1, discount: 0 };
+    const events: SettlementEvent[] = [];
+    rows.forEach(c => {
+      const evs = getSaleSettlementEvents({ ...pseudoSale, invoice_number: c.invoice_number || `ROW-${c.id}` }, [c]);
+      evs.forEach(ev => events.push({ ...ev, installmentNo: events.length + 1 }));
+    });
+    if (events.length === 0) return;
+    emitSaleSettlementEntries(
+      first.invoice_number,
+      first.registered_name || first.customer_name || first.client_name || 'Customer',
+      first.company_name || companyName,
+      events,
+      0
+    );
   });
 
   // 3. SUBSIDIARY PURCHASES / EXPENSES -> Always generates Expense Recognition Journal Entry:
-  // Dr Expense (net of VAT), Dr Input VAT, Cr Accounts Payable (gross net of discount)
+  // Dr Expense (net of VAT & trade discount), Dr Input VAT, Cr Accounts Payable
+  // The trade discount contrasts the EXPENSE (it is recorded net), so A/P that is booked is already net of discount.
+  const recognizedExpenseKeys: any[] = [];
+
   sortedExpenses.forEach(e => {
     if (e.is_cancelled || e.expense_status === 'Cancelled') return;
 
     const providerName = e.registered_name || e.service_provider_name || 'Vendor';
-    const isVat = e.vat_or_nonvat === 'VAT' || e.nonvat_or_vat === 'VAT' || e.business_tax_type === 'vatable' || (Number(e.vat_amount || e.vat_input_amount) > 0);
-    const rawExpAmt = Number(e.total_amount_vat_inclusive ?? e.amount ?? e.expense_invoice_amount) || 0;
-    const discounts = Number(e.discount ?? e.discounts ?? e.less_discount) || 0;
-    const w2307 = Number(e.tax_withheld ?? e.withholding_2307_2306 ?? e.less_withholding_tax) || 0;
-
-    const { vatable_expense_amount, vat_input_amount, nonvat_expense_amount, net_of_discount: netInvoice } = computeExpenseVAT(rawExpAmt, discounts, isVat);
-    const expBase = Number(e.vatable_amount ?? e.vatable_expense_amount) || (isVat ? vatable_expense_amount : nonvat_expense_amount);
-    const inputVat = Number(e.vat_amount ?? e.vat_input_amount) || (isVat ? vat_input_amount : 0);
-    const grossPayable = Math.round((expBase + inputVat) * 100) / 100 || netInvoice;
+    const pb = getPurchaseBookedAmounts(e);
+    const grossPayable = pb.netPayable;
+    const expBase = pb.expBase;
+    const inputVat = pb.inputVat;
+    const w2307 = Math.min(pb.w2307, grossPayable);
 
     if (grossPayable <= 0) return;
 
@@ -835,32 +1055,12 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       ref_no: vNo,
       description: `Subsidiary Purchases: Voucher #${vNo} - ${providerName} (${expType})`,
       debits: expDebits,
-      credits: [
-        { account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }
-      ]
+      credits: [{ account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }]
     } as any);
+    recognizedExpenseKeys.push(e);
 
-    // Check if paid in full directly without separate payment records, or via direct cash purchase
-    const normVoucher = normalizeDocNo(vNo);
-    const matchingPmts = payments.filter(p => !p.is_cancelled && (normalizeDocNo(p.voucher_number) === normVoucher || normalizeDocNo(p.invoice_number) === normVoucher));
-    const isExplicitExpCash = (e.type_of_transaction || '').toUpperCase().includes('CASH') || (e.payment_type || '').toLowerCase() === 'cash';
-    const isExplicitExpOnAccount = (e.type_of_transaction || '').toUpperCase().includes('ACCOUNT') || (e.payment_type || '').toLowerCase() === 'on_account' || (e.payment_type || '').toLowerCase() === 'partial';
-
-    const isExpPartial =
-      isExplicitExpOnAccount ||
-      e.settled_via_collections === true ||
-      (e.status || '').toLowerCase() === 'partial' ||
-      (e.status || '').toLowerCase() === 'on account' ||
-      (e.expense_status || '').toLowerCase() === 'partial' ||
-      (e.expense_status || '').toLowerCase() === 'on account' ||
-      (Number(e.down_payment) > 0 && Number(e.down_payment) < grossPayable - 0.5) ||
-      matchingPmts.some(p => Array.isArray(p.installments) && p.installments.length > 1) ||
-      matchingPmts.some(p => (p.type_of_transaction || '').toUpperCase().includes('ACCOUNT')) ||
-      matchingPmts.length > 1;
-
-    const isDirectCashPurchase = isExplicitExpCash && !isExpPartial && !e.settled_via_collections;
-
-    if (isDirectCashPurchase) {
+    // Direct full cash purchase -> Cash Disbursements Book posts ONE compound entry
+    if (isDirectFullCashPurchase(e, payments)) {
       const cashPaid = Math.max(0, Math.round((grossPayable - w2307) * 100) / 100);
       const cdCredits: Array<{ account_code: string; account_title: string; amount: number }> = [
         { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashPaid }
@@ -877,184 +1077,107 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
         ref_type: 'Payment',
         ref_no: vNo,
         description: `Cash Disbursements Book: Full Payment for Voucher #${vNo} - ${providerName}`,
-        debits: [
-          { account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }
-        ],
+        debits: [{ account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }],
         credits: cdCredits
       } as any);
-
-      if (normVoucher) {
-        directCashDisbursementVouchers.add(normVoucher);
-      }
-      if (e.invoice_number) {
-        directCashDisbursementVouchers.add(normalizeDocNo(e.invoice_number));
-      }
-      if (vNo) {
-        directCashDisbursementVouchers.add(vNo.trim().toLowerCase());
-      }
     }
   });
 
   // 4. PAYMENTS BOOK -> Journalizes partial / on-account payments
-  const sortedPayments = [...payments].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
-  const ewtRecognizedForVoucher = new Set<string>();
-
-  sortedPayments.forEach((p, idx) => {
-    if (p.is_cancelled) return;
-    const vNo = p.voucher_number || p.invoice_number || `PAY-${p.id}`;
-    const normVoucher = normalizeDocNo(vNo);
-    const rawVoucherLower = (vNo || '').trim().toLowerCase();
-    const normVoucherNo = normalizeDocNo(p.voucher_number);
-    const normInvNo = normalizeDocNo(p.invoice_number);
-
-    if (
-      (normVoucher && directCashDisbursementVouchers.has(normVoucher)) ||
-      (rawVoucherLower && directCashDisbursementVouchers.has(rawVoucherLower)) ||
-      (normVoucherNo && directCashDisbursementVouchers.has(normVoucherNo)) ||
-      (normInvNo && directCashDisbursementVouchers.has(normInvNo))
-    ) {
-      return; // Already journalized in Cash Disbursements Book above; do not duplicate in Payments Book
-    }
-
-    const matchingExp = expenses.find(e => !e.is_cancelled && (normalizeDocNo(e.voucher_number) === normVoucher || normalizeDocNo(e.invoice_number) === normVoucher));
-    const sameVoucherPmts = sortedPayments.filter(pm => {
-      if (pm.is_cancelled || (normalizeDocNo(pm.voucher_number) !== normVoucher && normalizeDocNo(pm.invoice_number) !== normVoucher)) return false;
-      const pmCash = pm.amount_paid !== undefined ? Number(pm.amount_paid) : (Number(pm.amount) || 0);
-      const pmWtax = Number(pm.withholding_tax_2307 ?? (pm as any).tax_withheld) || 0;
-      const pmDisc = Number((pm as any).discount ?? (pm as any).discounts) || 0;
-      const hasInst = Array.isArray(pm.installments) && pm.installments.length > 0;
-      return pmCash > 0 || pmWtax > 0 || pmDisc > 0 || hasInst;
+  //   Entry 2a (each payment):          Dr Accounts Payable, Cr Cash, (Cr Purchase Discounts)
+  //   Entry 2b (EWT recognition):       Dr Accounts Payable, Cr Expanded Withholding Tax Payable
+  const emitPurchaseSettlementEntries = (
+    vNo: string,
+    providerName: string,
+    entryCompany: string,
+    events: SettlementEvent[],
+    ewtPlug: number
+  ) => {
+    events.forEach((ev, i) => {
+      const n = i + 1;
+      const base = (Number(ev.sourceId) || 0) + ev.seq * 0.001;
+      const date = ev.date || new Date().toISOString().split('T')[0];
+      const apOffset = Math.round((ev.cash + ev.discount) * 100) / 100;
+      if (apOffset > 0) {
+        const credits: Array<{ account_code: string; account_title: string; amount: number }> = [];
+        if (ev.cash > 0) credits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: ev.cash });
+        if (ev.discount > 0) credits.push({ account_code: '5015', account_title: 'Purchase Discounts', amount: ev.discount });
+        entries.push({
+          id: idCounter++,
+          _sortKey: base + 0.1,
+          company_name: entryCompany,
+          entry_no: '',
+          date,
+          ref_type: 'Payment',
+          ref_no: vNo,
+          description: `Payments Book — Journal entry ${n} (${ordinalOf(n, 'payment')}): Voucher #${vNo} - ${providerName}`,
+          debits: [{ account_code: '2010', account_title: 'Accounts Payable', amount: apOffset }],
+          credits
+        } as any);
+      }
+      if (ev.withholding > 0) {
+        entries.push({
+          id: idCounter++,
+          _sortKey: base + 0.102,
+          company_name: entryCompany,
+          entry_no: '',
+          date,
+          ref_type: 'Payment',
+          ref_no: vNo,
+          description: `Payments Book — Journal entry ${n} (to recognize EWT): Voucher #${vNo} - ${providerName}`,
+          debits: [{ account_code: '2010', account_title: 'Accounts Payable', amount: ev.withholding }],
+          credits: [{ account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: ev.withholding }]
+        } as any);
+      }
     });
 
-    if (matchingExp) {
-      const isDirectCashPurchase = (matchingExp.type_of_transaction || '').toUpperCase() === 'CASH' && !matchingExp.settled_via_collections;
-      if (isDirectCashPurchase && ((normVoucher && directCashDisbursementVouchers.has(normVoucher)) || (normVoucherNo && directCashDisbursementVouchers.has(normVoucherNo)))) {
-        return; // Direct cash purchase already accounted for in Cash Disbursements
-      }
-    }
-
-    const providerName = p.registered_name || p.service_provider_name || matchingExp?.registered_name || matchingExp?.service_provider_name || 'Vendor';
-    const payDate = p.date || p.payment_date || new Date().toISOString().split('T')[0];
-
-    if (Array.isArray(p.installments) && p.installments.length > 0) {
-      p.installments.forEach((inst: any, instIdx: number) => {
-        const cashPaid = Number(inst.cash_amount) || 0;
-        const w2307 = Number(inst.wtax_2307) || 0;
-        const instDate = inst.date || payDate;
-        const pmtNo = inst.payment_no || (instIdx + 1);
-        const ordinal = pmtNo === 1 ? 'first payment/down payment' : pmtNo === 2 ? 'for 2nd payment' : `for #${pmtNo} payment`;
-
-        if (cashPaid > 0) {
-          entries.push({
-            id: idCounter++,
-            _sortKey: (Number(p.id) || 0) + (instIdx * 0.01) + 0.1,
-            company_name: p.company_name || companyName,
-            entry_no: '',
-            date: instDate,
-            ref_type: 'Payment',
-            ref_no: vNo,
-            description: `Payments Book — Journal entry ${pmtNo} (${ordinal}): Voucher #${vNo} - ${providerName}`,
-            debits: [
-              { account_code: '2010', account_title: 'Accounts Payable', amount: cashPaid }
-            ],
-            credits: [
-              { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashPaid }
-            ]
-          } as any);
-        }
-
-        if (w2307 > 0 && (inst.is_final || p.status === 'Paid')) {
-          entries.push({
-            id: idCounter++,
-            _sortKey: (Number(p.id) || 0) + (instIdx * 0.01) + 0.15,
-            company_name: p.company_name || companyName,
-            entry_no: '',
-            date: instDate,
-            ref_type: 'Payment',
-            ref_no: vNo,
-            description: `Payments Book — Journal entry ${pmtNo} (to recognize full payment): Voucher #${vNo} - ${providerName}`,
-            debits: [
-              { account_code: '2010', account_title: 'Accounts Payable', amount: w2307 }
-            ],
-            credits: [
-              { account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: w2307 }
-            ]
-          } as any);
-          if (normVoucher) ewtRecognizedForVoucher.add(normVoucher);
-        }
-      });
-      return;
-    }
-
-    const cashPaid = p.amount_paid !== undefined ? Number(p.amount_paid) : (Number(p.amount) || 0);
-    const rawDiscountAmt = Number(p.discount ?? p.discounts ?? p.less_discount) || 0;
-    const directEwtOnRow = Number(p.withholding_tax_2307 ?? p.tax_withheld ?? p.amount_withheld_2307) || 0;
-
-    // Do not double-count initial invoice trade discount if it was already booked in the Purchases recognition entry
-    const isInitialPurchaseDiscount = matchingExp && 
-      (Number(matchingExp.discount ?? matchingExp.less_discount) || 0) > 0 &&
-      (Number(matchingExp.discount ?? matchingExp.less_discount) || 0) === rawDiscountAmt &&
-      (p.particulars?.includes('Down Payment') || p.id === matchingExp.id + 1);
-    const discountAmt = isInitialPurchaseDiscount ? 0 : rawDiscountAmt;
-
-    if (cashPaid <= 0 && discountAmt <= 0 && directEwtOnRow <= 0) {
-      return; // Skip 0-amount On Account tracking rows
-    }
-
-    const pmtOrder = sameVoucherPmts.findIndex(pm => pm.id === p.id) + 1 || (idx + 1);
-    const ordinal = pmtOrder === 1 ? 'first payment/down payment' : pmtOrder === 2 ? 'for 2nd payment' : `for #${pmtOrder} payment`;
-
-    // Sum all cash paid for this voucher across installments
-    const totalCashPaidForVoucher = sameVoucherPmts.reduce((s, pm) => {
-      const pmCash = pm.amount_paid !== undefined ? Number(pm.amount_paid) : (Number(pm.amount) || 0);
-      return s + pmCash;
-    }, 0);
-
-    const expWtax = Number(matchingExp?.tax_withheld ?? matchingExp?.withholding_2307_2306) || 0;
-    const expGross = Number(matchingExp?.total_amount_vat_inclusive ?? matchingExp?.amount) || 0;
-    const expDisc = Number(matchingExp?.discount ?? matchingExp?.less_discount) || 0;
-    const netAP = Math.max(0, Math.round((expGross - expDisc) * 100) / 100);
-    const netCashDue = Number(matchingExp?.total_amount_due) > 0 ? Number(matchingExp.total_amount_due) : Math.max(0, Math.round((netAP - expWtax) * 100) / 100);
-
-    const isVoucherFullyPaid = p.status === 'Paid' || matchingExp?.status === 'Paid' || (netCashDue > 0 && totalCashPaidForVoucher >= netCashDue - 0.05);
-    const isLastPmtRow = sameVoucherPmts.length === 0 || sameVoucherPmts[sameVoucherPmts.length - 1].id === p.id;
-
-    const ewtAlreadyRecognized = normVoucher ? ewtRecognizedForVoucher.has(normVoucher) : false;
-
-    let w2307ForThisEntry = directEwtOnRow;
-    if (w2307ForThisEntry <= 0 && expWtax > 0 && isVoucherFullyPaid && isLastPmtRow && !ewtAlreadyRecognized) {
-      w2307ForThisEntry = expWtax;
-    }
-
-    // Dr Accounts Payable (counters AP by Cash + EWT + Discount), Cr Cash, Cr EWT Payable, Cr Purchase Discounts
-    const totalOffsetAP = Math.round((cashPaid + discountAmt + w2307ForThisEntry) * 100) / 100;
-    if (totalOffsetAP > 0) {
-      const pmtCredits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-      if (cashPaid > 0) {
-        pmtCredits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashPaid });
-      }
-      if (w2307ForThisEntry > 0) {
-        pmtCredits.push({ account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: w2307ForThisEntry });
-        if (normVoucher) ewtRecognizedForVoucher.add(normVoucher);
-      }
-      if (discountAmt > 0) {
-        pmtCredits.push({ account_code: '5015', account_title: 'Purchase Discounts', amount: discountAmt });
-      }
+    if (ewtPlug > 0.005 && events.length > 0) {
+      const last = events[events.length - 1];
       entries.push({
         id: idCounter++,
-        _sortKey: (Number(p.id) || 0) + 0.1,
-        company_name: p.company_name || companyName,
+        _sortKey: (Number(last.sourceId) || 0) + last.seq * 0.001 + 0.104,
+        company_name: entryCompany,
         entry_no: '',
-        date: payDate,
+        date: last.date || new Date().toISOString().split('T')[0],
         ref_type: 'Payment',
         ref_no: vNo,
-        description: `Payments Book — Journal entry ${pmtOrder} (${ordinal}): Voucher #${vNo} - ${providerName}`,
-        debits: [
-          { account_code: '2010', account_title: 'Accounts Payable', amount: totalOffsetAP }
-        ],
-        credits: pmtCredits
+        description: `Payments Book — Journal entry ${events.length} (to recognize full payment EWT): Voucher #${vNo} - ${providerName}`,
+        debits: [{ account_code: '2010', account_title: 'Accounts Payable', amount: ewtPlug }],
+        credits: [{ account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: ewtPlug }]
       } as any);
     }
+  };
+
+  recognizedExpenseKeys.forEach(e => {
+    if (isDirectFullCashPurchase(e, payments)) return; // already posted by Cash Disbursements Book (no duplicate)
+    const settlement = computePurchaseSettlement(e, payments);
+    if (settlement.events.length === 0) return;
+    const vNo = e.voucher_number || e.invoice_number || `EXP-${e.id}`;
+    emitPurchaseSettlementEntries(
+      vNo,
+      e.registered_name || e.service_provider_name || 'Vendor',
+      e.company_name || companyName,
+      settlement.events,
+      settlement.withholdingPlug
+    );
+  });
+
+  // Payments whose voucher is not in Subsidiary Purchases (stand-alone / imported payments): post them as recorded
+  const sortedPayments = [...payments].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  sortedPayments.forEach(p => {
+    if (p.is_cancelled) return;
+    if (recognizedExpenseKeys.some(e => purchasePaymentMatches(p, e))) return;
+    const vNo = p.voucher_number || p.invoice_number || `PAY-${p.id}`;
+    const pseudoExp = { voucher_number: p.voucher_number, invoice_number: p.invoice_number, id: -1, total_amount_due: 0, discount: 0 };
+    const events = getPurchaseSettlementEvents(pseudoExp, [p]);
+    if (events.length === 0) return;
+    emitPurchaseSettlementEntries(
+      vNo,
+      p.registered_name || p.service_provider_name || 'Vendor',
+      p.company_name || companyName,
+      events,
+      0
+    );
   });
 
   // 5. PPE Asset Acquisition, Pro-Rata Depreciation (PAS 16), Revaluation Surplus (PAS 16), Impairment (PAS 36) & Held-for-Sale Freeze (PFRS 5)
@@ -1217,6 +1340,19 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       debits,
       credits
     } as any);
+  });
+
+  // Rounding guard: absorb centavo-level rounding differences (<= 5 centavos) so no entry is ever out of balance
+  entries.forEach((entry: any) => {
+    const dr = Math.round(entry.debits.reduce((sum: number, l: any) => sum + (Number(l.amount) || 0), 0) * 100) / 100;
+    const cr = Math.round(entry.credits.reduce((sum: number, l: any) => sum + (Number(l.amount) || 0), 0) * 100) / 100;
+    const diff = Math.round((dr - cr) * 100) / 100;
+    if (diff !== 0 && Math.abs(diff) <= 0.05) {
+      const side = diff > 0 ? entry.credits : entry.debits;
+      if (side.length > 0) {
+        side[side.length - 1].amount = Math.round(((Number(side[side.length - 1].amount) || 0) + Math.abs(diff)) * 100) / 100;
+      }
+    }
   });
 
   // Sort strictly chronologically by _sortKey so GJ1, GJ2, GJ3... never swap or change when new transactions are added

@@ -143,7 +143,7 @@ import {
   mapRowsToPPE 
 } from './utils/csvImportExport';
 import { exportActiveSheetTo2OS, exportFullAccountingWorkbookTo2OS } from './utils/2osExportHelper';
-import { safeNum } from './utils/accounting';
+import { safeNum, computeSaleSettlement, computePurchaseSettlement } from './utils/accounting';
 import { ThemeMode } from './types';
 
 const themeConfigs = {
@@ -265,7 +265,7 @@ function mapSaleToUniform(s: any): UniformBookRecord {
   const netOfVat = safeNum(s.total_amount_net_of_vat) || safeNum(s.amount_net_of_vat) || (amount - vat);
   const discount = safeNum(s.discount) || safeNum(s.discounts) || safeNum(s.less_discount);
   const withheld = safeNum(s.tax_withheld) || safeNum(s.withholding_2307) || safeNum(s.less_withholding_tax);
-  const totalDue = safeNum(s.total_amount_due) || (amount - discount);
+  const totalDue = safeNum(s.total_amount_due) || Math.max(0, Math.round((amount - discount - withheld) * 100) / 100);
 
   return {
     id: s.id || Date.now(),
@@ -328,7 +328,7 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
   const netOfVat = safeNum(e.total_amount_net_of_vat) || safeNum(e.amount_net_of_vat) || (amount - vat);
   const discount = safeNum(e.discount) || safeNum(e.discounts) || safeNum(e.less_discount);
   const withheld = safeNum(e.tax_withheld) || safeNum(e.withholding_2307_2306) || safeNum(e.less_withholding_tax);
-  const totalDue = safeNum(e.total_amount_due) || (amount - discount);
+  const totalDue = safeNum(e.total_amount_due) || Math.max(0, Math.round((amount - discount - withheld) * 100) / 100);
 
   return {
     id: e.id || Date.now(),
@@ -390,7 +390,11 @@ function mapCollectionToUniform(c: any): UniformBookRecord {
   const isVat = c.vat_or_nonvat !== 'NONVAT';
   const vatable = safeNum(c.vatable_amount) || (isVat ? Math.round((amount / 1.12) * 100) / 100 : amount);
   const vat = safeNum(c.vat_amount) || (isVat ? Math.round((amount - vatable) * 100) / 100 : 0);
-  const withheld = safeNum(c.tax_withheld) || safeNum(c.amount_withheld_2307);
+  // amount_withheld_2307 is the CWT actually recognized on THIS collection row; tax_withheld is only a fallback.
+  // (Previously tax_withheld won, which silently promoted the invoice CWT onto the first down-payment row.)
+  const withheld = (c.amount_withheld_2307 !== undefined && c.amount_withheld_2307 !== null && c.amount_withheld_2307 !== '')
+    ? safeNum(c.amount_withheld_2307)
+    : safeNum(c.tax_withheld);
   const discount = safeNum(c.discount);
   const totalDue = safeNum(c.total_amount_due) || Math.max(0, Math.round((amount - discount - withheld) * 100) / 100);
   const collected = c.amount_collected !== undefined ? safeNum(c.amount_collected) : totalDue;
@@ -560,6 +564,56 @@ export default function App() {
   useEffect(() => {
     setPayments(paymentsRecords as any);
   }, [paymentsRecords]);
+
+  // =========================================================================
+  // SETTLEMENT RECONCILIATION (single source of truth)
+  // Status / pending balance of every sale and purchase is derived from the SAME settlement math the journal engine
+  // uses: cash + settlement discount + withholding tax (CWT/EWT) must clear the A/R (A/P). This repairs records that
+  // were previously marked Paid / Partial inconsistently because discount and withholding were not countering A/R.
+  // =========================================================================
+  useEffect(() => {
+    const activeCols = collectionsRecords.filter(c => !c.is_cancelled);
+    const statusBySale = new Map<number, ReturnType<typeof computeSaleSettlement>>();
+    let salesChanged = false;
+    const nextSales = subsidiarySales.map(sale => {
+      if (sale.is_cancelled || String(sale.status).toLowerCase() === 'cancelled') return sale;
+      const scoped = activeCols.filter(c => (c.company_name || '') === (sale.company_name || ''));
+      const st = computeSaleSettlement(sale, scoped);
+      statusBySale.set(sale.id, st);
+      const desiredPending = st.isPaid ? 0 : st.remainingCash;
+      const pendingNow = Number(sale.pending_balance) || 0;
+      if (sale.status !== st.status || Math.abs(pendingNow - desiredPending) > 0.009) {
+        salesChanged = true;
+        return { ...sale, status: st.status, sales_status: st.status, pending_balance: desiredPending, amount_collected: st.cash } as UniformBookRecord;
+      }
+      return sale;
+    });
+    if (salesChanged) {
+      setSubsidiarySales(nextSales.map(mapSaleToUniform));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subsidiarySales, collectionsRecords]);
+
+  useEffect(() => {
+    const activePays = paymentsRecords.filter(p => !p.is_cancelled);
+    let changed = false;
+    const nextPurchases = subsidiaryPurchases.map(pur => {
+      if (pur.is_cancelled || String(pur.status).toLowerCase() === 'cancelled') return pur;
+      const scoped = activePays.filter(p => (p.company_name || '') === (pur.company_name || ''));
+      const st = computePurchaseSettlement(pur, scoped);
+      const desiredPending = st.isPaid ? 0 : st.remainingCash;
+      const pendingNow = Number(pur.pending_balance) || 0;
+      if (pur.status !== st.status || Math.abs(pendingNow - desiredPending) > 0.009) {
+        changed = true;
+        return { ...pur, status: st.status, expense_status: st.status, pending_balance: desiredPending, amount_paid: st.cash } as UniformBookRecord;
+      }
+      return pur;
+    });
+    if (changed) {
+      setSubsidiaryPurchases(nextPurchases.map(mapExpenseToUniform));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subsidiaryPurchases, paymentsRecords]);
 
   // Normalize invoice / voucher numbers for reliable cross-book matching
   const normalizeDocNo = (num?: string) => (num || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
@@ -1624,7 +1678,7 @@ export default function App() {
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 shadow-2xl flex flex-col sm:flex-row items-center gap-3.5 px-5 py-3.5 rounded-xl border max-w-xl ${activeTheme.bgCard} ${activeTheme.borderCard} ${activeTheme.textMain}`}
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[300] shadow-2xl flex flex-col sm:flex-row items-center gap-3.5 px-5 py-3.5 rounded-xl border max-w-xl ${activeTheme.bgCard} ${activeTheme.borderCard} ${activeTheme.textMain}`}
           >
             <div className="flex items-center gap-2.5">
               {alertMsg.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />}
@@ -2294,6 +2348,11 @@ export default function App() {
                   setIncomeTaxRecords={setIncomeTaxRecords}
                   setSpecialEntries={setSpecialEntries}
                   activeCompany={activeCompany}
+                  setCompanies={setCompanies}
+                  onUpdateCompany={(c) => {
+                    setCompanies(prev => prev.map(comp => comp.id === c.id ? c : comp));
+                    setActiveCompany(c);
+                  }}
                   accountTitles={accountTitles}
                   theme={activeTheme}
                   triggerAlert={triggerAlert}

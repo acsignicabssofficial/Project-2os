@@ -22,7 +22,7 @@ import {
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import AutoSuggestInput from './AutoSuggestInput';
 import { UniformBookRecord, Contractor, Company, AccountTitle, SpecialEntry, SpecialEntryLine } from '../types';
-import { computeExpenseVAT } from '../utils/accounting';
+import { computeExpenseVAT, computePurchaseSettlement } from '../utils/accounting';
 
 interface PurchaseTransactionTabProps {
   subsidiaryPurchases: UniformBookRecord[];
@@ -159,6 +159,14 @@ export default function PurchaseTransactionTab({
     ];
   }, [accountTitles, expenseType]);
 
+  // Theme-aware form classes (readable on BOTH light and dark themes)
+  const isDark = !theme || !theme.isLight;
+  const fieldCls = isDark
+    ? 'bg-zinc-900 text-zinc-100 border-zinc-700 placeholder:text-zinc-500 focus:border-purple-400 focus:ring-1 focus:ring-purple-400'
+    : 'bg-white text-slate-900 border-slate-300 placeholder:text-slate-400 shadow-xs focus:border-purple-600 focus:ring-1 focus:ring-purple-600';
+  const fieldMonoCls = `${fieldCls} font-mono font-bold`;
+  const infoPanelCls = isDark ? 'bg-zinc-900/60 border-zinc-800 text-zinc-200' : 'bg-slate-50 border-slate-200 text-slate-800';
+
   // Transaction Mode: 'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'
   const [purchaseMode, setPurchaseMode] = useState<'ON CASH' | 'ON ACCOUNT' | 'ON PARTIAL'>('ON CASH');
 
@@ -260,18 +268,12 @@ export default function PurchaseTransactionTab({
 
   // Open / Unpaid / Partial Purchases for current company
   const openPayables = useMemo(() => {
+    const activePayments = payments.filter(pm => !pm.is_cancelled);
     return subsidiaryPurchases.filter(p => {
       if (p.is_cancelled) return false;
       if (activeCompanyName && p.company_name && p.company_name !== activeCompanyName) return false;
-      // Calculate how much has been paid across the payments book for this voucher/purchase
-      const matchingPayments = payments.filter(pm => 
-        !pm.is_cancelled && 
-        paymentMatches(pm, p)
-      );
-      const totalPaid = matchingPayments.reduce((sum, pm) => sum + (Number(pm.amount_paid || pm.amount) || 0), 0);
-      const purchaseDue = Number(p.total_amount_due || p.amount) || 0;
-      const isPaid = (p.status === 'Cash' || p.status === 'Paid') && totalPaid >= purchaseDue;
-      return !isPaid && (p.status === 'On Account' || p.status === 'Partial' || totalPaid < purchaseDue);
+      // Single source of truth: cash + EWT (+ any discount) must clear the booked A/P
+      return !computePurchaseSettlement(p, activePayments).isPaid;
     });
   }, [subsidiaryPurchases, payments, activeCompanyName]);
 
@@ -357,7 +359,8 @@ export default function PurchaseTransactionTab({
     }
 
     const totalEwt = liveFormulas.tax_withheld || 0;
-    const netCashForFullPayable = Math.max(0, Math.round((totalDue - totalEwt) * 100) / 100);
+    // total_amount_due is ALREADY net of trade discount and EWT -> it IS the cash to disburse (EWT must not be deducted twice)
+    const netCashForFullPayable = Math.max(0, Math.round(totalDue * 100) / 100);
 
     const purchaseRecord: UniformBookRecord = {
       id: commonId,
@@ -498,7 +501,7 @@ export default function PurchaseTransactionTab({
         return;
       }
 
-      const isFull = (downPmt + totalEwt + downWtax) >= totalDue - 0.01;
+      const isFull = downPmt >= netCashForFullPayable - 0.01;
       const actualFirstCash = isFull ? netCashForFullPayable : downPmt;
       const pendingBal = isFull ? 0 : Math.max(0, Math.round((netCashForFullPayable - downPmt) * 100) / 100);
 
@@ -597,19 +600,38 @@ export default function PurchaseTransactionTab({
 
     const payRec = selectedPayableToPay;
     const payTotalDue = Number(payRec.total_amount_due || payRec.amount) || 0;
-    const payEwt = Number(payRec.tax_withheld || payRec.withholding_tax_2307) || 0;
-    const targetNetCash = Math.max(0, Math.round((payTotalDue - payEwt) * 100) / 100);
+    const activePayments = payments.filter(pm => !pm.is_cancelled);
 
     // Find existing Payments Book records for this voucher
-    const existingMatching = payments.filter(pm => 
-      !pm.is_cancelled && 
-      paymentMatches(pm, payRec)
-    );
-    const prevPaid = existingMatching.reduce((sum, pm) => sum + (Number(pm.amount_paid) || 0), 0);
-    const newTotalPaid = Math.round((prevPaid + paymentAmt) * 100) / 100;
-    const effectiveEwt = wtaxInputAmt > 0 ? wtaxInputAmt : payEwt;
-    const isNowFullyPaid = (newTotalPaid + effectiveEwt) >= payTotalDue - 0.01 || newTotalPaid >= targetNetCash - 0.01;
-    const remainingPending = isNowFullyPaid ? 0 : Math.max(0, Math.round((targetNetCash - newTotalPaid) * 100) / 100);
+    const existingMatching = activePayments.filter(pm => paymentMatches(pm, payRec));
+
+    // Settlement BEFORE this payment (A/P booked is net of discount; EWT is NOT cash and is counted only once)
+    const before = computePurchaseSettlement(payRec, activePayments);
+    if (paymentAmt > before.remainingCash + 0.05) {
+      triggerAlert(
+        `Overpayment Precaution: Payment (₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining cash payable of ₱${before.remainingCash.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Voucher #${payRec.voucher_number}.`,
+        'error'
+      );
+      return;
+    }
+
+    const tentativeRow = {
+      id: Date.now(),
+      voucher_number: payRec.voucher_number,
+      invoice_number: payRec.invoice_number,
+      installments: [{ payment_no: 1, date: payDate, cash_amount: paymentAmt, wtax_2307: wtaxInputAmt }]
+    };
+    const after0 = computePurchaseSettlement(payRec, [...activePayments, tentativeRow]);
+    // The installment that completes the cash due carries the EWT that still has to counter A/P
+    const ewtThisInstallment = wtaxInputAmt > 0 ? wtaxInputAmt : after0.withholdingPlug;
+    const after = ewtThisInstallment === wtaxInputAmt
+      ? after0
+      : computePurchaseSettlement(payRec, [...activePayments, { ...tentativeRow, installments: [{ ...tentativeRow.installments[0], wtax_2307: ewtThisInstallment }] }]);
+
+    const isNowFullyPaid = after.isPaid;
+    const newTotalPaid = after.cash;
+    const effectiveEwt = after.withholdingRecognized > 0 ? after.withholdingRecognized : after.withholdingExpected;
+    const remainingPending = after.remainingCash;
 
     const commonId = Date.now();
     const nowIso = new Date().toISOString();
@@ -632,7 +654,7 @@ export default function PurchaseTransactionTab({
             date: payDate,
             ref_no: payRefNo.trim() || `PV-${Date.now().toString().slice(-4)}`,
             cash_amount: paymentAmt,
-            wtax_2307: isNowFullyPaid ? effectiveEwt : wtaxInputAmt
+            wtax_2307: ewtThisInstallment
           };
           return {
             ...pm,
@@ -691,7 +713,7 @@ export default function PurchaseTransactionTab({
             date: payDate,
             ref_no: payRefNo.trim() || `PV-${Date.now().toString().slice(-4)}`,
             cash_amount: paymentAmt,
-            wtax_2307: isNowFullyPaid ? effectiveEwt : wtaxInputAmt
+            wtax_2307: ewtThisInstallment
           }
         ],
         status: isNowFullyPaid ? 'Paid' : 'Partial',
@@ -706,7 +728,7 @@ export default function PurchaseTransactionTab({
       if (p.id === payRec.id || (p.voucher_number === payRec.voucher_number && isActiveCompanyRow(p))) {
         return {
           ...p,
-          status: isNowFullyPaid ? 'Paid' : 'Partial',
+          status: after.status,
           amount_paid: newTotalPaid,
           pending_balance: remainingPending
         };
@@ -914,7 +936,7 @@ export default function PurchaseTransactionTab({
                     type="number"
                     value={downPaymentAmount}
                     onChange={(e) => setDownPaymentAmount(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-purple-500/40 bg-zinc-900 text-white font-mono font-bold"
+                    className={`w-full px-3 py-2 text-xs rounded-lg border ${fieldMonoCls}`}
                     required
                   />
                 </div>
@@ -926,7 +948,7 @@ export default function PurchaseTransactionTab({
                     type="number"
                     value={downPaymentWithholding}
                     onChange={(e) => setDownPaymentWithholding(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-purple-500/40 bg-zinc-900 text-white font-mono"
+                    className={`w-full px-3 py-2 text-xs rounded-lg border ${fieldMonoCls}`}
                   />
                 </div>
                 <div>
@@ -937,7 +959,7 @@ export default function PurchaseTransactionTab({
                     type="text"
                     value={disbursementRef}
                     onChange={(e) => setDisbursementRef(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-purple-500/40 bg-zinc-900 text-white font-mono font-bold"
+                    className={`w-full px-3 py-2 text-xs rounded-lg border ${fieldMonoCls}`}
                   />
                 </div>
               </div>
@@ -1335,7 +1357,7 @@ export default function PurchaseTransactionTab({
               </div>
 
               {/* ROUTING SUMMARY BOX */}
-              <div className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/60 flex flex-col gap-1.5 text-[11px]">
+              <div className={`p-3.5 rounded-xl border ${infoPanelCls} flex flex-col gap-1.5 text-[11px]`}>
                 <span className="font-bold text-zinc-300 uppercase tracking-wider text-[10px]">Destination Books:</span>
                 <div className="flex items-center gap-1.5 text-emerald-400">
                   <Check className="w-3.5 h-3.5" />
@@ -1588,7 +1610,7 @@ export default function PurchaseTransactionTab({
             </div>
 
             <form onSubmit={handleExecutePayment} className="flex flex-col gap-4 text-xs">
-              <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col gap-1">
+              <div className={`p-3 rounded-xl border ${infoPanelCls} flex flex-col gap-1`}>
                 <div className="flex justify-between">
                   <span className="text-zinc-400">Provider / Payee:</span>
                   <span className="font-bold text-zinc-200">{selectedPayableToPay.registered_name}</span>
@@ -1596,6 +1618,10 @@ export default function PurchaseTransactionTab({
                 <div className="flex justify-between">
                   <span className="text-zinc-400">Total Voucher Payable:</span>
                   <span className="font-mono font-bold text-zinc-200">₱{(Number(selectedPayableToPay.total_amount_due) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-amber-500 font-bold">Remaining Cash Payable:</span>
+                  <span className="font-mono font-extrabold text-amber-500">₱{computePurchaseSettlement(selectedPayableToPay, payments.filter(pm => !pm.is_cancelled)).remainingCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
               </div>
 
@@ -1606,7 +1632,7 @@ export default function PurchaseTransactionTab({
                   step="any"
                   value={payAmount}
                   onChange={(e) => setPayAmount(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
+                  className={`w-full px-3 py-2 text-xs rounded-xl border ${fieldMonoCls}`}
                   required
                 />
               </div>
@@ -1619,7 +1645,7 @@ export default function PurchaseTransactionTab({
                     step="any"
                     value={payWtax}
                     onChange={(e) => setPayWtax(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
+                    className={`w-full px-3 py-2 text-xs rounded-xl border ${fieldMonoCls}`}
                   />
                 </div>
 
@@ -1629,7 +1655,7 @@ export default function PurchaseTransactionTab({
                     type="date"
                     value={payDate}
                     onChange={(e) => setPayDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-medium"
+                    className={`w-full px-3 py-2 text-xs rounded-xl border font-medium ${fieldCls}`}
                     required
                   />
                 </div>
@@ -1641,7 +1667,7 @@ export default function PurchaseTransactionTab({
                   type="text"
                   value={payRefNo}
                   onChange={(e) => setPayRefNo(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
+                  className={`w-full px-3 py-2 text-xs rounded-xl border ${fieldMonoCls}`}
                   required
                 />
               </div>

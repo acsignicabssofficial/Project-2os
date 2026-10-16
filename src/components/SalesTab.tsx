@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { CheckCircle2, Pencil, Trash2, Ban, RotateCcw, Plus, Search, X, Calculator } from 'lucide-react';
+import { CheckCircle2, Pencil, Trash2, Ban, RotateCcw, Plus, Search, X, Calculator, Scale, Info } from 'lucide-react';
 import { Sale, Customer, Company, Collection } from '../types';
 import AutoSuggestInput from './AutoSuggestInput';
 import { computeSaleFormulas } from '../utils/accounting';
+import { getStatutoryTaxRule } from '../utils/statutoryTaxEngine';
 
 interface SalesTabProps {
   sales: Sale[];
@@ -49,6 +50,9 @@ export default function SalesTab({
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Date-based statutory tax rule for selected transaction date
+  const statutoryRule = useMemo(() => getStatutoryTaxRule(issueDate), [issueDate]);
 
   // Compute live formula values
   const formulaResults = useMemo(() => {
@@ -525,6 +529,31 @@ export default function SalesTab({
                     />
                   </div>
                 </div>
+
+                {/* Statutory Date Guidance */}
+                <div className="px-2.5 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-[10px] text-violet-300 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Scale className="w-3.5 h-3.5 text-violet-400 flex-shrink-0" />
+                    <span>
+                      Governing Law ({issueDate}): <strong>{statutoryRule.shortName}</strong>
+                    </span>
+                  </div>
+                  <span className="font-mono text-zinc-400">
+                    {statutoryRule.primaryDocumentType === 'INVOICE' 
+                      ? 'EOPT: Harmonized Invoice for Goods & Services' 
+                      : 'Invoice (Goods) / OR (Services)'}
+                  </span>
+                </div>
+
+                {/* EOPT Official Receipt Advisory */}
+                {issueDate >= '2024-01-22' && invoiceType === 'Official Receipt' && (
+                  <div className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-300 flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                    <span>
+                      EOPT Compliance Notice: Under RA 11976 / RR 3-2024, "Invoice" (Sales/Service Invoice) is the required primary document. Official Receipts serve as supplementary evidence of collection only.
+                    </span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>

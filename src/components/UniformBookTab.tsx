@@ -55,6 +55,12 @@ interface UniformBookTabProps {
   onDeleteRecord?: (bookType: UniformBookType, record: UniformBookRecord) => void;
 }
 
+// Discounts given at collection time counter A/R. Rows that merely mirror the invoice trade discount
+// (down payment / tracking / cash copies) were already booked at sale recognition and must not be counted again.
+const SETTLEMENT_COPY_RX = /down payment|receivable tracking|full cash settlement|full settlement completed|reverted/i;
+const settlementDiscountOf = (r: any): number =>
+  SETTLEMENT_COPY_RX.test(String(r?.particulars || '')) ? 0 : (Number(r?.discount) || 0);
+
 export default function UniformBookTab({
   bookType,
   records,
@@ -1000,7 +1006,7 @@ export default function UniformBookTab({
 
                     const totalDueVal = Number(primary.total_amount_due || primary.amount) || 0;
                     const withheldVal = Number(primary.tax_withheld || primary.amount_withheld_2307 || primary.withholding_tax_2307) || 0;
-                    const netCashTarget = Math.max(0, Math.round((totalDueVal - withheldVal) * 100) / 100);
+                    const netCashTarget = Math.max(0, Math.round(totalDueVal * 100) / 100) /* total_amount_due is already net of discount & withholding */;
 
                     const activePayments = sortedPayments.filter(p => !p.is_cancelled && (p.amount_collected !== undefined ? Number(p.amount_collected) : 0) > 0);
                     const totalCashCollectedForInvoice = sortedPayments
@@ -1012,7 +1018,8 @@ export default function UniformBookTab({
                         return sum + cVal;
                       }, 0);
 
-                    const invoicePendingBalance = Math.max(0, Math.round((netCashTarget - totalCashCollectedForInvoice) * 100) / 100);
+                    const totalSettlementDiscountForInvoice = sortedPayments.filter(p => !p.is_cancelled && (Number(p.amount_collected) || 0) > 0).reduce((sum, p) => sum + settlementDiscountOf(p), 0);
+                    const invoicePendingBalance = Math.max(0, Math.round((netCashTarget - totalCashCollectedForInvoice - totalSettlementDiscountForInvoice) * 100) / 100);
                     const isFullyPaid = invoicePendingBalance <= 0.01 && totalCashCollectedForInvoice > 0;
                     const isPartial = !isFullyPaid && totalCashCollectedForInvoice > 0;
 
@@ -1158,7 +1165,7 @@ export default function UniformBookTab({
                               ? Number(payment.amount_collected)
                               : (payment.status === 'Paid' || payment.status === 'Cash' ? netCashTarget : 0);
                             if (!payment.is_cancelled) {
-                              runningCollected += payAmt;
+                              runningCollected += payAmt + (payAmt > 0 ? settlementDiscountOf(payment) : 0);
                             }
                             const runningPending = Math.max(0, Math.round((netCashTarget - runningCollected) * 100) / 100);
                             const isZeroPlaceholder = payAmt === 0 && sortedPayments.length === 1;
@@ -1275,13 +1282,13 @@ export default function UniformBookTab({
                   const isCancelled = r.is_cancelled;
                   const totalDueVal = Number(r.total_amount_due || r.amount) || 0;
                   const withheldVal = Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0;
-                  const netCashTarget = Math.max(0, Math.round((totalDueVal - withheldVal) * 100) / 100);
+                  const netCashTarget = Math.max(0, Math.round(totalDueVal * 100) / 100) /* total_amount_due is already net of discount & withholding */;
                   const cashReceivedOrPaid = isDisbursementOrPurchase
                     ? (r.amount_paid !== undefined ? Number(r.amount_paid) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0))
                     : (r.amount_collected !== undefined ? Number(r.amount_collected) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0));
                   const pendingBalanceVal = r.pending_balance !== undefined
                     ? Number(r.pending_balance)
-                    : (r.status === 'Paid' || r.status === 'Cash' ? 0 : Math.max(0, Math.round((netCashTarget - cashReceivedOrPaid) * 100) / 100));
+                    : (r.status === 'Paid' || r.status === 'Cash' ? 0 : Math.max(0, Math.round((netCashTarget - cashReceivedOrPaid - (isDisbursementOrPurchase ? 0 : settlementDiscountOf(r))) * 100) / 100));
 
                   return (
                     <tr 
@@ -1513,7 +1520,7 @@ export default function UniformBookTab({
                           .reduce((sum, r) => {
                             const totalDueVal = Number(r.total_amount_due || r.amount) || 0;
                             const withheldVal = Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0;
-                            const netCashTarget = Math.max(0, Math.round((totalDueVal - withheldVal) * 100) / 100);
+                            const netCashTarget = Math.max(0, Math.round(totalDueVal * 100) / 100) /* total_amount_due is already net of discount & withholding */;
                             const val = isDisbursementOrPurchase
                               ? (r.amount_paid !== undefined ? Number(r.amount_paid) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0))
                               : (r.amount_collected !== undefined ? Number(r.amount_collected) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0));
@@ -1527,13 +1534,13 @@ export default function UniformBookTab({
                           .reduce((sum, r) => {
                             const totalDueVal = Number(r.total_amount_due || r.amount) || 0;
                             const withheldVal = Number(r.tax_withheld || r.amount_withheld_2307 || r.withholding_tax_2307) || 0;
-                            const netCashTarget = Math.max(0, Math.round((totalDueVal - withheldVal) * 100) / 100);
+                            const netCashTarget = Math.max(0, Math.round(totalDueVal * 100) / 100) /* total_amount_due is already net of discount & withholding */;
                             const cashVal = isDisbursementOrPurchase
                               ? (r.amount_paid !== undefined ? Number(r.amount_paid) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0))
                               : (r.amount_collected !== undefined ? Number(r.amount_collected) : (r.status === 'Paid' || r.status === 'Cash' ? netCashTarget : 0));
                             const pendVal = r.pending_balance !== undefined
                               ? Number(r.pending_balance)
-                              : (r.status === 'Paid' || r.status === 'Cash' ? 0 : Math.max(0, Math.round((netCashTarget - cashVal) * 100) / 100));
+                              : (r.status === 'Paid' || r.status === 'Cash' ? 0 : Math.max(0, Math.round((netCashTarget - cashVal - (isDisbursementOrPurchase ? 0 : settlementDiscountOf(r))) * 100) / 100));
                             return sum + pendVal;
                           }, 0)
                           .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

@@ -20,7 +20,8 @@ import {
   Filter,
   Check,
   Upload,
-  RefreshCw
+  RefreshCw,
+  Scale
 } from 'lucide-react';
 import { 
   Sale, 
@@ -32,6 +33,9 @@ import {
   Company 
 } from '../types';
 import { parseCsvText } from '../utils/csvImportExport';
+import { getEntityTaxProfileForYear, isIndividualEntity, getAvailableTaxYears } from '../utils/taxProfiles';
+import { getStatutoryPercentageTaxRate, getStatutoryTaxRule } from '../utils/statutoryTaxEngine';
+import StatutoryTaxLawInspectorModal from './StatutoryTaxLawInspectorModal';
 
 export type BusinessTaxSubTab = 
   | 'btax_2550q' 
@@ -164,8 +168,20 @@ export default function BusinessTaxHubTab({
   // ---------------------------------------------------------------------------
   const [qtr2551, setQtr2551] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
   const [year2551, setYear2551] = useState<string>(() => String(new Date().getFullYear()));
-  const [rate2551, setRate2551] = useState<number>(3); // 3% CREATE rate or 1% during pandemic
+  const [rate2551, setRate2551] = useState<number>(3); // 3% standard or 1% during CREATE relief
   const [priorPaid2551, setPriorPaid2551] = useState<number>(0);
+  const [isStatutoryModalOpen, setIsStatutoryModalOpen] = useState(false);
+
+  // Available chronological tax years (2018–2028 + transactions)
+  const availableTaxYears = useMemo(() => {
+    return getAvailableTaxYears(activeCompany, [...sales, ...expenses]);
+  }, [activeCompany, sales, expenses]);
+
+  // Automatically synchronize Section 116 percentage rate with Philippine statutory law (e.g. 1% CREATE relief 2020-2023 vs 3% standard)
+  useEffect(() => {
+    const statutory = getStatutoryPercentageTaxRate(year2551);
+    setRate2551(statutory.rate);
+  }, [year2551]);
 
   // ---------------------------------------------------------------------------
   // STATE: SUMMARY LIST OF SALES (SLS)
@@ -333,6 +349,9 @@ export default function BusinessTaxHubTab({
   /* COMPUTATION: 2551Q PERCENTAGE TAX RETURN (NON-VAT ENTITIES)               */
   /* ========================================================================= */
   const comp2551q = useMemo(() => {
+    const taxProfile = getEntityTaxProfileForYear(activeCompany, year2551);
+    const is8PercentElected = isIndividualEntity(activeCompany?.entity_type) && taxProfile.income_tax_type === 'EIGHT_PERCENT';
+
     const qSales = sales
       .filter(s => s && !s.is_cancelled && !isSampleTransaction(s))
       .filter(s => {
@@ -355,24 +374,28 @@ export default function BusinessTaxHubTab({
       creditableTaxWithheld += wtax;
     });
 
-    const pctRate = rate2551 / 100;
-    const taxDue = grossTaxable * pctRate;
+    const pctRate = is8PercentElected ? 0 : rate2551 / 100;
+    const taxDue = is8PercentElected ? 0 : grossTaxable * pctRate;
     const totalCredits = priorPaid2551 + creditableTaxWithheld;
-    const taxStillDue = Math.max(0, taxDue - totalCredits);
-    const overpayment = Math.max(0, totalCredits - taxDue);
+    const taxStillDue = is8PercentElected ? 0 : Math.max(0, taxDue - totalCredits);
+    const overpayment = is8PercentElected ? 0 : Math.max(0, totalCredits - taxDue);
+
+    const statutoryInfo = getStatutoryPercentageTaxRate(year2551);
 
     return {
       grossTaxable,
-      taxRate: rate2551,
+      taxRate: is8PercentElected ? 0 : rate2551,
       taxDue,
       creditableTaxWithheld,
       priorPaid2551,
       totalCredits,
       taxStillDue,
       overpayment,
-      salesCount: qSales.length
+      salesCount: qSales.length,
+      is8PercentElected,
+      statutoryInfo
     };
-  }, [sales, rate2551, priorPaid2551, qtr2551, year2551]);
+  }, [sales, rate2551, priorPaid2551, qtr2551, year2551, activeCompany]);
 
   /* ========================================================================= */
   /* DATA: SUMMARY LIST OF SALES (SLS - REAL TRANSACTIONS PIPELINE)            */
@@ -1064,10 +1087,9 @@ export default function BusinessTaxHubTab({
                 onChange={(e) => setVatYear(e.target.value)}
                 className={`px-3 py-1.5 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="2024" className="bg-slate-900 text-white">Taxable Year 2024</option>
-                <option value="2025" className="bg-slate-900 text-white">Taxable Year 2025</option>
-                <option value="2026" className="bg-slate-900 text-white">Taxable Year 2026</option>
-                <option value="2027" className="bg-slate-900 text-white">Taxable Year 2027</option>
+                {availableTaxYears.map(y => (
+                  <option key={y} value={String(y)} className="bg-slate-900 text-white">Taxable Year {y}</option>
+                ))}
               </select>
             </div>
 
@@ -1395,10 +1417,9 @@ export default function BusinessTaxHubTab({
                 onChange={(e) => setYear2551(e.target.value)}
                 className={`px-3 py-1.5 text-xs rounded-xl border bg-transparent font-bold cursor-pointer ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="2024" className="bg-slate-900 text-white">Taxable Year 2024</option>
-                <option value="2025" className="bg-slate-900 text-white">Taxable Year 2025</option>
-                <option value="2026" className="bg-slate-900 text-white">Taxable Year 2026</option>
-                <option value="2027" className="bg-slate-900 text-white">Taxable Year 2027</option>
+                {availableTaxYears.map(y => (
+                  <option key={y} value={String(y)} className="bg-slate-900 text-white">Taxable Year {y}</option>
+                ))}
               </select>
 
               <div className="flex items-center gap-1.5 ml-2">
@@ -1412,12 +1433,49 @@ export default function BusinessTaxHubTab({
                   <option value="1" className="bg-slate-900 text-white">1% (CREATE Reduced Rate)</option>
                 </select>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setIsStatutoryModalOpen(true)}
+                className="px-2.5 py-1 text-xs rounded-xl border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 font-bold flex items-center gap-1.5 transition cursor-pointer"
+                title="View Philippine Statutory Era Rules & Details"
+              >
+                <Scale className="w-3.5 h-3.5" />
+                <span>{comp2551q.statutoryInfo.statutoryRule.shortName}</span>
+              </button>
             </div>
 
             <span className="text-xs font-mono text-zinc-400">
               For Non-VAT Registered Entities (Gross Sales ≤ ₱3,000,000)
             </span>
           </div>
+
+          {/* Statutory CREATE Relief Notice */}
+          {comp2551q.statutoryInfo.isReducedRelief && !comp2551q.is8PercentElected && (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-start gap-3">
+              <Scale className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-400" />
+              <div className="text-xs leading-relaxed">
+                <p className="font-bold text-white">CREATE Law Reduced Percentage Tax Rate (1%) Active for Year {year2551}</p>
+                <p className="text-amber-200/90 mt-0.5">
+                  Pursuant to RA 11534 (CREATE Act) and BIR RR 4-2021, the Section 116 Percentage Tax was temporarily reduced from 3% to 1% effective July 1, 2020 through June 30, 2023 to provide economic relief. Restored to 3% beginning July 1, 2023.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {comp2551q.is8PercentElected && (
+            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <div className="text-xs leading-relaxed space-y-1">
+                <p className="font-bold text-white">
+                  Exempt from Section 116 Percentage Tax (Form 2551Q)
+                </p>
+                <p>
+                  Active entity <strong className="text-white">{companyName}</strong> elected the <strong>8% Gross Income Tax Option</strong> under Section 24(A)(2)(b) of the Tax Code (TRAIN Law) for Taxable Year {year2551}. Taxpayers under the 8% option are legally exempt from the 3% Percentage Tax under Section 116. No quarterly 2551Q payment is due.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Quick Metrics */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1574,10 +1632,9 @@ export default function BusinessTaxHubTab({
                 onChange={(e) => setSalesYear(e.target.value)}
                 className={`px-2.5 py-1.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="2024" className="bg-slate-900 text-white">2024</option>
-                <option value="2025" className="bg-slate-900 text-white">2025</option>
-                <option value="2026" className="bg-slate-900 text-white">2026</option>
-                <option value="2027" className="bg-slate-900 text-white">2027</option>
+                {availableTaxYears.map(y => (
+                  <option key={y} value={String(y)} className="bg-slate-900 text-white">{y}</option>
+                ))}
               </select>
 
               <div className="relative flex-1 sm:w-60">
@@ -1805,10 +1862,9 @@ export default function BusinessTaxHubTab({
                 onChange={(e) => setPurchasesYear(e.target.value)}
                 className={`px-2.5 py-1.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="2024" className="bg-slate-900 text-white">2024</option>
-                <option value="2025" className="bg-slate-900 text-white">2025</option>
-                <option value="2026" className="bg-slate-900 text-white">2026</option>
-                <option value="2027" className="bg-slate-900 text-white">2027</option>
+                {availableTaxYears.map(y => (
+                  <option key={y} value={String(y)} className="bg-slate-900 text-white">{y}</option>
+                ))}
               </select>
 
               <div className="relative flex-1 sm:w-60">
@@ -2081,6 +2137,16 @@ export default function BusinessTaxHubTab({
             </div>
           </div>
         </div>
+      )}
+
+      {/* POPUP MODAL: STATUTORY TAX LAW INSPECTOR & TIMELINE */}
+      {isStatutoryModalOpen && (
+        <StatutoryTaxLawInspectorModal
+          isOpen={isStatutoryModalOpen}
+          onClose={() => setIsStatutoryModalOpen(false)}
+          initialDate={`${year2551}-06-30`}
+          theme={theme}
+        />
       )}
 
     </div>

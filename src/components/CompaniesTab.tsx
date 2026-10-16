@@ -21,9 +21,11 @@ import {
   ChevronRight, 
   ChevronDown, 
   GitBranch,
-  User
+  User,
+  CalendarClock
 } from 'lucide-react';
-import { Company } from '../types';
+import { Company, EntityTaxYearProfile } from '../types';
+import AnnualTaxRegimesModal from './AnnualTaxRegimesModal';
 
 interface CompaniesTabProps {
   companies: Company[];
@@ -114,6 +116,19 @@ export default function CompaniesTab({
   const [documentaryStamp, setDocumentaryStamp] = useState<'Yes' | 'No'>('No');
 
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
+  const [formTaxYearProfiles, setFormTaxYearProfiles] = useState<EntityTaxYearProfile[]>([]);
+  const [taxProfilesCompany, setTaxProfilesCompany] = useState<Company | null>(null);
+
+  const handleSaveTaxProfiles = (updatedCompany: Company) => {
+    setCompanies(prev => prev.map(c => c.id === updatedCompany.id ? updatedCompany : c));
+    if (activeCompany && activeCompany.id === updatedCompany.id) {
+      setActiveCompany(updatedCompany);
+    }
+    setTaxProfilesCompany(updatedCompany);
+    if (editingCompanyId === updatedCompany.id) {
+      setFormTaxYearProfiles(updatedCompany.tax_year_profiles || []);
+    }
+  };
 
   // Helper to format individual registered name
   const getComputedIndividualName = (
@@ -212,6 +227,7 @@ export default function CompaniesTab({
     setFringeBenefits('No');
     setRelatedParty('No');
     setDocumentaryStamp('No');
+    setFormTaxYearProfiles([]);
   };
 
   const openNewCompanyModal = () => {
@@ -323,6 +339,7 @@ export default function CompaniesTab({
       withholding_expanded: expandedWithholding === 'Yes',
       withholding_compensation: withholdingComp === 'Yes',
       withholding_fringe_benefit: fringeBenefits === 'Yes',
+      tax_year_profiles: formTaxYearProfiles.length > 0 ? formTaxYearProfiles : undefined,
       date_of_entry: new Date().toISOString().split('T')[0]
     };
 
@@ -475,6 +492,7 @@ export default function CompaniesTab({
     setFringeBenefits(c.withholding_fringe_benefit ? 'Yes' : 'No');
     setRelatedParty('No');
     setDocumentaryStamp('No');
+    setFormTaxYearProfiles(c.tax_year_profiles ? [...c.tax_year_profiles] : []);
 
     setIsModalOpen(true);
   };
@@ -585,6 +603,7 @@ export default function CompaniesTab({
                 <th className="p-3.5">Entity Name / Registered Taxpayer</th>
                 <th className="p-3.5">Trade Name</th>
                 <th className="p-3.5">Entity Type</th>
+                <th className="p-3.5">Annual Tax Regimes</th>
                 <th className="p-3.5">RDO Code</th>
                 <th className="p-3.5">Birthday / Incorp Date</th>
                 <th className="p-3.5 text-right">Actions</th>
@@ -593,7 +612,7 @@ export default function CompaniesTab({
             <tbody className={`divide-y ${theme.borderCard}`}>
               {groupedEntityHierarchy.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-zinc-500">
+                  <td colSpan={8} className="p-12 text-center text-zinc-500">
                     <Building2 className="w-10 h-10 mx-auto mb-2 opacity-30" />
                     <p className="font-semibold text-sm">No Entity Profiles Found</p>
                     <p className="text-xs mt-1">Click "Register Entity Profile" above to register your first workspace.</p>
@@ -676,6 +695,44 @@ export default function CompaniesTab({
                             {c.entity_type || 'CORPORATION'}
                           </span>
                         </td>
+                        <td className="p-3.5">
+                          <div className="flex flex-col gap-1 max-w-[220px]">
+                            {c.tax_year_profiles && c.tax_year_profiles.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {c.tax_year_profiles.slice(-4).map(p => (
+                                  <span
+                                    key={p.year}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border font-mono font-bold ${
+                                      p.income_tax_type === 'EIGHT_PERCENT'
+                                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                        : p.expense_deduction_type === 'OSD_40'
+                                        ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30'
+                                        : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                                    }`}
+                                    title={`Year ${p.year}: ${p.income_tax_type === 'EIGHT_PERCENT' ? '8% Flat Gross' : p.expense_deduction_type === 'OSD_40' ? 'OSD (40%)' : 'Itemized Deductions'}`}
+                                  >
+                                    {p.year}: {p.income_tax_type === 'EIGHT_PERCENT' ? '8%' : p.expense_deduction_type === 'OSD_40' ? 'OSD' : 'Item'}
+                                  </span>
+                                ))}
+                                {c.tax_year_profiles.length > 4 && (
+                                  <span className="text-[10px] text-zinc-500 font-mono">+{c.tax_year_profiles.length - 4}</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-zinc-500 font-medium">
+                                Base: {c.income_tax_type === 'EIGHT_PERCENT' ? '8% Flat' : c.expense_deduction_type === 'OSD_40' ? 'OSD' : 'Itemized'}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setTaxProfilesCompany(c)}
+                              className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 font-semibold cursor-pointer w-fit"
+                            >
+                              <CalendarClock className="w-3 h-3" />
+                              Configure Years
+                            </button>
+                          </div>
+                        </td>
                         <td className="p-3.5 font-mono font-bold text-xs">
                           {c.rdo || c.rdo_code || '—'}
                         </td>
@@ -699,6 +756,14 @@ export default function CompaniesTab({
                                 Select
                               </button>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => setTaxProfilesCompany(c)}
+                              className="p-1.5 rounded-lg border border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 transition cursor-pointer"
+                              title="Manage Annual Tax Regimes (8%, OSD, Itemized by Year)"
+                            >
+                              <CalendarClock className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => {
@@ -1245,6 +1310,36 @@ export default function CompaniesTab({
                         </p>
                       )}
                     </div>
+
+                    {/* ANNUAL TAX ELECTIONS (YEAR-BY-YEAR REGIME OVERRIDES) */}
+                    <div className="p-3.5 rounded-xl border border-purple-500/30 bg-purple-500/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <CalendarClock className="w-4 h-4 text-purple-400" />
+                          <h5 className={`font-bold text-xs ${theme.textTitle}`}>Annual Tax Regimes Ledger</h5>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md font-mono bg-purple-500/20 text-purple-400 font-bold">
+                            {formTaxYearProfiles.length} year(s) configured
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1">
+                          Need different tax approaches across multiple years (e.g. Y1=8%, Y2=OSD, Y3=Itemized)? Configure per-year elections so historical years remain isolated.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (editingCompanyId !== null) {
+                            const comp = companies.find(c => c.id === editingCompanyId);
+                            if (comp) setTaxProfilesCompany(comp);
+                          } else {
+                            triggerAlert('Please save the entity profile first before configuring custom historical tax years.', 'info');
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 font-bold text-xs transition cursor-pointer whitespace-nowrap"
+                      >
+                        Manage Year Profiles
+                      </button>
+                    </div>
                   </div>
 
                   {/* YES / NO BIR 2303 REGISTERED TAX OBLIGATIONS */}
@@ -1695,6 +1790,20 @@ export default function CompaniesTab({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* POPUP MODAL: ANNUAL TAX REGIMES LEDGER (PER-YEAR TAX ELECTIONS)           */}
+      {/* ========================================================================= */}
+      {taxProfilesCompany && (
+        <AnnualTaxRegimesModal
+          company={taxProfilesCompany}
+          isOpen={!!taxProfilesCompany}
+          onClose={() => setTaxProfilesCompany(null)}
+          onSaveCompany={handleSaveTaxProfiles}
+          triggerAlert={triggerAlert}
+          theme={theme}
+        />
       )}
     </div>
   );

@@ -46,10 +46,65 @@ export interface Company {
   // Income tax options (individuals: sole proprietor / professional only)
   income_tax_type?: 'GRADUATED' | 'EIGHT_PERCENT' | string;
   expense_deduction_type?: 'ITEMIZED' | 'OSD_40' | string;
+  tax_year_profiles?: EntityTaxYearProfile[];
   service_bookkeeping?: boolean | string;
   service_tax_filing?: boolean | string;
   service_bir_attachments?: boolean | string;
   branches?: CompanyBranch[];
+}
+
+export interface EntityTaxYearProfile {
+  year: number;
+  income_tax_type: 'GRADUATED' | 'EIGHT_PERCENT';
+  expense_deduction_type: 'ITEMIZED' | 'OSD_40';
+  vat_or_non_vat?: 'VATABLE' | 'NON-VAT' | 'EXEMPT';
+  allow_250k_exemption?: boolean;
+  notes?: string;
+}
+
+export type StatutoryTaxEraCode = 
+  | 'PRE_TRAIN' 
+  | 'TRAIN_ERA1' 
+  | 'CREATE_RELIEF' 
+  | 'CREATE_PERMANENT' 
+  | 'EOPT' 
+  | 'CUSTOM';
+
+export interface StatutoryTaxRule {
+  code: StatutoryTaxEraCode;
+  name: string;
+  shortName: string;
+  citation: string;
+  effectiveFrom: string; // YYYY-MM-DD
+  effectiveTo?: string;   // YYYY-MM-DD
+  percentageTaxRate: number; // e.g. 3 or 1 (percent)
+  rcitRateRegular: number;   // e.g. 0.25
+  rcitRateMsme: number;      // e.g. 0.20
+  mcitRate: number;          // e.g. 0.02 or 0.01
+  vatThreshold: number;      // e.g. 3,000,000
+  eightPercentOptionAllowed: boolean;
+  eightPercentExemptionAmount: number; // 250,000
+  primaryDocumentType: 'INVOICE' | 'INVOICE_AND_OR';
+  microSmallPenaltyReduction: boolean;
+  microExemptionWithholding: boolean;
+  keyFeatures: string[];
+}
+
+export interface CustomTaxLaw extends StatutoryTaxRule {
+  id: string;
+  createdAt: string;
+  isUserDefined: boolean;
+}
+
+export type TaxpayerClassificationCategory = 'MICRO' | 'SMALL' | 'MEDIUM' | 'LARGE';
+
+export interface TaxpayerClassificationInfo {
+  category: TaxpayerClassificationCategory;
+  label: string;
+  thresholdDesc: string;
+  withholdingExemption: boolean;
+  reducedPenalties: boolean;
+  maxItrPages: number;
 }
 
 export interface ActivityList {

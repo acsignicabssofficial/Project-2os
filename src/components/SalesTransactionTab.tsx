@@ -25,7 +25,7 @@ import {
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import AutoSuggestInput from './AutoSuggestInput';
 import { UniformBookRecord, Customer, Company, SpecialEntry, SpecialEntryLine } from '../types';
-import { computeSaleFormulas } from '../utils/accounting';
+import { computeSaleFormulas, computeSaleSettlement } from '../utils/accounting';
 
 interface SalesTransactionTabProps {
   subsidiarySales: UniformBookRecord[];
@@ -66,6 +66,16 @@ export default function SalesTransactionTab({
 }: SalesTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const isDark = !theme || !theme.isLight;
+
+  // Theme-aware form classes (readable on BOTH light and dark themes)
+  const fieldCls = isDark
+    ? 'bg-zinc-900 text-zinc-100 border-zinc-700 placeholder:text-zinc-500 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400'
+    : 'bg-white text-slate-900 border-slate-300 placeholder:text-slate-400 shadow-xs focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600';
+  const fieldMonoCls = `${fieldCls} font-mono font-bold`;
+  const panelCls = isDark ? 'bg-zinc-800/30 border-zinc-700/40' : 'bg-slate-50 border-slate-200';
+  const labelCls = isDark ? 'text-zinc-300' : 'text-slate-700';
+  const subtleTextCls = isDark ? 'text-zinc-400' : 'text-slate-600';
+  const infoPanelCls = isDark ? 'bg-zinc-900/60 border-zinc-800 text-zinc-200' : 'bg-slate-50 border-slate-200 text-slate-800';
 
   // Tab mode: 'new_sale' or 'collect_open'
   const [hubTab, setHubTab] = useState<'new_sale' | 'collect_open'>('new_sale');
@@ -145,6 +155,7 @@ export default function SalesTransactionTab({
     address: string;
     taxType: 'VAT' | 'Non-VAT';
     pendingSaleData?: any;
+    errorText?: string;
   } | null>(null);
 
   // Prompt modal when customer name already exists in Directory > Customers
@@ -204,12 +215,12 @@ export default function SalesTransactionTab({
   }, [tinMatchCustomer, customerName]);
 
   // Auto-fill TIN & Customer details
-  const handleSelectCustomer = (custInput: string | Customer) => {
+  const handleSelectCustomer = (custInput: string | Customer | any) => {
     let found: Customer | undefined;
     if (typeof custInput === 'object' && custInput !== null) {
-      found = custInput;
+      found = custInput as Customer;
     } else {
-      const custName = custInput;
+      const custName = typeof custInput === 'string' ? custInput : '';
       setCustomerName(custName);
       const norm = normName(custName);
       const rawLower = custName.trim().toLowerCase();
@@ -308,47 +319,12 @@ export default function SalesTransactionTab({
 
   // Open / Unpaid / Partial Sales for current company
   const openInvoices = useMemo(() => {
+    const scopedCollections = collections.filter(c => !c.is_cancelled && isActiveCompanyRow(c));
     return subsidiarySales.filter(s => {
       if (s.is_cancelled) return false;
       if (activeCompanyName && s.company_name && s.company_name.trim().toLowerCase() !== activeCompanyName.trim().toLowerCase()) return false;
-      
-      // If already explicitly marked as Cash or Paid
-      if (s.status === 'Cash' || s.status === 'Paid' || s.sales_status === 'Paid') return false;
-
-      const grossInv = Number(s.total_amount_vat_inclusive || s.amount) || 0;
-      const invDisc = Number(s.discount ?? s.less_discount ?? s.discounts) || 0;
-      const invWtax = Number(s.tax_withheld ?? s.withholding_2307 ?? s.amount_withheld_2307 ?? s.less_withholding_tax) || 0;
-      const netReceivable = Math.max(0, Math.round((grossInv - invDisc) * 100) / 100);
-      const netCashDue = Number(s.total_amount_due) > 0 ? Number(s.total_amount_due) : Math.max(0, Math.round((netReceivable - invWtax) * 100) / 100);
-
-      // Find all matching collections
-      const matchingCollections = collections.filter(c => 
-        !c.is_cancelled && 
-        c.invoice_number && 
-        isActiveCompanyRow(c) &&
-        sameInvoiceNo(c.invoice_number, s.invoice_number)
-      );
-
-      let totalCashCollected = 0;
-      let totalDiscountSettled = 0;
-      let totalWtaxSettled = 0;
-
-      matchingCollections.forEach(c => {
-        const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
-        totalCashCollected += cashVal;
-        const discVal = Number(c.discount ?? c.discounts) || 0;
-        if (discVal > 0) totalDiscountSettled += discVal;
-        const wtaxVal = Number(c.amount_withheld_2307 ?? c.tax_withheld ?? c.wtax_2307) || 0;
-        if (wtaxVal > 0 && cashVal > 0) totalWtaxSettled += wtaxVal;
-      });
-
-      const effectiveWtax = totalWtaxSettled > 0 ? totalWtaxSettled : invWtax;
-      const totalOffsetCreditedToAR = Math.round((totalCashCollected + totalDiscountSettled + effectiveWtax) * 100) / 100;
-      const remainingAR = Math.max(0, Math.round((netReceivable - totalOffsetCreditedToAR) * 100) / 100);
-      const remainingCash = Math.max(0, Math.round((netCashDue - totalCashCollected - totalDiscountSettled) * 100) / 100);
-
-      const isPaid = remainingAR <= 0.05 || remainingCash <= 0.05;
-      return !isPaid;
+      // Single source of truth: cash + settlement discount + CWT must clear the booked A/R
+      return !computeSaleSettlement(s, scopedCollections).isPaid;
     });
   }, [subsidiarySales, collections, activeCompanyName]);
 
@@ -372,6 +348,10 @@ export default function SalesTransactionTab({
     overrideAddress?: string,
     overrideName?: string
   ) => {
+    // Always close the confirmation dialogs first so the user never gets stuck on a dialog that "does nothing"
+    setNewCustomerPrompt(null);
+    setExistingCustomerMatchPrompt(null);
+
     const effectiveName = (overrideName !== undefined ? overrideName : customerName).trim();
     const effectiveTinStr = overrideTin9 !== undefined ? overrideTin9 : tin;
     const effectiveBranchStr = overrideBranch5 !== undefined ? overrideBranch5 : branchCode;
@@ -443,6 +423,19 @@ export default function SalesTransactionTab({
     const totalDue = liveFormulas.total_amount_due;
     const nowIso = new Date().toISOString();
     const commonId = Date.now();
+
+    // Validate BEFORE anything is written so a failed validation can never leave a half-recorded sale behind
+    if (saleMode === 'ON PARTIAL') {
+      const dpCheck = parseFloat(downPaymentAmount) || 0;
+      if (dpCheck <= 0) {
+        triggerAlert('Please enter a valid Down Payment amount.', 'error');
+        return;
+      }
+      if (dpCheck > totalDue + 0.01) {
+        triggerAlert(`Overpayment Precaution: Down payment (₱${dpCheck.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the Total Amount Due (₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}). Customer overpayment is blocked.`, 'error');
+        return;
+      }
+    }
 
     // 1. Prepare Base Record for Subsidiary Sales
     let assignedStatus: 'Cash' | 'On Account' | 'Partial' | 'Paid' = 'On Account';
@@ -617,7 +610,7 @@ export default function SalesTransactionTab({
         total_amount_vat_inclusive: liveFormulas.total_sale_vat_inclusive,
         total_amount_net_of_vat: liveFormulas.amount_net_of_vat,
         discount: 0, // Invoice trade discount is already booked in Sales recognition (dr 4015); collections only track subsequent cash settlement discounts
-        tax_withheld: liveFormulas.less_withholding_tax,
+        tax_withheld: 0, // CWT is recognized when the cash due is fully settled (Dr CWT, Cr A/R), not on the down payment
         total_amount_due: totalDue,
         amount_collected: downPmt,
         pending_balance: pendingBal,
@@ -871,69 +864,25 @@ export default function SalesTransactionTab({
     }
 
     const inv = selectedInvoiceToCollect;
-    const invGross = Number(inv.total_amount_vat_inclusive || inv.amount) || 0;
-    const invTradeDiscount = Number(inv.discount ?? inv.less_discount ?? inv.discounts) || 0;
-    const netReceivable = Math.max(0, Math.round((invGross - invTradeDiscount) * 100) / 100);
     const invWtax = Number(inv.tax_withheld ?? inv.withholding_2307 ?? inv.amount_withheld_2307 ?? inv.less_withholding_tax) || 0;
-    const netCashDue = Number(inv.total_amount_due) > 0 ? Number(inv.total_amount_due) : Math.max(0, Math.round((netReceivable - invWtax) * 100) / 100);
+    const scopedCollections = collections.filter(c => !c.is_cancelled && isActiveCompanyRow(c));
 
-    // Check existing collection record(s) for this invoice
-    const existingMatching = collections.filter(c => 
-      !c.is_cancelled && 
-      c.invoice_number && 
-      isActiveCompanyRow(c) &&
-      sameInvoiceNo(c.invoice_number, inv.invoice_number)
-    );
+    // Settlement BEFORE this collection (single source of truth shared with the journal engine)
+    const before = computeSaleSettlement(inv, scopedCollections);
 
-    // Only count actual payment rows, not 0-amount on-account placeholder rows
-    const actualMatching = existingMatching.filter(c => 
-      (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0 || 
-      (Number(c.discount ?? c.discounts) || 0) > 0
-    );
-
-    const prevCashCollected = actualMatching.reduce((sum, c) => {
-      const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
-      return sum + cashVal;
-    }, 0);
-    const prevCollectionDiscounts = actualMatching.reduce((sum, c) => {
-      const isInitial = c.particulars?.includes('Down Payment') || c.id === inv.id + 1;
-      const dVal = Number(c.discount ?? c.discounts) || 0;
-      return sum + (isInitial ? 0 : dVal);
-    }, 0);
-    const prevInstallmentWtax = actualMatching.reduce((sum, c) => {
-      return sum + (Number(c.amount_withheld_2307) || 0);
-    }, 0);
-
-    // Remaining cash that the customer needs to pay
-    const remainingCashBeforeThis = Math.max(0, Math.round((netCashDue - prevCashCollected - prevCollectionDiscounts) * 100) / 100);
-
-    if (paymentAmt > remainingCashBeforeThis + 0.05) {
+    if (paymentAmt + discountAmt > before.remainingCash + 0.05) {
       triggerAlert(
-        `Overpayment Precaution: Collection cash amount (₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining cash balance of ₱${remainingCashBeforeThis.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${inv.invoice_number}. Customer overpayment is blocked.`,
+        `Overpayment Precaution: Cash + discount (₱${(paymentAmt + discountAmt).toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds the remaining balance of ₱${before.remainingCash.toLocaleString(undefined, { minimumFractionDigits: 2 })} for Invoice #${inv.invoice_number}. Customer overpayment is blocked.`,
         'error'
       );
       return;
     }
 
-    const newTotalCashCollected = Math.round((prevCashCollected + paymentAmt) * 100) / 100;
-    const newTotalSettled = Math.round((newTotalCashCollected + prevCollectionDiscounts + discountAmt) * 100) / 100;
-    const isNowFullyCollected = newTotalSettled >= (netCashDue - 0.05) || (newTotalCashCollected + prevCollectionDiscounts + discountAmt + (manualWtaxAmt || invWtax)) >= (netReceivable - 0.05);
-
-    // Upon full collection completion, recognize the remaining invoice 2307 CWT (or manualWtaxAmt)
-    const wtaxForThisInstallment = manualWtaxAmt > 0
-      ? manualWtaxAmt
-      : (isNowFullyCollected ? Math.max(0, Math.round((invWtax - prevInstallmentWtax) * 100) / 100) : 0);
-
     const commonId = Date.now();
     const nowIso = new Date().toISOString();
-    const pendingBal = Math.max(0, Math.round((netCashDue - newTotalSettled) * 100) / 100);
+    const nextPaymentNo = before.events.filter(e => e.cash > 0).length + 1;
 
-    // Count existing actual payments (where amount_collected > 0) to determine COLLECTION 1, COLLECTION 2, COLLECTION 3...
-    const existingActualPayments = existingMatching.filter(c => (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0);
-    const nextPaymentNo = existingActualPayments.length + 1;
-
-    // 1. Add a NEW separate collection record per payment in Collections Book (NEVER overwrite previous 50k collection to 60k!)
-    const newCollectionRec: UniformBookRecord = {
+    const buildCollectionRow = (wtax: number, pending: number, fully: boolean): UniformBookRecord => ({
       id: commonId,
       company_name: activeCompanyName,
       registered_name: inv.registered_name,
@@ -945,7 +894,7 @@ export default function SalesTransactionTab({
       invoice_type: 'OFFICIAL RECEIPT',
       voucher_number: collectRefNo.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
       invoice_number: inv.invoice_number,
-      particulars: `COLLECTION ${nextPaymentNo} for Invoice #${inv.invoice_number} — ₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} (${isNowFullyCollected ? 'Full Settlement' : `Remaining: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`})`,
+      particulars: `COLLECTION ${nextPaymentNo} for Invoice #${inv.invoice_number} — ₱${paymentAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} (${fully ? 'Full Settlement' : `Remaining: ₱${pending.toLocaleString(undefined, { minimumFractionDigits: 2 })}`})`,
       qty: inv.qty || 1,
       unit_price: inv.unit_price || inv.amount,
       amount: inv.amount,
@@ -956,15 +905,29 @@ export default function SalesTransactionTab({
       total_amount_vat_inclusive: inv.total_amount_vat_inclusive,
       total_amount_net_of_vat: inv.total_amount_net_of_vat,
       discount: discountAmt,
-      tax_withheld: wtaxForThisInstallment,
-      amount_withheld_2307: wtaxForThisInstallment,
-      total_amount_due: inv.total_amount_due || netCashDue,
+      tax_withheld: wtax,
+      amount_withheld_2307: wtax,
+      total_amount_due: inv.total_amount_due || before.cashDue,
       amount_collected: paymentAmt,
-      pending_balance: pendingBal,
-      status: isNowFullyCollected ? 'Paid' : 'Partial',
+      pending_balance: pending,
+      status: fully ? 'Paid' : 'Partial',
       is_cancelled: false,
       created_at: nowIso
-    };
+    });
+
+    // Tentative row -> settlement AFTER. If this collection completes the cash due, the row carries the CWT that
+    // still has to counter A/R, so a fully-paid invoice can never leave an A/R residual.
+    let newCollectionRec = buildCollectionRow(manualWtaxAmt, 0, false);
+    let after = computeSaleSettlement(inv, [...scopedCollections, newCollectionRec]);
+    if (manualWtaxAmt <= 0 && after.withholdingPlug > 0.005) {
+      newCollectionRec = buildCollectionRow(after.withholdingPlug, 0, false);
+      after = computeSaleSettlement(inv, [...scopedCollections, newCollectionRec]);
+    }
+    const isNowFullyCollected = after.isPaid;
+    const pendingBal = after.remainingCash;
+    const newTotalCashCollected = after.cash;
+    newCollectionRec = buildCollectionRow(newCollectionRec.amount_withheld_2307 || 0, pendingBal, isNowFullyCollected);
+    const wtaxForThisInstallment = newCollectionRec.amount_withheld_2307 || 0;
 
     setCollections(prev => {
       // Remove any 0-amount "On Account" placeholder row for this invoice, keep all actual payment rows intact with their original amounts, and add the new payment row
@@ -972,7 +935,7 @@ export default function SalesTransactionTab({
         const isSameInv = !c.is_cancelled && c.invoice_number && isActiveCompanyRow(c) && sameInvoiceNo(c.invoice_number, inv.invoice_number);
         if (!isSameInv) return true;
         const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
-        return cashVal > 0;
+        return cashVal > 0 || !/receivable tracking/i.test(String(c.particulars || ''));
       });
       // Update status on sibling rows of the same invoice if now Paid, while strictly preserving each row's individual amount_collected!
       const updatedSiblings = withoutZeroPlaceholder.map(c => {
@@ -990,8 +953,8 @@ export default function SalesTransactionTab({
       if (sameInvoiceNo(s.invoice_number, inv.invoice_number) && isActiveCompanyRow(s)) {
         return {
           ...s,
-          status: isNowFullyCollected ? 'Paid' : 'Partial',
-          sales_status: isNowFullyCollected ? 'Paid' : 'Partial',
+          status: after.status,
+          sales_status: after.status,
           amount_collected: newTotalCashCollected,
           pending_balance: isNowFullyCollected ? 0 : pendingBal
         };
@@ -1238,7 +1201,7 @@ export default function SalesTransactionTab({
                         placeholder="0.00"
                         value={downPaymentAmount}
                         onChange={(e) => setDownPaymentAmount(e.target.value)}
-                        className={`w-full px-3.5 py-2 text-xs rounded-xl border bg-zinc-900 text-white font-mono font-bold ${
+                        className={`w-full px-3.5 py-2 text-xs rounded-xl border ${fieldMonoCls} ${
                           (parseFloat(downPaymentAmount) || 0) > liveFormulas.total_amount_due + 0.01
                             ? 'border-rose-500 ring-1 ring-rose-500'
                             : 'border-cyan-500/40 focus:ring-1 focus:ring-cyan-400'
@@ -1266,7 +1229,7 @@ export default function SalesTransactionTab({
                         placeholder="OR # / Voucher ref"
                         value={collectionRef}
                         onChange={(e) => setCollectionRef(e.target.value)}
-                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-cyan-500/40 bg-zinc-900 text-white font-mono font-bold focus:ring-1 focus:ring-cyan-400"
+                        className={`w-full px-3.5 py-2 text-xs rounded-xl border ${fieldMonoCls}`}
                       />
                       <p className="text-[10px] text-zinc-400 mt-1">
                         Recorded as 1st Collection entry in Collections Book
@@ -2011,16 +1974,10 @@ export default function SalesTransactionTab({
 
       {/* QUICK COLLECTION MODAL */}
       {selectedInvoiceToCollect && (() => {
-        const invDueModal = Number(selectedInvoiceToCollect.total_amount_due || selectedInvoiceToCollect.amount) || 0;
-        const matchingCollsModal = collections.filter(c =>
-          !c.is_cancelled &&
-          c.invoice_number &&
-          isActiveCompanyRow(c) &&
-          sameInvoiceNo(c.invoice_number, selectedInvoiceToCollect.invoice_number) &&
-          (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0
-        );
-        const collectedSoFarModal = matchingCollsModal.reduce((sum, c) => sum + (Number(c.amount_collected) || 0) + (Number(c.discount) || 0), 0);
-        const remainingBalanceModal = Math.max(0, Math.round((invDueModal - collectedSoFarModal) * 100) / 100);
+        const settleModal = computeSaleSettlement(selectedInvoiceToCollect, collections.filter(c => !c.is_cancelled && isActiveCompanyRow(c)));
+        const invDueModal = settleModal.cashDue;
+        const matchingCollsModal = settleModal.events.filter(ev => ev.cash > 0);
+        const remainingBalanceModal = settleModal.remainingCash;
         const enteredTotalModal = Math.round(((parseFloat(collectAmount) || 0) + (parseFloat(collectDiscount) || 0)) * 100) / 100;
         const isOverpaymentModal = enteredTotalModal > remainingBalanceModal + 0.01;
         const nextCollectionNum = matchingCollsModal.length + 1;
@@ -2048,22 +2005,22 @@ export default function SalesTransactionTab({
               </div>
 
               <form onSubmit={handleExecuteCollection} className="flex flex-col gap-4 text-xs">
-                <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col gap-1.5">
+                <div className={`p-3 rounded-xl ${infoPanelCls} border flex flex-col gap-1.5`}>
                   <div className="flex justify-between">
                     <span className="text-zinc-400">Customer:</span>
                     <span className="font-bold text-zinc-200">{selectedInvoiceToCollect.registered_name}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-zinc-400">Total Invoice Due:</span>
+                    <span className="text-zinc-400">Cash Due (net of discount & CWT):</span>
                     <span className="font-mono font-bold text-zinc-200">₱{invDueModal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                   {matchingCollsModal.length > 0 && (
                     <div className="pt-1 border-t border-zinc-800 space-y-1">
                       <span className="text-[10px] font-bold uppercase text-cyan-400 block">Previous Collections Made:</span>
-                      {matchingCollsModal.slice().reverse().map((prevCol, idx) => (
-                        <div key={prevCol.id} className="flex justify-between font-mono text-[11px] text-emerald-400">
+                      {matchingCollsModal.map((prevCol, idx) => (
+                        <div key={`${prevCol.sourceId}-${prevCol.seq}`} className="flex justify-between font-mono text-[11px] text-emerald-400">
                           <span>COLLECTION {idx + 1} ({prevCol.date}):</span>
-                          <span>₱{(Number(prevCol.amount_collected) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                          <span>₱{(prevCol.cash + prevCol.discount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                         </div>
                       ))}
                     </div>
@@ -2106,8 +2063,8 @@ export default function SalesTransactionTab({
                       value={collectAmount}
                       onChange={(e) => setCollectAmount(e.target.value)}
                       placeholder="0.00"
-                      className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent text-white font-mono font-bold ${
-                        isOverpaymentModal ? 'border-rose-500 ring-1 ring-rose-500' : 'border-zinc-700'
+                      className={`w-full px-3 py-2 text-xs rounded-xl border ${fieldMonoCls} ${
+                        isOverpaymentModal ? 'border-rose-500 ring-1 ring-rose-500' : ''
                       }`}
                       required
                     />
@@ -2121,7 +2078,7 @@ export default function SalesTransactionTab({
                       value={collectDiscount}
                       onChange={(e) => setCollectDiscount(e.target.value)}
                       placeholder="0.00"
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
+                      className={`w-full px-3 py-2 text-xs rounded-xl border ${fieldMonoCls}`}
                     />
                   </div>
 
@@ -2133,13 +2090,13 @@ export default function SalesTransactionTab({
                       value={collectWtax}
                       onChange={(e) => setCollectWtax(e.target.value)}
                       placeholder="0.00"
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono"
+                      className={`w-full px-3 py-2 text-xs rounded-xl border ${fieldMonoCls}`}
                     />
                   </div>
                 </div>
 
                 {/* LIVE JOURNAL ENTRY 2 PREVIEW */}
-                <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-700 space-y-1.5">
+                <div className={`p-3 rounded-xl ${infoPanelCls} border space-y-1.5`}>
                   <div className="flex justify-between items-center text-[11px] font-bold text-amber-400">
                     <span>COLLECTION {nextCollectionNum} Journal Preview:</span>
                     <span className="font-mono">
@@ -2177,7 +2134,7 @@ export default function SalesTransactionTab({
                       type="date"
                       value={collectDate}
                       onChange={(e) => setCollectDate(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-medium"
+                      className={`w-full px-3 py-2 text-xs rounded-xl border font-medium ${fieldCls}`}
                       required
                     />
                   </div>
@@ -2188,7 +2145,7 @@ export default function SalesTransactionTab({
                       type="text"
                       value={collectRefNo}
                       onChange={(e) => setCollectRefNo(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-transparent text-white font-mono font-bold"
+                      className={`w-full px-3 py-2 text-xs rounded-xl border ${fieldMonoCls}`}
                       required
                     />
                   </div>
@@ -2222,7 +2179,7 @@ export default function SalesTransactionTab({
 
       {/* EXISTING CUSTOMER NAME MATCH CONFIRMATION & TIN VERIFICATION MODAL */}
       {existingCustomerMatchPrompt && existingCustomerMatchPrompt.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
           <div className={`w-full max-w-lg p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-2xl space-y-4 animate-scaleUp`}>
             <div className="flex items-center justify-between border-b border-zinc-700/40 pb-3">
               <div className="flex items-center gap-2.5">
@@ -2241,7 +2198,7 @@ export default function SalesTransactionTab({
               <button
                 type="button"
                 onClick={() => setExistingCustomerMatchPrompt(null)}
-                className="p-1 text-zinc-400 hover:text-white rounded cursor-pointer"
+                className={`p-1 rounded cursor-pointer ${isDark ? 'text-zinc-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2253,7 +2210,7 @@ export default function SalesTransactionTab({
                   <p className={theme.textMain}>
                     A registered customer named <strong>&quot;{existingCustomerMatchPrompt.matchedCustomer.customer_name || existingCustomerMatchPrompt.matchedCustomer.registered_name}&quot;</strong> already exists in <strong>Directory &gt; Customers</strong>.
                   </p>
-                  <p className="text-zinc-400">
+                  <p className={subtleTextCls}>
                     Is this the <strong>same customer</strong> as the one recorded in your Customer Directory?
                   </p>
                 </div>
@@ -2289,7 +2246,7 @@ export default function SalesTransactionTab({
                       // Treated differently even if same name -> goes strictly to Various Customers without duplicating in Registered Customers
                       executeRecordSale(false, true, '000-000-000', '00000');
                     }}
-                    className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition cursor-pointer"
+                    className={`w-full px-4 py-2.5 text-xs font-bold rounded-xl border transition cursor-pointer ${isDark ? 'text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30' : 'text-amber-800 bg-amber-100 hover:bg-amber-200 border-amber-400'}`}
                   >
                     ✕ No, Different Customer (Record as Various Customer Only)
                   </button>
@@ -2297,7 +2254,7 @@ export default function SalesTransactionTab({
                   <button
                     type="button"
                     onClick={() => setExistingCustomerMatchPrompt(null)}
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl text-zinc-400 hover:text-white border border-zinc-700/40 transition cursor-pointer"
+                    className={`w-full px-3 py-2 text-xs font-semibold rounded-xl border transition cursor-pointer ${isDark ? 'text-zinc-300 hover:text-white border-zinc-700/60' : 'text-slate-700 hover:text-slate-900 border-slate-300 hover:bg-slate-100'}`}
                   >
                     Cancel
                   </button>
@@ -2313,7 +2270,7 @@ export default function SalesTransactionTab({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div>
-                    <label className="block text-[11px] font-bold text-zinc-300 mb-1">
+                    <label className={`block text-[11px] font-bold ${labelCls} mb-1`}>
                       Confirm Customer TIN (9 Digits) *
                     </label>
                     <input
@@ -2333,12 +2290,12 @@ export default function SalesTransactionTab({
                           errorText: undefined
                         });
                       }}
-                      className="w-full px-3 py-2 rounded-lg border border-cyan-500/40 bg-zinc-900 font-mono font-bold text-cyan-300 text-xs"
+                      className={`w-full px-3 py-2 rounded-lg border text-xs ${fieldMonoCls}`}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-zinc-300 mb-1">
+                    <label className={`block text-[11px] font-bold ${labelCls} mb-1`}>
                       Branch Code (5 Digits)
                     </label>
                     <input
@@ -2354,13 +2311,13 @@ export default function SalesTransactionTab({
                           errorText: undefined
                         });
                       }}
-                      className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 font-mono font-bold text-white text-xs"
+                      className={`w-full px-3 py-2 rounded-lg border text-xs ${fieldMonoCls}`}
                     />
                   </div>
                 </div>
 
                 {existingCustomerMatchPrompt.errorText && (
-                  <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center gap-2">
+                  <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-600 text-xs font-semibold flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
                     <span>{existingCustomerMatchPrompt.errorText}</span>
                   </div>
@@ -2424,7 +2381,7 @@ export default function SalesTransactionTab({
                   <button
                     type="button"
                     onClick={() => executeRecordSale(false, true, '000-000-000', '00000')}
-                    className="px-3 py-2.5 text-xs font-bold rounded-xl text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition cursor-pointer"
+                    className={`px-3 py-2.5 text-xs font-bold rounded-xl border transition cursor-pointer ${isDark ? 'text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30' : 'text-amber-800 bg-amber-100 hover:bg-amber-200 border-amber-400'}`}
                   >
                     Record as Various Customer Only
                   </button>
@@ -2438,7 +2395,7 @@ export default function SalesTransactionTab({
                         errorText: undefined
                       })
                     }
-                    className="px-3 py-2 text-xs font-semibold rounded-xl text-zinc-400 hover:text-white border border-zinc-700/40 transition cursor-pointer"
+                    className={`px-3 py-2 text-xs font-semibold rounded-xl border transition cursor-pointer ${isDark ? 'text-zinc-300 hover:text-white border-zinc-700/60' : 'text-slate-700 hover:text-slate-900 border-slate-300 hover:bg-slate-100'}`}
                   >
                     Back
                   </button>
@@ -2451,7 +2408,7 @@ export default function SalesTransactionTab({
 
       {/* NEW CUSTOMER CONFIRMATION / ADD TO REGULAR CUSTOMERS MODAL */}
       {newCustomerPrompt && newCustomerPrompt.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
           <div className={`w-full max-w-lg p-6 border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-2xl space-y-4 animate-scaleUp`}>
             <div className="flex items-center justify-between border-b border-zinc-700/40 pb-3">
               <div className="flex items-center gap-2.5">
@@ -2467,7 +2424,7 @@ export default function SalesTransactionTab({
               </div>
               <button 
                 onClick={() => setNewCustomerPrompt(null)}
-                className="p-1 text-zinc-400 hover:text-white rounded cursor-pointer"
+                className={`p-1 rounded cursor-pointer ${isDark ? 'text-zinc-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2477,19 +2434,19 @@ export default function SalesTransactionTab({
               Would you like to add <strong>&quot;{newCustomerPrompt.customerName}&quot;</strong> to your <strong>Regular Customers Directory</strong> (requires 9-digit TIN &amp; 5-digit Branch Code), or record this transaction under <strong>Various Customers</strong>?
             </p>
 
-            <div className="space-y-3 p-3.5 bg-zinc-800/30 rounded-xl border border-zinc-700/30 text-xs">
+            <div className={`space-y-3 p-3.5 ${panelCls} border text-xs`}>
               <div>
-                <label className="block text-[11px] font-bold text-zinc-400 mb-1">Registered Trade Name</label>
+                <label className={`block text-[11px] font-bold ${labelCls} mb-1`}>Registered Trade Name</label>
                 <input 
                   type="text"
                   value={newCustomerPrompt.customerName}
-                  onChange={(e) => setNewCustomerPrompt({ ...newCustomerPrompt, customerName: e.target.value })}
-                  className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-900 ${theme.borderInput} ${theme.textMain} text-xs`}
+                  onChange={(e) => setNewCustomerPrompt({ ...newCustomerPrompt, customerName: e.target.value, errorText: '' })}
+                  className={`w-full px-3 py-1.5 rounded-lg border text-xs ${fieldCls}`}
                 />
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-400 mb-1">Customer TIN (9 Digits)</label>
+                  <label className={`block text-[11px] font-bold ${labelCls} mb-1`}>Customer TIN (9 Digits)</label>
                   <input 
                     type="text"
                     maxLength={11}
@@ -2501,13 +2458,13 @@ export default function SalesTransactionTab({
                       if (d.length > 0) fmt += d.slice(0, 3);
                       if (d.length > 3) fmt += '-' + d.slice(3, 6);
                       if (d.length > 6) fmt += '-' + d.slice(6, 9);
-                      setNewCustomerPrompt({ ...newCustomerPrompt, tin: fmt });
+                      setNewCustomerPrompt({ ...newCustomerPrompt, tin: fmt, errorText: '' });
                     }}
-                    className="w-full px-3 py-1.5 rounded-lg border bg-zinc-950 font-mono text-cyan-400 font-bold border-zinc-700/50 text-xs"
+                    className={`w-full px-3 py-1.5 rounded-lg border text-xs ${fieldMonoCls}`}
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-400 mb-1">Branch (5 Digits)</label>
+                  <label className={`block text-[11px] font-bold ${labelCls} mb-1`}>Branch (5 Digits)</label>
                   <input 
                     type="text"
                     maxLength={5}
@@ -2517,15 +2474,15 @@ export default function SalesTransactionTab({
                       const d = e.target.value.replace(/\D/g, '').slice(0, 5);
                       setNewCustomerPrompt({ ...newCustomerPrompt, branchCode: d });
                     }}
-                    className="w-full px-3 py-1.5 rounded-lg border bg-zinc-950 font-mono text-white font-bold border-zinc-700/50 text-xs"
+                    className={`w-full px-3 py-1.5 rounded-lg border text-xs ${fieldMonoCls}`}
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-400 mb-1">Tax Classification</label>
+                  <label className={`block text-[11px] font-bold ${labelCls} mb-1`}>Tax Classification</label>
                   <select
                     value={newCustomerPrompt.taxType}
                     onChange={(e) => setNewCustomerPrompt({ ...newCustomerPrompt, taxType: e.target.value as any })}
-                    className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-900 ${theme.borderInput} ${theme.textMain} text-xs`}
+                    className={`w-full px-3 py-1.5 rounded-lg border text-xs ${fieldCls}`}
                   >
                     <option value="VAT">VAT Registered (12%)</option>
                     <option value="Non-VAT">Non-VAT / Percentage</option>
@@ -2533,28 +2490,57 @@ export default function SalesTransactionTab({
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] font-bold text-zinc-400 mb-1">Business Address</label>
+                <label className={`block text-[11px] font-bold ${labelCls} mb-1`}>Business Address</label>
                 <input 
                   type="text"
                   placeholder="Enter customer business address..."
                   value={newCustomerPrompt.address}
                   onChange={(e) => setNewCustomerPrompt({ ...newCustomerPrompt, address: e.target.value })}
-                  className={`w-full px-3 py-1.5 rounded-lg border bg-zinc-900 ${theme.borderInput} ${theme.textMain} text-xs`}
+                  className={`w-full px-3 py-1.5 rounded-lg border text-xs ${fieldCls}`}
                 />
               </div>
             </div>
+
+            {newCustomerPrompt.errorText && (
+              <div role="alert" className={`flex items-start gap-2 p-3 rounded-xl border text-xs font-semibold ${isDark ? 'bg-rose-500/10 border-rose-500/40 text-rose-300' : 'bg-rose-50 border-rose-300 text-rose-700'}`}>
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{newCustomerPrompt.errorText}</span>
+              </div>
+            )}
 
             <div className="flex flex-col sm:flex-row gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => {
                   const raw9 = newCustomerPrompt.tin.replace(/\D/g, '').slice(0, 9);
+                  const br5 = (newCustomerPrompt.branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+                  const typedName = newCustomerPrompt.customerName.trim();
+                  const typedKey = typedName.toLowerCase();
+
+                  // 1) The customer may already exist in the directory (same TIN, or same name) -> route to that record instead of doing nothing
+                  const existing = customers.find(c => isActiveCompanyRow(c) && (
+                    (raw9.length === 9 && !/^0+$/.test(raw9) && tin9Of(c) === raw9) ||
+                    (typedKey.length >= 2 && customerNameKeys(c).some(k => k === typedKey || k === typedKey.replace(/[^a-z0-9]/g, '')))
+                  ));
+                  if (existing) {
+                    const exDigits = tin9Of(existing);
+                    const exTin = exDigits.length === 9 ? `${exDigits.slice(0, 3)}-${exDigits.slice(3, 6)}-${exDigits.slice(6, 9)}` : (existing.client_TIN || existing.customer_tin || '');
+                    const exName = customerDisplayName(existing);
+                    const exAddr = existing.client_Address || existing.customer_address || (existing as any).address || newCustomerPrompt.address;
+                    const exBranch = ((existing as any).branch_code || br5 || '00000').toString().replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+                    setCustomerName(exName);
+                    if (exTin) setTin(exTin);
+                    setBranchCode(exBranch);
+                    executeRecordSale(false, false, exTin || '000-000-000', exBranch, exAddr, exName);
+                    return;
+                  }
+
+                  // 2) New customer: a valid TIN is required. Show the message INSIDE the dialog (a toast behind the overlay is invisible)
                   if (raw9.length !== 9 || /^0+$/.test(raw9)) {
-                    triggerAlert('Please enter a valid 9-digit TIN (e.g. 222-222-222) to add this customer to Regular Customers, or choose "Track as Various Customer Only".', 'error');
+                    setNewCustomerPrompt({ ...newCustomerPrompt, errorText: 'Enter a valid 9-digit TIN (e.g. 222-222-222) to add this customer to Regular Customers, or choose "Track as Various Customer Only".' });
                     return;
                   }
                   const fmt9 = `${raw9.slice(0, 3)}-${raw9.slice(3, 6)}-${raw9.slice(6, 9)}`;
-                  const br5 = (newCustomerPrompt.branchCode || '00000').replace(/\D/g, '').padStart(5, '0').slice(0, 5);
                   setTin(fmt9);
                   setBranchCode(br5);
                   executeRecordSale(true, false, fmt9, br5, newCustomerPrompt.address, newCustomerPrompt.customerName);
@@ -2566,14 +2552,14 @@ export default function SalesTransactionTab({
               <button
                 type="button"
                 onClick={() => executeRecordSale(false, true, '000-000-000', '00000')}
-                className="px-4 py-2.5 text-xs font-bold rounded-xl text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition cursor-pointer"
+                className={`px-4 py-2.5 text-xs font-bold rounded-xl border transition cursor-pointer ${isDark ? 'text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30' : 'text-amber-800 bg-amber-100 hover:bg-amber-200 border-amber-400'}`}
               >
                 Track as Various Customer Only
               </button>
               <button
                 type="button"
                 onClick={() => setNewCustomerPrompt(null)}
-                className="px-3 py-2 text-xs font-semibold rounded-xl text-zinc-400 hover:text-white border border-zinc-700/40 transition cursor-pointer"
+                className={`px-3 py-2 text-xs font-semibold rounded-xl border transition cursor-pointer ${isDark ? 'text-zinc-300 hover:text-white border-zinc-700/60' : 'text-slate-700 hover:text-slate-900 border-slate-300 hover:bg-slate-100'}`}
               >
                 Cancel
               </button>

@@ -3081,3 +3081,34 @@
 
 }
 
+
+/* ---------------------------------------------------------------------------
+   FORM FIELD READABILITY SAFETY NET (light themes)
+   Form fields that were hard-coded with a dark surface (bg-zinc-900 / bg-zinc-950 / bg-black ...) were left dark in
+   light themes while their text colour was remapped to a dark shade -> dark text on a dark field (unreadable).
+   In light themes these fields now always render as a light field with dark text.
+   --------------------------------------------------------------------------- */
+@layer readability {
+  .theme-light :is(input, select, textarea):is(
+      [class~="bg-zinc-900"], [class~="bg-zinc-950"], [class~="bg-zinc-800"],
+      [class~="bg-slate-900"], [class~="bg-slate-950"], [class~="bg-black"],
+      [class*="bg-zinc-900/"], [class*="bg-zinc-950/"], [class*="bg-zinc-800/"],
+      [class*="bg-slate-900/"], [class*="bg-slate-950/"], [class*="bg-black/"]
+    ):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) {
+    background-color: #ffffff;
+    color: #0f172a;
+    border-color: #cbd5e1;
+    -webkit-text-fill-color: #0f172a;
+  }
+  .theme-light :is(input, textarea):is(
+      [class~="bg-zinc-900"], [class~="bg-zinc-950"], [class~="bg-zinc-800"],
+      [class~="bg-slate-900"], [class~="bg-slate-950"], [class~="bg-black"]
+    )::placeholder {
+    color: #94a3b8;
+    -webkit-text-fill-color: #94a3b8;
+  }
+  .theme-light select:is([class~="bg-zinc-900"], [class~="bg-zinc-950"], [class~="bg-zinc-800"]) option {
+    background-color: #ffffff;
+    color: #0f172a;
+  }
+}

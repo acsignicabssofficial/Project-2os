@@ -74,7 +74,7 @@ import {
   ThemeMode
 } from '../types';
 import ActivitiesWorkflow from './ActivitiesWorkflow';
-import { computeAccountingSummaries } from '../utils/accounting';
+import { computeAccountingSummaries, computeSaleSettlement } from '../utils/accounting';
 
 interface ExecutiveDashboardProps {
   sales: Sale[];
@@ -365,20 +365,12 @@ export default function ExecutiveDashboard({
       if (!customerMap[cName]) {
         customerMap[cName] = { totalInvoiced: 0, totalCollected: 0, invoiceCount: 0, tin: cTin };
       }
-      const invAmt = Number(s.invoice_amount ?? (s as any).total_amount_vat_inclusive ?? (s as any).amount) || 0;
-      const disc = Number(s.discounts ?? (s as any).discount) || 0;
-      const netInv = Math.max(0, invAmt - disc);
-      const downPmt = Number((s as any).down_payment) || 0;
-      const sStatus = (s.sales_status || (s as any).status || '').toLowerCase();
-
-      customerMap[cName].totalInvoiced += netInv;
+      // Same settlement math as the journal engine: A/R is booked net of trade discount; cash + discount + CWT clear it.
+      // (The old formula added the down payment twice and ignored collection discounts.)
+      const st = computeSaleSettlement(s as any, compColls.filter(c => !(c as any).is_cancelled) as any);
+      customerMap[cName].totalInvoiced += st.booked;
       customerMap[cName].invoiceCount += 1;
-      
-      const sInvNo = (s.invoice_number || '').trim().toLowerCase();
-      const colMatches = sInvNo ? compColls.filter(c => (c.invoice_number || '').trim().toLowerCase() === sInvNo) : [];
-      const colAmt = colMatches.length > 0 
-        ? colMatches.reduce((a, b) => a + (Number(b.amount_collected ?? (b as any).amount) || 0) + (Number(b.amount_withheld_2307 ?? (b as any).tax_withheld) || 0), 0) + downPmt
-        : (sStatus === 'paid' || sStatus === 'cash' ? netInv : (sStatus === 'partial' ? downPmt : 0));
+      const colAmt = st.offset;
       customerMap[cName].totalCollected += colAmt;
     });
 

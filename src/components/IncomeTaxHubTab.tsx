@@ -14,8 +14,21 @@ import {
   Scale,
   DollarSign,
   Search,
-  BookOpen
+  BookOpen,
+  CalendarClock
 } from 'lucide-react';
+import AnnualTaxRegimesModal from './AnnualTaxRegimesModal';
+import StatutoryTaxLawInspectorModal from './StatutoryTaxLawInspectorModal';
+import { 
+  getEntityTaxProfileForYear, 
+  getAvailableTaxYears 
+} from '../utils/taxProfiles';
+import { 
+  getStatutoryTaxRule, 
+  computeGraduatedIndividualTax, 
+  computeCorporateTaxRates,
+  getTaxpayerClassification 
+} from '../utils/statutoryTaxEngine';
 import BIR2307CertificateView from './BIR2307CertificateView';
 import {
   normalizeTransactions,
@@ -62,6 +75,8 @@ interface IncomeTaxHubTabProps {
   setIncomeTaxRecords?: React.Dispatch<React.SetStateAction<IncomeTaxRecord[]>>;
   setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
   activeCompany: Company | null;
+  setCompanies?: React.Dispatch<React.SetStateAction<Company[]>>;
+  onUpdateCompany?: (updatedCompany: Company) => void;
   accountTitles?: AccountTitle[];
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
@@ -77,12 +92,15 @@ export default function IncomeTaxHubTab({
   setIncomeTaxRecords,
   setSpecialEntries,
   activeCompany,
+  setCompanies,
+  onUpdateCompany,
   accountTitles = [],
   theme,
   triggerAlert,
   initialSubTab = 'itax_1701'
 }: IncomeTaxHubTabProps) {
   const [activeSubTab, setActiveSubTab] = useState<IncomeTaxSubTab>(initialSubTab);
+  const [isTaxRegimesModalOpen, setIsTaxRegimesModalOpen] = useState(false);
 
   React.useEffect(() => {
     if (initialSubTab) {
@@ -100,6 +118,22 @@ export default function IncomeTaxHubTab({
   const [taxYear, setTaxYear] = useState<string>(latestPeriod([...sales, ...expenses], ['invoice_date', 'expense_date', 'date'])?.year || '2026');
   const [taxQuarter, setTaxQuarter] = useState<'ANNUAL' | 'Q1' | 'Q2' | 'Q3'>('ANNUAL');
 
+  // Available chronological tax years (2018–2028 + transactions)
+  const availableTaxYears = useMemo(() => {
+    return getAvailableTaxYears(activeCompany, [...sales, ...expenses]);
+  }, [activeCompany, sales, expenses]);
+
+  // Current year statutory tax election profile
+  const currentTaxProfile = useMemo(() => {
+    return getEntityTaxProfileForYear(activeCompany, taxYear);
+  }, [activeCompany, taxYear]);
+
+  // Statutory Law Engine state & resolution
+  const [isStatutoryModalOpen, setIsStatutoryModalOpen] = useState(false);
+  const currentStatutoryRule = useMemo(() => {
+    return getStatutoryTaxRule(taxYear);
+  }, [taxYear]);
+
   // 1701 Individual State
   const [regime1701, setRegime1701] = useState<'GRADUATED' | 'EIGHT_PERCENT'>('GRADUATED');
   const [deduction1701, setDeduction1701] = useState<'ITEMIZED' | 'OSD_40'>('ITEMIZED');
@@ -110,13 +144,13 @@ export default function IncomeTaxHubTab({
   const [deduction1702, setDeduction1702] = useState<'ITEMIZED' | 'OSD_40'>('ITEMIZED');
   const [quarterlyPayments1702, setQuarterlyPayments1702] = useState<number>(0);
 
-  // Default regime / deduction method from the entity's registration (Entity > BIR tab)
+  // Default regime / deduction method synced to the selected year's profile
   React.useEffect(() => {
-    const ded = activeCompany?.expense_deduction_type === 'OSD_40' ? 'OSD_40' : 'ITEMIZED';
-    setRegime1701(isIndividual && activeCompany?.income_tax_type === 'EIGHT_PERCENT' ? 'EIGHT_PERCENT' : 'GRADUATED');
-    setDeduction1701(ded);
-    setDeduction1702(ded);
-  }, [activeCompany?.id, activeCompany?.income_tax_type, activeCompany?.expense_deduction_type, isIndividual]);
+    const profile = getEntityTaxProfileForYear(activeCompany, taxYear);
+    setRegime1701(isIndividual && profile.income_tax_type === 'EIGHT_PERCENT' ? 'EIGHT_PERCENT' : 'GRADUATED');
+    setDeduction1701(profile.expense_deduction_type === 'OSD_40' ? 'OSD_40' : 'ITEMIZED');
+    setDeduction1702(profile.expense_deduction_type === 'OSD_40' ? 'OSD_40' : 'ITEMIZED');
+  }, [activeCompany, taxYear, isIndividual]);
 
   // 1702EX Exempted Non-Individual State
   const [exemptionBasis, setExemptionBasis] = useState<string>('Sec. 30(E) - Non-stock, Non-profit Charitable Organization');
@@ -213,6 +247,11 @@ export default function IncomeTaxHubTab({
     };
   }, [sales, expenses, ppeAssets, specialEntries, taxYear, itrPeriod, itrCredit]);
 
+  // Ease of Paying Taxes (EOPT) Act Taxpayer Classification (Micro, Small, Medium, Large)
+  const taxpayerClassification = useMemo(() => {
+    return getTaxpayerClassification(booksData.grossSales, taxYear);
+  }, [booksData.grossSales, taxYear]);
+
   /* ========================================================================= */
   /* TAB 1: 1701 [FOR INDIVIDUALS] CALCULATIONS                                */
   /* ========================================================================= */
@@ -224,8 +263,8 @@ export default function IncomeTaxHubTab({
     let taxDue = 0;
 
     if (regime1701 === 'EIGHT_PERCENT') {
-      // 8% Flat Tax on gross sales in excess of 250,000
-      allowableDeductions = 250000;
+      // 8% Flat Tax on gross sales in excess of 250,000 (if pure business income)
+      allowableDeductions = currentTaxProfile.allow_250k_exemption !== false ? 250000 : 0;
       netTaxableIncome = Math.max(0, grossSales - allowableDeductions);
       taxDue = netTaxableIncome * 0.08;
     } else {
@@ -237,20 +276,9 @@ export default function IncomeTaxHubTab({
       }
       netTaxableIncome = Math.max(0, grossSales - allowableDeductions);
 
-      // TRAIN Law Section 24(A) Graduated Rates
-      if (netTaxableIncome <= 250000) {
-        taxDue = 0;
-      } else if (netTaxableIncome <= 400000) {
-        taxDue = (netTaxableIncome - 250000) * 0.15;
-      } else if (netTaxableIncome <= 800000) {
-        taxDue = 22500 + (netTaxableIncome - 400000) * 0.20;
-      } else if (netTaxableIncome <= 2000000) {
-        taxDue = 102500 + (netTaxableIncome - 800000) * 0.25;
-      } else if (netTaxableIncome <= 8000000) {
-        taxDue = 402500 + (netTaxableIncome - 2000000) * 0.30;
-      } else {
-        taxDue = 2202500 + (netTaxableIncome - 8000000) * 0.35;
-      }
+      // Statutory date-based calculation for graduated brackets (Pre-TRAIN, TRAIN 2018-2022, 2023+ TRAIN/CREATE/EOPT)
+      const gradResult = computeGraduatedIndividualTax(netTaxableIncome, taxYear);
+      taxDue = gradResult.taxDue;
     }
 
     const totalCredits = creditable2307 + quarterlyPayments1701;
@@ -267,7 +295,7 @@ export default function IncomeTaxHubTab({
       netTaxPayable,
       overpayment
     };
-  }, [booksData, regime1701, deduction1701, quarterlyPayments1701]);
+  }, [booksData, regime1701, deduction1701, quarterlyPayments1701, currentTaxProfile, taxYear]);
 
   /* ========================================================================= */
   /* TAB 2: 1702RT [FOR NON INDIVIDUALS] CALCULATIONS                          */
@@ -284,12 +312,13 @@ export default function IncomeTaxHubTab({
 
     const netTaxableIncome = Math.max(0, grossSales - allowableDeductions);
 
-    // RCIT: 20% for MSME or 25% regular
-    const rcitRate = corpRate1702 === 'RCIT_20' ? 0.20 : 0.25;
+    // Statutory date-based corporate tax rates for the selected year
+    const corpRates = computeCorporateTaxRates(taxYear);
+    const rcitRate = corpRate1702 === 'RCIT_20' ? corpRates.rcitMsmeRate : corpRates.rcitRegularRate;
     const rcitAmount = netTaxableIncome * rcitRate;
 
-    // MCIT: 2% of Gross Profit
-    const mcitAmount = grossProfit * 0.02;
+    // MCIT: Evaluated from statutory rule (1% for CREATE relief period 2020.07-2023.06, 2% standard)
+    const mcitAmount = grossProfit * corpRates.mcitRate;
 
     // Higher of RCIT or MCIT
     const taxDue = Math.max(rcitAmount, mcitAmount);
@@ -305,16 +334,18 @@ export default function IncomeTaxHubTab({
       allowableDeductions,
       netTaxableIncome,
       rcitAmount,
-      rcitRate: corpRate1702 === 'RCIT_20' ? '20%' : '25%',
+      rcitRate: `${(rcitRate * 100).toFixed(0)}%`,
       mcitAmount,
+      mcitRate: `${(corpRates.mcitRate * 100).toFixed(0)}%`,
       taxDue,
       isMcitApplied,
       creditable2307,
       totalCredits,
       netTaxPayable,
-      overpayment
+      overpayment,
+      statutoryRule: corpRates.statutoryRule
     };
-  }, [booksData, corpRate1702, deduction1702, quarterlyPayments1702]);
+  }, [booksData, corpRate1702, deduction1702, quarterlyPayments1702, taxYear]);
 
   /* ========================================================================= */
   /* TAB 3: 1702EX [FOR EXEMPTED NON INDIVIDUALS] CALCULATIONS                 */
@@ -598,11 +629,30 @@ function isSampleTransaction(record: any): boolean {
                 onChange={(e) => setTaxYear(e.target.value)}
                 className={`px-2.5 py-1.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="2024">2024</option>
-                <option value="2025">2025</option>
-                <option value="2026">2026</option>
-                <option value="2027">2027</option>
+                {availableTaxYears.map(y => (
+                  <option key={y} value={String(y)}>{y}</option>
+                ))}
               </select>
+
+              <button
+                type="button"
+                onClick={() => setIsTaxRegimesModalOpen(true)}
+                className="px-2.5 py-1.5 text-xs rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 font-bold transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                title="Configure Annual Tax Elections for each Year"
+              >
+                <CalendarClock className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Annual Regimes</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsStatutoryModalOpen(true)}
+                className="px-2.5 py-1.5 text-xs rounded-xl border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 font-bold transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                title="View Philippine Statutory Tax Law Rules & Timeline"
+              >
+                <Scale className="w-3.5 h-3.5" />
+                <span>{currentStatutoryRule.shortName}</span>
+              </button>
 
               <span className={`text-xs font-bold ml-2 ${theme.textTitle}`}>Tax Regime:</span>
               <select
@@ -610,7 +660,7 @@ function isSampleTransaction(record: any): boolean {
                 onChange={(e) => setRegime1701(e.target.value as any)}
                 className={`px-2.5 py-1.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="GRADUATED">Graduated Income Tax Table (TRAIN Law: 0% - 35%)</option>
+                <option value="GRADUATED">Graduated Income Tax Table ({currentStatutoryRule.shortName})</option>
                 <option value="EIGHT_PERCENT">Optional 8% Gross Income Tax (Exceeding ₱250k)</option>
               </select>
 
@@ -638,6 +688,56 @@ function isSampleTransaction(record: any): boolean {
                 onChange={(e) => setQuarterlyPayments1701(Number(e.target.value) || 0)}
                 className={`w-28 px-2.5 py-1.5 text-xs font-mono text-right rounded-xl border bg-transparent ${theme.borderInput} ${theme.textMain}`}
               />
+            </div>
+          </div>
+
+          {/* ANNUAL STATUTORY TAX ELECTION & STATUTORY ERA BANNER */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="md:col-span-2 p-3.5 rounded-2xl border border-purple-500/30 bg-purple-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Scale className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                <div>
+                  <p className="font-bold text-xs text-purple-200">
+                    Tax Election for {taxYear}:{' '}
+                    <span className="text-white font-mono">
+                      {regime1701 === 'EIGHT_PERCENT' ? '8% Flat Gross Income Tax (Non-VAT)' : 'Graduated Income Tax Table'}
+                    </span>
+                    {' '}•{' '}
+                    <span className="text-purple-300">
+                      {regime1701 === 'EIGHT_PERCENT'
+                        ? 'NIRC Sec. 24(A)(2)(b) — Exempt from 3% Percentage Tax (Form 2551Q)'
+                        : deduction1701 === 'OSD_40'
+                        ? '40% Optional Standard Deduction (OSD)'
+                        : 'Itemized Deductions'}
+                    </span>
+                  </p>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">
+                    Multi-year isolation: Year {taxYear} calculates strictly under this election without mutating historical or future accounting.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTaxRegimesModalOpen(true)}
+                className="text-xs px-3 py-1.5 rounded-xl border border-purple-500/40 bg-purple-600 hover:bg-purple-500 text-white font-bold transition cursor-pointer whitespace-nowrap"
+              >
+                Configure Regimes
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-2xl border border-violet-500/30 bg-violet-500/10 flex items-center justify-between gap-2">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-violet-300 tracking-wider">Governing Statutory Law:</span>
+                <p className="text-xs font-bold text-white mt-0.5">{currentStatutoryRule.name}</p>
+                <p className="text-[10px] text-zinc-400">{currentStatutoryRule.citation}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsStatutoryModalOpen(true)}
+                className="text-[11px] px-2.5 py-1 rounded-lg border border-violet-500/40 bg-violet-600/30 hover:bg-violet-600/50 text-violet-200 font-bold transition cursor-pointer whitespace-nowrap"
+              >
+                Timeline
+              </button>
             </div>
           </div>
 
@@ -781,11 +881,30 @@ function isSampleTransaction(record: any): boolean {
                 onChange={(e) => setTaxYear(e.target.value)}
                 className={`px-2.5 py-1.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="2024">2024</option>
-                <option value="2025">2025</option>
-                <option value="2026">2026</option>
-                <option value="2027">2027</option>
+                {availableTaxYears.map(y => (
+                  <option key={y} value={String(y)}>{y}</option>
+                ))}
               </select>
+
+              <button
+                type="button"
+                onClick={() => setIsTaxRegimesModalOpen(true)}
+                className="px-2.5 py-1.5 text-xs rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 font-bold transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                title="Configure Annual Tax Elections for each Year"
+              >
+                <CalendarClock className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Annual Regimes</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsStatutoryModalOpen(true)}
+                className="px-2.5 py-1.5 text-xs rounded-xl border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 font-bold transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                title="View Philippine Statutory Tax Law Rules & Timeline"
+              >
+                <Scale className="w-3.5 h-3.5" />
+                <span>{currentStatutoryRule.shortName}</span>
+              </button>
 
               <span className={`text-xs font-bold ml-2 ${theme.textTitle}`}>Corporate Tax Rate:</span>
               <select
@@ -793,8 +912,8 @@ function isSampleTransaction(record: any): boolean {
                 onChange={(e) => setCorpRate1702(e.target.value as any)}
                 className={`px-2.5 py-1.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="RCIT_20">RCIT 20% (CREATE Act Micro/Small Corp: Income ≤ ₱5M, Assets ≤ ₱100M)</option>
-                <option value="RCIT_25">RCIT 25% (Standard Regular Corporate Income Tax)</option>
+                <option value="RCIT_20">RCIT {comp1702rt.statutoryRule ? `${(comp1702rt.statutoryRule.rcitRateMsme * 100).toFixed(0)}%` : '20%'} (MSME Domestic Corp: Net Income ≤ ₱5M, Assets ≤ ₱100M)</option>
+                <option value="RCIT_25">RCIT {comp1702rt.statutoryRule ? `${(comp1702rt.statutoryRule.rcitRateRegular * 100).toFixed(0)}%` : '25%'} (Standard Regular Corporate Income Tax)</option>
               </select>
 
               <span className={`text-xs font-bold ml-2 ${theme.textTitle}`}>Deductions:</span>
@@ -820,6 +939,50 @@ function isSampleTransaction(record: any): boolean {
             </div>
           </div>
 
+          {/* EOPT TAXPAYER CLASSIFICATION & STATUTORY ERA BANNER */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="md:col-span-2 p-3.5 rounded-2xl border border-blue-500/30 bg-blue-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Building2 className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-xs text-blue-200">
+                      EOPT Classification (RA 11976): <strong className="text-white font-mono">{taxpayerClassification.label}</strong>
+                    </p>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                      {taxpayerClassification.thresholdDesc}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-zinc-400 mt-1">
+                    Withholding Obligation:{' '}
+                    <span className={taxpayerClassification.withholdingExemption ? 'text-emerald-400 font-bold' : 'text-zinc-300'}>
+                      {taxpayerClassification.withholdingExemption ? 'EXEMPT from Income Tax Withholding at Source (RR 4-2024)' : 'Standard Withholding Agent'}
+                    </span>
+                    {' '}• Civil Penalties:{' '}
+                    <span className={taxpayerClassification.reducedPenalties ? 'text-emerald-400 font-bold' : 'text-zinc-300'}>
+                      {taxpayerClassification.reducedPenalties ? 'Reduced 10% Surcharge & 50% Interest Discount' : 'Standard 25%'}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl border border-violet-500/30 bg-violet-500/10 flex items-center justify-between gap-2">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-violet-300 tracking-wider">Governing Law ({taxYear}):</span>
+                <p className="text-xs font-bold text-white mt-0.5">{currentStatutoryRule.name}</p>
+                <p className="text-[10px] text-zinc-400">RCIT {(currentStatutoryRule.rcitRateRegular*100).toFixed(0)}% / MCIT {(currentStatutoryRule.mcitRate*100).toFixed(0)}%</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsStatutoryModalOpen(true)}
+                className="text-[11px] px-2.5 py-1 rounded-lg border border-violet-500/40 bg-violet-600/30 hover:bg-violet-600/50 text-violet-200 font-bold transition cursor-pointer whitespace-nowrap"
+              >
+                Timeline
+              </button>
+            </div>
+          </div>
+
           {/* Metric Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className={`p-4 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs`}>
@@ -831,7 +994,7 @@ function isSampleTransaction(record: any): boolean {
             </div>
 
             <div className={`p-4 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs`}>
-              <span className={`text-[11px] font-semibold ${theme.textMuted} uppercase tracking-wider`}>RCIT ({comp1702rt.rcitRate}) vs MCIT (2%)</span>
+              <span className={`text-[11px] font-semibold ${theme.textMuted} uppercase tracking-wider`}>RCIT ({comp1702rt.rcitRate}) vs MCIT ({comp1702rt.mcitRate})</span>
               <p className={`text-lg font-bold font-mono mt-1 ${theme.textTitle}`}>
                 ₱{comp1702rt.rcitAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
@@ -1117,10 +1280,9 @@ function isSampleTransaction(record: any): boolean {
                 onChange={(e) => setTaxYear(e.target.value)}
                 className={`px-2.5 py-1.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
               >
-                <option value="2024">2024</option>
-                <option value="2025">2025</option>
-                <option value="2026">2026</option>
-                <option value="2027">2027</option>
+                {availableTaxYears.map(y => (
+                  <option key={y} value={String(y)}>{y}</option>
+                ))}
               </select>
             </div>
 
@@ -1315,6 +1477,33 @@ function isSampleTransaction(record: any): boolean {
         </div>
       )}
 
+      {/* POPUP MODAL: ANNUAL TAX REGIMES LEDGER */}
+      {activeCompany && isTaxRegimesModalOpen && (
+        <AnnualTaxRegimesModal
+          company={activeCompany}
+          isOpen={isTaxRegimesModalOpen}
+          onClose={() => setIsTaxRegimesModalOpen(false)}
+          onSaveCompany={(updated) => {
+            if (onUpdateCompany) {
+              onUpdateCompany(updated);
+            } else if (setCompanies) {
+              setCompanies(prev => prev.map(c => c.id === updated.id ? updated : c));
+            }
+          }}
+          triggerAlert={triggerAlert}
+          theme={theme}
+        />
+      )}
+
+      {/* POPUP MODAL: STATUTORY TAX LAW INSPECTOR & TIMELINE */}
+      {isStatutoryModalOpen && (
+        <StatutoryTaxLawInspectorModal
+          isOpen={isStatutoryModalOpen}
+          onClose={() => setIsStatutoryModalOpen(false)}
+          initialDate={`${taxYear}-06-30`}
+          theme={theme}
+        />
+      )}
     </div>
   );
 }
