@@ -119,6 +119,7 @@ import EmployeeProfilesTab from './components/EmployeeProfilesTab';
 import PayrollTab from './components/PayrollTab';
 import ContributionTablesTab from './components/ContributionTablesTab';
 import ActivitiesWorkflow from './components/ActivitiesWorkflow';
+import EntityStatusTab from './components/EntityStatusTab';
 import AboutAppTab from './components/AboutAppTab';
 import TabDescriptionBanner from './components/TabDescriptionBanner';
 import TwoOSTopBar from './components/2os/2osTopBar';
@@ -1186,13 +1187,27 @@ export default function App() {
     | 'subsidiary_sales' | 'subsidiary_purchases' | 'cash_receipts' | 'cash_disbursements' | 'cash_receipt' | 'cash_disbursement' | 'special_ledger'
     | 'sales_transaction' | 'purchase_transaction'
     | 'companies' | 'customers' | 'providers' | 'related_parties' | 'employees' // Group 2
-    | 'dashboard' | 'account_titles' | 'tax_calendar' | 'activities' | 'activity_lists' | 'about_app' | 'system_specs' | 'about' // Group 3
+    | 'dashboard' | 'entity_status' | 'account_titles' | 'tax_calendar' | 'activities' | 'activity_lists' | 'about_app' | 'system_specs' | 'about' // Group 3
     | 'tax_reports' | 'income_tax' | 'ppe' | 'payroll' | 'contribution_tables' | 'cwt_customers' | 'cwt_providers' | 'special_entries' // Group 4
     | 'fs_balance_sheet' | 'fs_position' | 'fs_position_pfrs' | 'fs_income' | 'fs_equity' | 'fs_cashflows' | 'fs_notes' // Group 5
     | 'bir_2316' | 'bir_slsp' | 'bir_qap' | 'bir_sawt' | 'bir_alphalist' // Group 6
     | 'reports' | 'reports_turnovers' | 'reports_horizontal' | 'reports_vertical' | 'reports_ratios' // Group 7
     | 'bank_recon' | 'inventory_services' | 'inventory_list'
   >('dashboard');
+
+  // Closed Fiscal Years (Option C - PAS 8 Period-End Accounting & Lock Guardrail)
+  const [closedFiscalYears, setClosedFiscalYears] = useState<string[]>(() => {
+    const saved = localStorage.getItem('2os_closed_fiscal_years');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { }
+    }
+    return ['2024'];
+  });
+
+  const handleUpdateClosedFiscalYears = (years: string[]) => {
+    setClosedFiscalYears(years);
+    localStorage.setItem('2os_closed_fiscal_years', JSON.stringify(years));
+  };
 
   // Automatically scroll to the top of the page whenever switching tools/tabs or sheet branches
   useEffect(() => {
@@ -1211,7 +1226,7 @@ export default function App() {
 
   const entityRequiredTabs = [
     // Home Tools
-    'dashboard', 'reports', 'reports_turnovers', 'reports_horizontal', 'reports_vertical', 'reports_ratios', 'account_titles', 'tax_calendar', 'activities', 'activity_lists',
+    'dashboard', 'entity_status', 'reports', 'reports_turnovers', 'reports_horizontal', 'reports_vertical', 'reports_ratios', 'account_titles', 'tax_calendar', 'activities', 'activity_lists',
     // Financial Statements Tools
     'fs_balance_sheet', 'fs_income', 'fs_position', 'fs_position_pfrs', 'fs_equity', 'fs_cashflows', 'fs_notes',
     // BIR Computations Tools
@@ -1414,6 +1429,7 @@ export default function App() {
       case 'customers': return customers.length;
       case 'providers': return contractors.length;
       case 'account_titles': return accountTitles.length;
+      case 'entity_status': return 1;
       default: return 0;
     }
   };
@@ -1446,6 +1462,7 @@ export default function App() {
       case 'customers': return 'Customers Directory';
       case 'providers': return 'Service Providers Directory';
       case 'account_titles': return 'Chart of Accounts';
+      case 'entity_status': return 'Entity Status & Compliance Hub';
       case 'general_journal':
       case 'special_entries': return 'General Journal';
       case 'general_ledger': return 'General Ledger';
@@ -1855,6 +1872,29 @@ export default function App() {
                 />
               )}
 
+              {activeTab === 'entity_status' && (
+                <EntityStatusTab 
+                  activeCompany={activeCompany}
+                  companies={companies}
+                  sales={companySales}
+                  collections={companyCollections}
+                  expenses={companyExpenses}
+                  payments={companyPayments}
+                  cashReceipts={companyCashReceipts}
+                  cashDisbursements={companyCashDisbursements}
+                  specialEntries={companySpecialEntries}
+                  accountTitles={accountTitles}
+                  closedFiscalYears={closedFiscalYears}
+                  onUpdateClosedFiscalYears={handleUpdateClosedFiscalYears}
+                  onSelectTab={(k) => {
+                    setIsSettingsCategoryOpen(false);
+                    setActiveTab(k as any);
+                  }}
+                  theme={activeTheme}
+                  triggerAlert={triggerAlert}
+                />
+              )}
+
               {(activeTab === 'sales' || activeTab === 'subsidiary_sales') && (
                 <UniformBookTab 
                   bookType="subsidiary_sales"
@@ -1981,6 +2021,7 @@ export default function App() {
                   specialEntries={specialEntries}
                   setSpecialEntries={setSpecialEntries}
                   onDeleteRecord={handleCascadingDeleteFromBook}
+                  closedFiscalYears={closedFiscalYears}
                 />
               )}
 
@@ -2004,6 +2045,7 @@ export default function App() {
                   specialEntries={specialEntries}
                   setSpecialEntries={setSpecialEntries}
                   onDeleteRecord={handleCascadingDeleteFromBook}
+                  closedFiscalYears={closedFiscalYears}
                 />
               )}
 

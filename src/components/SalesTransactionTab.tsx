@@ -44,6 +44,7 @@ interface SalesTransactionTabProps {
   specialEntries?: SpecialEntry[];
   setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
   onDeleteRecord?: (bookType: string, record: UniformBookRecord) => void;
+  closedFiscalYears?: string[];
 }
 
 export default function SalesTransactionTab({
@@ -62,7 +63,8 @@ export default function SalesTransactionTab({
   onNavigateToTab,
   specialEntries = [],
   setSpecialEntries,
-  onDeleteRecord
+  onDeleteRecord,
+  closedFiscalYears = []
 }: SalesTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const isDark = !theme || !theme.isLight;
@@ -166,6 +168,12 @@ export default function SalesTransactionTab({
     verifyTinInput: string;
     verifyBranchInput: string;
     errorText?: string;
+  } | null>(null);
+
+  // Option C: Warning modal when recording transaction into a closed fiscal year
+  const [priorYearWarning, setPriorYearWarning] = useState<{
+    invoiceYear: string;
+    currentYear: string;
   } | null>(null);
 
   // Quick collection modal for open invoices
@@ -346,11 +354,13 @@ export default function SalesTransactionTab({
     overrideTin9?: string,
     overrideBranch5?: string,
     overrideAddress?: string,
-    overrideName?: string
+    overrideName?: string,
+    priorYearAdjustment?: { originalYear: string; effectiveYear: string }
   ) => {
     // Always close the confirmation dialogs first so the user never gets stuck on a dialog that "does nothing"
     setNewCustomerPrompt(null);
     setExistingCustomerMatchPrompt(null);
+    setPriorYearWarning(null);
 
     const effectiveName = (overrideName !== undefined ? overrideName : customerName).trim();
     const effectiveTinStr = overrideTin9 !== undefined ? overrideTin9 : tin;
@@ -465,7 +475,9 @@ export default function SalesTransactionTab({
       invoice_type: invoiceType,
       voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
       invoice_number: invoiceNo.trim(),
-      particulars: particulars.trim(),
+      particulars: priorYearAdjustment
+        ? `[Prior FY ${priorYearAdjustment.originalYear} Omission - Reflected in FY ${priorYearAdjustment.effectiveYear} (PAS 8)] ${particulars.trim()}`.trim()
+        : particulars.trim(),
       qty: parseFloat(qty) || 1,
       unit_price: parseFloat(unitPrice) || 0,
       amount: liveFormulas.amount,
@@ -482,6 +494,10 @@ export default function SalesTransactionTab({
       down_payment: saleMode === 'ON PARTIAL' ? parseFloat(downPaymentAmount) || 0 : undefined,
       is_cancelled: false,
       is_various: finalIsVarious,
+      is_prior_year_omission: Boolean(priorYearAdjustment),
+      original_year: priorYearAdjustment?.originalYear,
+      effective_year: priorYearAdjustment?.effectiveYear,
+      omission_acknowledged_at: priorYearAdjustment ? nowIso : undefined,
       created_at: nowIso,
       // Compatibility aliases for BIR tools, Reports, Notes to FS
       invoice_date: date,
@@ -705,6 +721,17 @@ export default function SalesTransactionTab({
         );
         return;
       }
+    }
+
+    // Option C: Check if transaction date belongs to a CLOSED fiscal year
+    const invYear = (date || '').slice(0, 4);
+    const curYear = String(new Date().getFullYear());
+    if (closedFiscalYears && closedFiscalYears.includes(invYear) && invYear !== curYear) {
+      setPriorYearWarning({
+        invoiceYear: invYear,
+        currentYear: curYear
+      });
+      return;
     }
 
     const rawTinDigits = tin.replace(/\D/g, '').slice(0, 9);
@@ -1868,24 +1895,14 @@ export default function SalesTransactionTab({
                 </thead>
                 <tbody className={`divide-y ${isDark ? 'divide-zinc-800/60' : 'divide-slate-200'}`}>
                   {filteredOpenInvoices.map((inv) => {
-                    const invDue = Number(inv.total_amount_due || inv.amount) || 0;
-                    const matchingColls = collections.filter(c => 
-                      !c.is_cancelled && 
-                      c.invoice_number && 
-                      isActiveCompanyRow(c) &&
-                      sameInvoiceNo(c.invoice_number, inv.invoice_number)
-                    );
-                    const collectedCashSoFar = matchingColls.reduce((sum, c) => {
-                      const cashVal = c.amount_collected !== undefined ? Number(c.amount_collected) : 0;
-                      return sum + cashVal;
-                    }, 0);
-                    const collectedDiscSoFar = matchingColls.reduce((sum, c) => {
-                      const dVal = Number(c.discount ?? c.discounts) || 0;
-                      return sum + dVal;
-                    }, 0);
-                    const totalCollectedSoFar = Math.round((collectedCashSoFar + collectedDiscSoFar) * 100) / 100;
-                    const balance = Math.max(0, Math.round((invDue - totalCollectedSoFar) * 100) / 100);
-                    const actualPaymentCount = matchingColls.filter(c => (c.amount_collected !== undefined ? Number(c.amount_collected) : 0) > 0).length;
+                    const scopedCols = collections.filter(c => !c.is_cancelled && isActiveCompanyRow(c));
+                    const settle = computeSaleSettlement(inv, scopedCols);
+                    const invGross = Number(inv.total_amount_vat_inclusive || inv.amount) || 0;
+                    const invTradeDisc = Number(inv.discount ?? inv.less_discount ?? inv.discounts) || 0;
+                    const netReceivable = Math.max(0, Math.round((invGross - invTradeDisc) * 100) / 100);
+                    const totalSettledSoFar = settle.offset;
+                    const balance = settle.remaining;
+                    const actualPaymentCount = settle.events.filter(e => e.cash > 0 || e.withholding > 0).length;
 
                     return (
                       <tr key={inv.id} className={`transition ${isDark ? 'hover:bg-zinc-800/30' : 'hover:bg-slate-50'}`}>
@@ -1896,15 +1913,18 @@ export default function SalesTransactionTab({
                           <div className={`text-[10px] font-mono ${isDark ? 'text-zinc-500' : 'text-slate-500'}`}>{inv.tin}</div>
                         </td>
                         <td className={`p-3 text-right font-mono font-bold ${isDark ? 'text-zinc-200' : 'text-slate-900'}`}>
-                          ₱{invDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          ₱{netReceivable.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                         <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                          <div>₱{totalCollectedSoFar.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                          {collectedDiscSoFar > 0 && (
-                            <div className="text-[10px] text-rose-500 font-normal">incl. ₱{collectedDiscSoFar.toLocaleString(undefined, { minimumFractionDigits: 2 })} disc</div>
+                          <div>₱{totalSettledSoFar.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                          {settle.discount > 0 && (
+                            <div className="text-[10px] text-rose-500 font-normal">incl. ₱{settle.discount.toLocaleString(undefined, { minimumFractionDigits: 2 })} disc</div>
+                          )}
+                          {settle.withholdingExplicit > 0 && (
+                            <div className="text-[10px] text-cyan-400 font-normal">incl. ₱{settle.withholdingExplicit.toLocaleString(undefined, { minimumFractionDigits: 2 })} CWT</div>
                           )}
                           {actualPaymentCount > 0 && (
-                            <div className={`text-[10px] ${isDark ? 'text-zinc-400' : 'text-slate-500'}`}>{actualPaymentCount} collection(s)</div>
+                            <div className={`text-[10px] ${isDark ? 'text-zinc-400' : 'text-slate-500'}`}>{actualPaymentCount} payment event(s)</div>
                           )}
                         </td>
                         <td className="p-3 text-right font-mono font-black text-amber-600 dark:text-amber-400">
@@ -1912,11 +1932,11 @@ export default function SalesTransactionTab({
                         </td>
                         <td className="p-3 text-center">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            inv.status === 'Partial' || totalCollectedSoFar > 0
+                            inv.status === 'Partial' || totalSettledSoFar > 0
                               ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30' 
                               : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30'
                           }`}>
-                            {totalCollectedSoFar > 0 ? 'Partial' : (inv.status || 'On Account')}
+                            {totalSettledSoFar > 0 ? 'Partial' : (inv.status || 'On Account')}
                           </span>
                         </td>
                         <td className="p-3 text-right">
@@ -2560,6 +2580,65 @@ export default function SalesTransactionTab({
                 type="button"
                 onClick={() => setNewCustomerPrompt(null)}
                 className={`px-3 py-2 text-xs font-semibold rounded-xl border transition cursor-pointer ${isDark ? 'text-zinc-300 hover:text-white border-zinc-700/60' : 'text-slate-700 hover:text-slate-900 border-slate-300 hover:bg-slate-100'}`}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OPTION C: PRIOR-YEAR CLOSED FISCAL PERIOD CONFIRMATION MODAL */}
+      {priorYearWarning && (
+        <div className="fixed inset-0 z-[220] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg p-6 rounded-3xl border ${isDark ? 'bg-zinc-950 border-amber-500/40 text-zinc-100' : 'bg-white border-amber-400 text-slate-900'} shadow-2xl space-y-4`}>
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-amber-500/20 text-amber-400 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black">
+                  Prior-Year Transaction Warning (Option C - PAS 8)
+                </h3>
+                <p className="text-xs text-amber-500 font-bold">
+                  Fiscal Year {priorYearWarning.invoiceYear} Books of Accounts are CLOSED &amp; REVERSED
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-black/30 border border-zinc-800 text-xs space-y-2 leading-relaxed">
+              <p className="text-zinc-200">
+                You are recording a sales transaction dated <strong>{date}</strong> (Fiscal Year <strong>{priorYearWarning.invoiceYear}</strong>).
+              </p>
+              <p className="text-zinc-300">
+                Under Philippine Financial Reporting Standards (PAS 8 - Accounting Policies, Changes in Accounting Estimates and Errors) and BIR rules:
+              </p>
+              <ul className="list-disc list-inside space-y-1.5 text-zinc-400">
+                <li>The audited books and sales of closed FY <strong>{priorYearWarning.invoiceYear}</strong> will <strong>NOT be altered</strong> retrospectively.</li>
+                <li>This transaction will be recognized as a <strong>Prior-Period Omission</strong> and will reflect in the <strong>present active year ({priorYearWarning.currentYear})</strong>.</li>
+                <li>A permanent audit log will be created in the <strong>Entity Status &amp; Compliance Hub</strong>.</li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const warningInfo = {
+                    originalYear: priorYearWarning.invoiceYear,
+                    effectiveYear: priorYearWarning.currentYear
+                  };
+                  setPriorYearWarning(null);
+                  executeRecordSale(false, false, tin, branchCode, address, customerName, warningInfo);
+                }}
+                className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-sm cursor-pointer"
+              >
+                ✓ Proceed &amp; Post to Present Year ({priorYearWarning.currentYear}) (Option C)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPriorYearWarning(null)}
+                className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-zinc-700 hover:bg-white/5 transition cursor-pointer"
               >
                 Cancel
               </button>

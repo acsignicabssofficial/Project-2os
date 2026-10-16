@@ -86,18 +86,29 @@ export default function VariousCustomersTab({
       if (s.is_cancelled) return false;
       if (activeCompanyName && s.company_name && s.company_name !== activeCompanyName) return false;
 
+      // If explicitly marked as rerouted / not various, never include in various
+      if ((s as any).is_various === false) return false;
+
       const rawTinDigits = (s.tin || '').replace(/\D/g, '');
       const isDummyTin = !rawTinDigits || rawTinDigits.length < 9 || /^0+$/.test(rawTinDigits);
       const isVariousName = (s.registered_name || '').toLowerCase().includes('various');
       const isExplicitVarious = (s as any).is_various === true;
 
-      // Check if this TIN exists in registered customer list
-      const matchesRegisteredCustomer = !isDummyTin && customers.some(c => {
+      // Check if customer matches a registered customer by TIN or registered name
+      const cleanRegName = (s.registered_name || s.customer_name || '').trim().toLowerCase();
+      const matchesRegisteredCustomer = customers.some(c => {
         const cDigits = (c.client_TIN || c.customer_tin || '').replace(/\D/g, '');
-        return cDigits.length >= 9 && cDigits.startsWith(rawTinDigits.slice(0, 9));
+        const hasTinMatch = !isDummyTin && cDigits.length >= 9 && cDigits.startsWith(rawTinDigits.slice(0, 9));
+        const cName = (c.registered_name || c.customer_name || c.trade_name || '').trim().toLowerCase();
+        const hasNameMatch = Boolean(cName && cleanRegName && (cName === cleanRegName || cleanRegName.includes(cName) || cName.includes(cleanRegName)));
+        return hasTinMatch || hasNameMatch;
       });
 
-      return isDummyTin || isVariousName || isExplicitVarious || !matchesRegisteredCustomer;
+      if (matchesRegisteredCustomer && !isVariousName) {
+        return false;
+      }
+
+      return isDummyTin || isVariousName || isExplicitVarious;
     });
   }, [subsidiarySales, activeCompanyName, customers]);
 

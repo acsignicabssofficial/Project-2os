@@ -158,19 +158,33 @@ export default function BusinessTaxHubTab({
   // ---------------------------------------------------------------------------
   // STATE: 2550Q QUARTERLY VAT RETURN
   // ---------------------------------------------------------------------------
-  const [vatQuarter, setVatQuarter] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
+  // STATE: 2550Q QUARTERLY VAT RETURN
+  // ---------------------------------------------------------------------------
+  const [vatQuarter, setVatQuarter] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q1');
   const [vatYear, setVatYear] = useState<string>(() => String(new Date().getFullYear()));
   const [priorVatOverpayment, setPriorVatOverpayment] = useState<number>(0);
   const [priorVatPayments, setPriorVatPayments] = useState<number>(0);
 
+  // Assessment of Variances: Declared vs Actual (2550Q)
+  const [vatDeclarationMode, setVatDeclarationMode] = useState<'ACTUAL' | 'CUSTOM'>('ACTUAL');
+  const [declaredSalesInputVat, setDeclaredSalesInputVat] = useState<string>('');
+  const [declaredTaxDueInputVat, setDeclaredTaxDueInputVat] = useState<string>('');
+  const [reflectPriorUndeclaredVat, setReflectPriorUndeclaredVat] = useState<boolean>(false);
+
   // ---------------------------------------------------------------------------
   // STATE: 2551Q PERCENTAGE TAX RETURN
   // ---------------------------------------------------------------------------
-  const [qtr2551, setQtr2551] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
+  const [qtr2551, setQtr2551] = useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q1');
   const [year2551, setYear2551] = useState<string>(() => String(new Date().getFullYear()));
   const [rate2551, setRate2551] = useState<number>(3); // 3% standard or 1% during CREATE relief
   const [priorPaid2551, setPriorPaid2551] = useState<number>(0);
   const [isStatutoryModalOpen, setIsStatutoryModalOpen] = useState(false);
+
+  // Assessment of Variances: Declared vs Actual (2551Q)
+  const [ptaxDeclarationMode, setPtaxDeclarationMode] = useState<'ACTUAL' | 'CUSTOM'>('ACTUAL');
+  const [declaredSalesInputPtax, setDeclaredSalesInputPtax] = useState<string>('');
+  const [declaredTaxDueInputPtax, setDeclaredTaxDueInputPtax] = useState<string>('');
+  const [reflectPriorUndeclaredPtax, setReflectPriorUndeclaredPtax] = useState<boolean>(false);
 
   // Available chronological tax years (2018–2028 + transactions)
   const availableTaxYears = useMemo(() => {
@@ -205,53 +219,64 @@ export default function BusinessTaxHubTab({
     if (allDates.length > 0) {
       const latestDateStr = allDates.sort().reverse()[0];
       const y = getYearFromDate(latestDateStr);
+      const q = getQuarterFromDate(latestDateStr);
       if (y) {
         setVatYear(y);
         setYear2551(y);
         setSalesYear(y);
         setPurchasesYear(y);
       }
+      if (q) {
+        setVatQuarter(q);
+        setQtr2551(q);
+        setSalesQuarter(q);
+        setPurchasesQuarter(q);
+      }
     }
   }, [sales, expenses]);
 
   /* ========================================================================= */
-  /* COMPUTATION: 2550Q QUARTERLY VAT RETURN (REAL TRANSACTIONS ONLY)          */
+  /* REUSABLE QUARTERLY VAT COMPUTATION HELPER                                 */
   /* ========================================================================= */
-  const comp2550q = useMemo(() => {
-    // Filter sales and expenses by selected quarter & year (strictly real transactions)
-    const quarterSales = sales
+  const computeQuarterVatData = (
+    targetQuarter: 'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4',
+    targetYear: string,
+    priorOverpaymentInput: number = 0,
+    priorPaymentsInput: number = 0,
+    addSalesBase: number = 0
+  ) => {
+    const qSales = sales
       .filter(s => s && !s.is_cancelled && !isSampleTransaction(s))
       .filter(s => {
         const y = getYearFromDate(s.invoice_date || (s as any).date || (s as any).transaction_date);
-        if (vatYear && y !== vatYear) return false;
-        if (vatQuarter !== 'ALL') {
+        if (targetYear && y !== targetYear) return false;
+        if (targetQuarter !== 'ALL') {
           const q = getQuarterFromDate(s.invoice_date || (s as any).date || (s as any).transaction_date);
-          if (q !== vatQuarter) return false;
+          if (q !== targetQuarter) return false;
         }
         return true;
       });
 
-    const quarterExpenses = expenses
+    const qExpenses = expenses
       .filter(e => e && !e.is_cancelled && !isSampleTransaction(e))
       .filter(e => {
         const y = getYearFromDate(e.expense_date || (e as any).date || (e as any).transaction_date);
-        if (vatYear && y !== vatYear) return false;
-        if (vatQuarter !== 'ALL') {
+        if (targetYear && y !== targetYear) return false;
+        if (targetQuarter !== 'ALL') {
           const q = getQuarterFromDate(e.expense_date || (e as any).date || (e as any).transaction_date);
-          if (q !== vatQuarter) return false;
+          if (q !== targetQuarter) return false;
         }
         return true;
       });
 
-    // 1. Sales & Output VAT
-    let vatableSales = 0;
-    let outputVat = 0;
+    let vatableSales = addSalesBase;
+    let outputVat = Math.round(addSalesBase * 0.12 * 100) / 100;
     let salesToGovt = 0;
     let govtOutputVat = 0;
     let zeroRatedSales = 0;
     let exemptSales = 0;
 
-    quarterSales.forEach(s => {
+    qSales.forEach(s => {
       const gross = Number((s as any).total_amount_vat_inclusive) || Number((s as any).total_sale_vat_inclusive) || Number(s.invoice_amount) || Number(s.amount) || Number(s.total_amount_due) || 0;
       const isVat = s.nonvat_or_vat === 'VAT' || (s as any).vat_or_nonvat === 'VAT' || Number((s as any).output_vat || 0) > 0 || isVatRegistered;
       const vatable = Number((s as any).vatable_sales) || Number((s as any).vatable_amount) || (isVat ? Math.round((gross / 1.12) * 100) / 100 : gross);
@@ -277,13 +302,12 @@ export default function BusinessTaxHubTab({
     const totalSales = vatableSales + salesToGovt + zeroRatedSales + exemptSales;
     const totalOutputVat = outputVat + govtOutputVat;
 
-    // 2. Purchases & Input VAT
     let inputGoods = 0;
     let inputServices = 0;
     let inputCapital = 0;
     let totalInputVat = 0;
 
-    quarterExpenses.forEach(e => {
+    qExpenses.forEach(e => {
       const gross = Number((e as any).total_amount_vat_inclusive) || Number((e as any).total_expenses_vat_inclusive) || Number(e.expense_invoice_amount) || Number(e.amount) || Number(e.total_amount_due) || 0;
       const vatable = Number((e as any).vatable_expense) || Number((e as any).vatable_expense_amount) || Number((e as any).vatable_amount) || (isVatRegistered ? Math.round((gross / 1.12) * 100) / 100 : gross);
       const inVat = Number((e as any).add_vat) || Number((e as any).vat_amount) || Number(e.vat_input_amount) || (isVatRegistered ? Math.round((vatable * 0.12) * 100) / 100 : 0);
@@ -303,18 +327,17 @@ export default function BusinessTaxHubTab({
       totalInputVat += inVat;
     });
 
-    const allowableInputVat = totalInputVat + priorVatOverpayment;
+    const allowableInputVat = totalInputVat + priorOverpaymentInput;
     const netVatPayable = Math.max(0, totalOutputVat - allowableInputVat);
     const excessInputVat = Math.max(0, allowableInputVat - totalOutputVat);
 
-    // 3. Tax Credits: BIR 2307 Creditable VAT withheld (WV010)
     let creditableVatWithheld = 0;
-    quarterSales.forEach(s => {
+    qSales.forEach(s => {
       const wtax = Number(s.less_withholding_tax) || Number(s.withholding_2307) || Number((s as any).tax_withheld) || Number((s as any).amount_withheld_2307) || Number(s.ewt_amount) || 0;
       creditableVatWithheld += wtax;
     });
 
-    const totalCredits = priorVatPayments + creditableVatWithheld;
+    const totalCredits = priorPaymentsInput + creditableVatWithheld;
     const taxStillDue = Math.max(0, netVatPayable - totalCredits);
     const overpayment = Math.max(0, totalCredits - netVatPayable + (excessInputVat > 0 ? excessInputVat : 0));
 
@@ -331,19 +354,60 @@ export default function BusinessTaxHubTab({
       inputServices,
       inputCapital,
       totalInputVat,
-      priorVatOverpayment,
+      priorVatOverpayment: priorOverpaymentInput,
       allowableInputVat,
       netVatPayable,
       excessInputVat,
       creditableVatWithheld,
-      priorVatPayments,
+      priorVatPayments: priorPaymentsInput,
       totalCredits,
       taxStillDue,
       overpayment,
-      salesCount: quarterSales.length,
-      expensesCount: quarterExpenses.length
+      salesCount: qSales.length,
+      expensesCount: qExpenses.length
     };
-  }, [sales, expenses, vatQuarter, vatYear, priorVatOverpayment, priorVatPayments, isVatRegistered]);
+  };
+
+  /* ========================================================================= */
+  /* MULTI-QUARTER OVERPAYMENT & TAX CREDIT CARRY-OVER POOL                    */
+  /* ========================================================================= */
+  const quarterlyVatPool = useMemo(() => {
+    // Q1 baseline (no prior overpayment from current year)
+    const q1 = computeQuarterVatData('Q1', vatYear, 0, 0);
+    const q1Carryover = q1.excessInputVat > 0 ? q1.excessInputVat : q1.overpayment;
+
+    // Q2 with Q1 carryover
+    const q2 = computeQuarterVatData('Q2', vatYear, q1Carryover, 0);
+    const q2Carryover = q2.excessInputVat > 0 ? q2.excessInputVat : q2.overpayment;
+
+    // Q3 with Q2 carryover
+    const q3 = computeQuarterVatData('Q3', vatYear, q2Carryover, 0);
+    const q3Carryover = q3.excessInputVat > 0 ? q3.excessInputVat : q3.overpayment;
+
+    // Q4 with Q3 carryover
+    const q4 = computeQuarterVatData('Q4', vatYear, q3Carryover, 0);
+
+    return {
+      Q1: { ...q1, availableNextCredit: q1Carryover },
+      Q2: { ...q2, availableNextCredit: q2Carryover, priorAvailableCredit: q1Carryover, priorQtr: 'Q1' },
+      Q3: { ...q3, availableNextCredit: q3Carryover, priorAvailableCredit: q2Carryover, priorQtr: 'Q2' },
+      Q4: { ...q4, priorAvailableCredit: q3Carryover, priorQtr: 'Q3' }
+    };
+  }, [sales, expenses, vatYear, isVatRegistered]);
+
+  // Determine prior quarter available credit for current return
+  const currentAvailablePriorCredit = useMemo(() => {
+    if (vatQuarter === 'Q2') return quarterlyVatPool.Q2.priorAvailableCredit || 0;
+    if (vatQuarter === 'Q3') return quarterlyVatPool.Q3.priorAvailableCredit || 0;
+    if (vatQuarter === 'Q4') return quarterlyVatPool.Q4.priorAvailableCredit || 0;
+    return 0;
+  }, [vatQuarter, quarterlyVatPool]);
+
+  // Main active quarter computation
+  const comp2550q = useMemo(() => {
+    const effectivePriorOverpayment = priorVatOverpayment > 0 ? priorVatOverpayment : currentAvailablePriorCredit;
+    return computeQuarterVatData(vatQuarter, vatYear, effectivePriorOverpayment, priorVatPayments, 0);
+  }, [sales, expenses, vatQuarter, vatYear, priorVatOverpayment, currentAvailablePriorCredit, priorVatPayments, isVatRegistered]);
 
   /* ========================================================================= */
   /* COMPUTATION: 2551Q PERCENTAGE TAX RETURN (NON-VAT ENTITIES)               */
@@ -1164,6 +1228,217 @@ export default function BusinessTaxHubTab({
             </div>
           </div>
 
+          {/* CROSS-QUARTER OVERPAYMENT & TAX CREDIT CARRY-OVER CARD */}
+          {currentAvailablePriorCredit > 0 && (
+            <div className="p-4 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 shrink-0 mt-0.5">
+                  <Scale className="w-5 h-5" />
+                </div>
+                <div className="text-xs space-y-0.5">
+                  <div className="font-bold text-white flex items-center gap-2">
+                    <span>Prior Quarter Excess Input VAT / Tax Credit from {quarterlyVatPool[vatQuarter as 'Q2'|'Q3'|'Q4']?.priorQtr || 'Previous Quarter'} Available</span>
+                    <span className="font-mono bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded text-[11px] font-bold">
+                      ₱{currentAvailablePriorCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <p className="text-zinc-300">
+                    Your previous quarter ended with an allowable excess Input VAT / overpayment. Under BIR Section 110, this is legally recognized and carries over as a deduction against this quarter&apos;s Output VAT.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPriorVatOverpayment(currentAvailablePriorCredit);
+                  triggerAlert(`Applied ₱${currentAvailablePriorCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} prior quarter excess input VAT to Line 20A!`, 'success');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shadow-sm shrink-0"
+              >
+                <Check className="w-4 h-4" />
+                <span>Apply to Line 20A (₱{currentAvailablePriorCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
+              </button>
+            </div>
+          )}
+
+          {/* NEGATIVE TAX / EXCESS INPUT VAT PRESERVATION BANNER */}
+          {(comp2550q.excessInputVat > 0 || comp2550q.overpayment > 0) && (
+            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+              <div className="text-xs leading-relaxed space-y-1">
+                <div className="font-bold text-emerald-300 flex items-center gap-2">
+                  <span>Negative Tax / Excess Input VAT Preserved for Carry-over</span>
+                  <span className="font-mono bg-emerald-500/20 text-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                    ₱{(comp2550q.excessInputVat || comp2550q.overpayment).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <p className="text-zinc-300">
+                  Total Input VAT (₱{comp2550q.totalInputVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}) exceeds Output VAT (₱{comp2550q.totalOutputVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}) because purchases and expenses are higher than sales for this quarter. 
+                  This negative tax amount is <strong>fully preserved as an asset</strong> (Input VAT Credit Asset) and can be used as a <strong>tax credit carry-over</strong> to deduct against tax due in subsequent quarterly filings (Line 20A).
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2 & 3: ASSESSMENT OF VARIANCES (ACTUAL BOOKS VS DECLARED BIR FILING) */}
+          {(() => {
+            const actualSales = comp2550q.vatableSales;
+            const actualOutputVat = comp2550q.totalOutputVat;
+            const declaredSales = vatDeclarationMode === 'CUSTOM' && declaredSalesInputVat !== ''
+              ? parseFloat(declaredSalesInputVat) || 0
+              : actualSales;
+            const declaredTax = vatDeclarationMode === 'CUSTOM' && declaredTaxDueInputVat !== ''
+              ? parseFloat(declaredTaxDueInputVat) || 0
+              : (vatDeclarationMode === 'CUSTOM' ? Math.round(declaredSales * 0.12 * 100) / 100 : actualOutputVat);
+
+            const undeclaredSales = Math.max(0, Math.round((actualSales - declaredSales) * 100) / 100);
+            const remainingTaxPayable = Math.max(0, Math.round((actualOutputVat - declaredTax) * 100) / 100);
+            const isUnderdeclared = undeclaredSales > 0 || remainingTaxPayable > 0;
+            const nextQtr = vatQuarter === 'Q1' ? 'Q2' : vatQuarter === 'Q2' ? 'Q3' : vatQuarter === 'Q3' ? 'Q4' : 'Q1 (Next Taxable Year)';
+
+            return (
+              <div className={`p-5 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs space-y-4`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Scale className="w-5 h-5 text-amber-400" />
+                    <div>
+                      <h3 className={`text-sm font-bold ${theme.textTitle}`}>
+                        Steps 2 &amp; 3: Assessment of Variances (Actual Books vs Declared BIR Filing)
+                      </h3>
+                      <p className={`text-[11px] ${theme.textMuted}`}>
+                        Compare actual financial results from subsidiary sales with declared amounts on BIR Form 2550Q
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVatDeclarationMode('ACTUAL');
+                        setDeclaredSalesInputVat('');
+                        setDeclaredTaxDueInputVat('');
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-xl font-bold transition cursor-pointer ${
+                        vatDeclarationMode === 'ACTUAL'
+                          ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                          : `${theme.textMuted} hover:text-white border border-zinc-700/60`
+                      }`}
+                    >
+                      100% Full Declaration (Actual Books)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVatDeclarationMode('CUSTOM');
+                        if (!declaredSalesInputVat) {
+                          setDeclaredSalesInputVat(String(Math.round(actualSales / 2)));
+                          setDeclaredTaxDueInputVat(String(Math.round(actualOutputVat / 2)));
+                        }
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-xl font-bold transition cursor-pointer ${
+                        vatDeclarationMode === 'CUSTOM'
+                          ? 'bg-amber-500 text-slate-950 shadow-sm'
+                          : `${theme.textMuted} hover:text-white border border-zinc-700/60`
+                      }`}
+                    >
+                      Custom Declared Filing (Assess Variances)
+                    </button>
+                  </div>
+                </div>
+
+                {vatDeclarationMode === 'CUSTOM' && (
+                  <div className="space-y-4 animate-fadeIn">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <label className="block text-[11px] font-bold text-zinc-400 mb-1">
+                          Actual Vatable Sales (Books)
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={`₱${actualSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                          className="w-full px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 font-mono font-bold text-zinc-300"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-amber-400 mb-1">
+                          Declared Vatable Sales (₱) *
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={declaredSalesInputVat}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setDeclaredSalesInputVat(val);
+                            const n = parseFloat(val) || 0;
+                            setDeclaredTaxDueInputVat(String(Math.round(n * 0.12 * 100) / 100));
+                          }}
+                          placeholder="e.g. 500000"
+                          className="w-full px-3 py-2 rounded-xl border border-amber-500/40 bg-zinc-900 font-mono font-bold text-amber-300 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-zinc-400 mb-1">
+                          Actual Output VAT (Books 12%)
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={`₱${actualOutputVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                          className="w-full px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 font-mono font-bold text-zinc-300"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-amber-400 mb-1">
+                          Declared Output VAT Due (₱) *
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={declaredTaxDueInputVat}
+                          onChange={(e) => setDeclaredTaxDueInputVat(e.target.value)}
+                          placeholder="e.g. 6000"
+                          className="w-full px-3 py-2 rounded-xl border border-amber-500/40 bg-zinc-900 font-mono font-bold text-amber-300 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* UNDERDECLARATION WARNING BANNER */}
+                    {isUnderdeclared ? (
+                      <div className="p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-500/40 text-amber-900 dark:text-amber-200 space-y-3">
+                        <div className="flex items-center gap-2.5 font-extrabold text-sm text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                          <span>WARNING: Underdeclaration Detected for {vatQuarter} {vatYear}</span>
+                        </div>
+                        <p className="text-xs leading-relaxed font-medium">
+                          For this quarter, your actual vatable sales per Books of Accounts is <strong>₱{actualSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>, but you only declared <strong>₱{declaredSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>.
+                          The difference of <strong>₱{undeclaredSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong> in sales with remaining VAT payable of <strong>₱{remainingTaxPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong> will reflect in the next quarter&apos;s computation.
+                        </p>
+                        <div className="p-3.5 rounded-xl bg-black/10 dark:bg-black/30 border border-amber-500/20 text-[11px] font-mono space-y-1.5">
+                          <div className="text-amber-500 font-bold uppercase tracking-wider">General Journal &amp; General Ledger Alignment:</div>
+                          <div className="text-zinc-300">• Sales Journal Entry credited Output VAT Payable [2020] by ₱{actualOutputVat.toLocaleString(undefined, { minimumFractionDigits: 2 })} based on actual sales of ₱{actualSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}.</div>
+                          <div className="text-zinc-300">• Declared Tax Remittance Journal Entry debits Output VAT Payable [2020] by ₱{declaredTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}.</div>
+                          <div className="text-amber-400 font-bold">• General Ledger Output VAT Payable [2020] retains a remaining credit balance of ₱{remainingTaxPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })} until fully remitted.</div>
+                          <div className="text-cyan-400">• Subsequent Quarter Starting Base: Quarter {nextQtr} computation will reflect this undeclared variance (+₱{undeclaredSales.toLocaleString(undefined, { minimumFractionDigits: 2 })} sales).</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                        <span>Declared amounts match or exceed actual Books of Accounts. No undeclared variances detected.</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* BIR FORM 2550Q STATEMENT SHEET */}
           <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-xs overflow-hidden`}>
             <div className={`p-4 border-b ${theme.borderCard} bg-black/5 dark:bg-white/5 flex items-center justify-between`}>
@@ -1509,6 +1784,184 @@ export default function BusinessTaxHubTab({
               <span className="text-[11px] text-zinc-400 block mt-1">Net of 2307 creditable tax credits</span>
             </div>
           </div>
+
+          {/* OVERPAYMENT & TAX CREDIT CARRY-OVER CARD (PERCENTAGE TAX) */}
+          {comp2551q.overpayment > 0 && (
+            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+              <div className="text-xs leading-relaxed space-y-1">
+                <div className="font-bold text-emerald-300 flex items-center gap-2">
+                  <span>Tax Overpayment / Excess 2307 Credits Preserved for Carry-over</span>
+                  <span className="font-mono bg-emerald-500/20 text-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                    ₱{comp2551q.overpayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <p className="text-zinc-300">
+                  Total tax credits (BIR 2307 creditable tax withheld of ₱{comp2551q.creditableTaxWithheld.toLocaleString(undefined, { minimumFractionDigits: 2 })} plus prior payments) exceed the Percentage Tax due for this quarter. 
+                  This overpayment is <strong>fully preserved as a tax credit asset</strong> and can be used as a <strong>credit carry-over</strong> to deduct against tax due in subsequent quarterly filings (Line 19).
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2 & 3: ASSESSMENT OF VARIANCES (2551Q PERCENTAGE TAX) */}
+          {(() => {
+            const actualSales = comp2551q.grossTaxable;
+            const actualTax = comp2551q.taxDue;
+            const declaredSales = ptaxDeclarationMode === 'CUSTOM' && declaredSalesInputPtax !== ''
+              ? parseFloat(declaredSalesInputPtax) || 0
+              : actualSales;
+            const declaredTax = ptaxDeclarationMode === 'CUSTOM' && declaredTaxDueInputPtax !== ''
+              ? parseFloat(declaredTaxDueInputPtax) || 0
+              : (ptaxDeclarationMode === 'CUSTOM' ? Math.round(declaredSales * (comp2551q.taxRate / 100) * 100) / 100 : actualTax);
+
+            const undeclaredSales = Math.max(0, Math.round((actualSales - declaredSales) * 100) / 100);
+            const remainingTaxPayable = Math.max(0, Math.round((actualTax - declaredTax) * 100) / 100);
+            const isUnderdeclared = undeclaredSales > 0 || remainingTaxPayable > 0;
+            const nextQtr = qtr2551 === 'Q1' ? 'Q2' : qtr2551 === 'Q2' ? 'Q3' : qtr2551 === 'Q3' ? 'Q4' : 'Q1 (Next Taxable Year)';
+
+            return (
+              <div className={`p-5 rounded-2xl border ${theme.borderCard} ${theme.bgCard} shadow-xs space-y-4`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Scale className="w-5 h-5 text-amber-400" />
+                    <div>
+                      <h3 className={`text-sm font-bold ${theme.textTitle}`}>
+                        Steps 2 &amp; 3: Assessment of Variances (Actual Books vs Declared BIR 2551Q Filing)
+                      </h3>
+                      <p className={`text-[11px] ${theme.textMuted}`}>
+                        Compare actual subsidiary sales results with declared percentage tax on BIR Form 2551Q
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPtaxDeclarationMode('ACTUAL');
+                        setDeclaredSalesInputPtax('');
+                        setDeclaredTaxDueInputPtax('');
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-xl font-bold transition cursor-pointer ${
+                        ptaxDeclarationMode === 'ACTUAL'
+                          ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                          : `${theme.textMuted} hover:text-white border border-zinc-700/60`
+                      }`}
+                    >
+                      100% Full Declaration (Actual Books)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPtaxDeclarationMode('CUSTOM');
+                        if (!declaredSalesInputPtax) {
+                          setDeclaredSalesInputPtax(String(Math.round(actualSales / 2)));
+                          setDeclaredTaxDueInputPtax(String(Math.round(actualTax / 2)));
+                        }
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-xl font-bold transition cursor-pointer ${
+                        ptaxDeclarationMode === 'CUSTOM'
+                          ? 'bg-amber-500 text-slate-950 shadow-sm'
+                          : `${theme.textMuted} hover:text-white border border-zinc-700/60`
+                      }`}
+                    >
+                      Custom Declared Filing (Assess Variances)
+                    </button>
+                  </div>
+                </div>
+
+                {ptaxDeclarationMode === 'CUSTOM' && (
+                  <div className="space-y-4 animate-fadeIn">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <label className="block text-[11px] font-bold text-zinc-400 mb-1">
+                          Actual Taxable Sales (Books)
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={`₱${actualSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                          className="w-full px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 font-mono font-bold text-zinc-300"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-amber-400 mb-1">
+                          Declared Taxable Sales (₱) *
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={declaredSalesInputPtax}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setDeclaredSalesInputPtax(val);
+                            const n = parseFloat(val) || 0;
+                            setDeclaredTaxDueInputPtax(String(Math.round(n * (comp2551q.taxRate / 100) * 100) / 100));
+                          }}
+                          placeholder="e.g. 500000"
+                          className="w-full px-3 py-2 rounded-xl border border-amber-500/40 bg-zinc-900 font-mono font-bold text-amber-300 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-zinc-400 mb-1">
+                          Actual Tax Due ({comp2551q.taxRate}%)
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={`₱${actualTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                          className="w-full px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 font-mono font-bold text-zinc-300"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-amber-400 mb-1">
+                          Declared Percentage Tax (₱) *
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={declaredTaxDueInputPtax}
+                          onChange={(e) => setDeclaredTaxDueInputPtax(e.target.value)}
+                          placeholder="e.g. 15000"
+                          className="w-full px-3 py-2 rounded-xl border border-amber-500/40 bg-zinc-900 font-mono font-bold text-amber-300 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* UNDERDECLARATION WARNING BANNER */}
+                    {isUnderdeclared ? (
+                      <div className="p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-500/40 text-amber-900 dark:text-amber-200 space-y-3">
+                        <div className="flex items-center gap-2.5 font-extrabold text-sm text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                          <span>WARNING: Underdeclaration Detected for {qtr2551} {year2551}</span>
+                        </div>
+                        <p className="text-xs leading-relaxed font-medium">
+                          For this quarter, your actual taxable sales per Books of Accounts is <strong>₱{actualSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>, but you only declared <strong>₱{declaredSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>.
+                          The difference of <strong>₱{undeclaredSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong> in sales with remaining Percentage Tax payable of <strong>₱{remainingTaxPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong> will reflect in the next quarter&apos;s computation.
+                        </p>
+                        <div className="p-3.5 rounded-xl bg-black/10 dark:bg-black/30 border border-amber-500/20 text-[11px] font-mono space-y-1.5">
+                          <div className="text-amber-500 font-bold uppercase tracking-wider">General Journal &amp; General Ledger Alignment:</div>
+                          <div className="text-zinc-300">• Sales Journal Entry recorded actual gross revenue of ₱{actualSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}.</div>
+                          <div className="text-zinc-300">• Percentage Tax Remittance Journal Entry records remittance of ₱{declaredTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}.</div>
+                          <div className="text-amber-400 font-bold">• Remaining Percentage Tax Payable retains a balance of ₱{remainingTaxPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })} in Books of Accounts until fully settled.</div>
+                          <div className="text-cyan-400">• Subsequent Quarter Starting Base: Quarter {nextQtr} computation will reflect this undeclared sales variance (+₱{undeclaredSales.toLocaleString(undefined, { minimumFractionDigits: 2 })} sales).</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                        <span>Declared amounts match or exceed actual Books of Accounts. No undeclared variances detected.</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* BIR 2551Q Statement */}
           <div className={`border ${theme.borderCard} ${theme.bgCard} rounded-2xl shadow-xs overflow-hidden`}>

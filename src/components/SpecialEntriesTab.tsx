@@ -80,8 +80,14 @@ export default function SpecialEntriesTab({
   const [isLockWizardOpen, setIsLockWizardOpen] = useState(false);
   const [isRJEWizardOpen, setIsRJEWizardOpen] = useState(false);
 
-  // Period Lock state (stored locally or per company)
-  const [lockedPeriods, setLockedPeriods] = useState<string[]>(['2024']);
+  // Period Lock state (stored locally or synchronized with Entity Status)
+  const [lockedPeriods, setLockedPeriods] = useState<string[]>(() => {
+    const saved = localStorage.getItem('2os_closed_fiscal_years');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { }
+    }
+    return ['2024'];
+  });
   const [selectedFiscalYear, setSelectedFiscalYear] = useState('2025');
 
   // Calculate debit and credit totals

@@ -109,6 +109,15 @@ export const RIBBON_CATEGORIES: RibbonCategory[] = [
         cellRef: 'ACTIVITY!A1',
         description: 'Activity Lists: Interactive Gantt chart timeline, Kanban task board, department assignments (Sales, Payroll, Purchasing, Accounting), team chat and operational tracking.',
         formula: '=ACTIVITY_LISTS(Task, Department, Assignee, Priority, Gantt, Kanban)'
+      },
+      {
+        key: 'entity_status',
+        label: 'Entity Status & Compliance Hub (Missing Invoices, Books Open/Closed, Tax)',
+        shortLabel: 'Entity\nStatus',
+        icon: ShieldCheck,
+        cellRef: 'STATUS!A1',
+        description: 'Entity Status: Diagnostic monitor tracking missing invoice sequences, fiscal year closure status of Books of Accounts (Open vs Closed), tax computed vs declared vs paid, and prior-year omission audit logs.',
+        formula: '=ENTITY_STATUS(MissingInvoices, BooksOpenClosed, TaxComputedDeclaredPaid, PriorYearOmissions)'
       }
     ]
   },
@@ -465,7 +474,7 @@ export function getCategoryForTab(tabKey: string): RibbonCategoryKey {
   }
 
   // Check aliases
-  if (['dashboard', 'reports', 'reports_turnovers', 'reports_horizontal', 'reports_vertical', 'reports_ratios', 'tax_calendar', 'about_app', 'activities', 'activity_lists', 'system_specs', 'account_titles'].includes(tabKey)) return 'HOME';
+  if (['dashboard', 'reports', 'reports_turnovers', 'reports_horizontal', 'reports_vertical', 'reports_ratios', 'tax_calendar', 'about_app', 'activities', 'activity_lists', 'system_specs', 'account_titles', 'entity_status'].includes(tabKey)) return 'HOME';
   if (['companies', 'customers', 'providers', 'employees', 'related_parties', 'inventory_services'].includes(tabKey)) return 'DIRECTORY';
   if (['sales', 'expenses', 'collections', 'payments', 'general_journal', 'special_entries', 'general_ledger', 'special_ledger'].includes(tabKey)) return 'BOOKS OF ACCOUNTS';
   if (['sales_transaction', 'purchase_transaction', 'payroll', 'ppe', 'inventory_list', 'bank_recon', 'contribution_tables'].includes(tabKey)) return 'TRANSACTIONS';

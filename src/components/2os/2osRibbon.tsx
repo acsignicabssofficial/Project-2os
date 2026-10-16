@@ -203,6 +203,8 @@ export default function TwoOSRibbon({
         return 'SPECIAL JOURNAL VOUCHERS (ADJUSTING & ACCRUAL ENTRIES)';
       case 'dashboard':
         return 'EXECUTIVE FINANCIAL MONITORING DASHBOARD';
+      case 'entity_status':
+        return 'ENTITY STATUS & COMPLIANCE HUB (MISSING INVOICES, BOOKS OPEN/CLOSED & TAX MONITOR)';
       case 'activities':
       case 'activity_lists':
       case 'about_app':

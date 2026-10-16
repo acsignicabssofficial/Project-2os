@@ -47,6 +47,8 @@ export interface Company {
   income_tax_type?: 'GRADUATED' | 'EIGHT_PERCENT' | string;
   expense_deduction_type?: 'ITEMIZED' | 'OSD_40' | string;
   tax_year_profiles?: EntityTaxYearProfile[];
+  closed_fiscal_years?: string[];
+  fiscal_year_statuses?: FiscalYearBookStatus[];
   service_bookkeeping?: boolean | string;
   service_tax_filing?: boolean | string;
   service_bir_attachments?: boolean | string;
@@ -271,8 +273,11 @@ export interface Sale {
   down_payment?: number;
   is_cancelled?: boolean;
   cancel_reason?: string;
-  cancel_date?: string;
   is_various_customer?: boolean;
+  is_prior_year_omission?: boolean;
+  original_year?: string;
+  effective_year?: string;
+  omission_acknowledged_at?: string;
 }
 
 export interface Expense {
@@ -336,6 +341,50 @@ export interface Expense {
   less_withholding_tax?: number;
   zero_rated?: number;
   vat_exempt?: number;
+  is_prior_year_omission?: boolean;
+  original_year?: string;
+  effective_year?: string;
+  omission_acknowledged_at?: string;
+}
+
+export interface FiscalYearBookStatus {
+  year: string;
+  isClosed: boolean;
+  dateClosed?: string;
+  closedBy?: string;
+  closingVoucherRef?: string;
+  notes?: string;
+  isReversed?: boolean;
+}
+
+export interface MissingInvoiceRecord {
+  id: string;
+  seriesPrefix: string;
+  missingNumber: number;
+  formattedInvoiceNo: string;
+  type: 'SALES_INVOICE' | 'PURCHASE_VOUCHER' | 'OFFICIAL_RECEIPT' | 'CHECK_VOUCHER';
+  year: string;
+  quarter?: string;
+  detectedAt: string;
+  status: 'MISSING' | 'VOIDED_WITH_AFFIDAVIT' | 'RESOLVED';
+  reason?: string;
+}
+
+export interface TaxComplianceStatusRecord {
+  taxType: '2550Q' | '2551Q' | '1701_1702' | '1601_C' | '0619_E';
+  taxName: string;
+  year: string;
+  quarter: string;
+  computedTax: number;
+  declaredTax: number;
+  paidTax: number;
+  varianceSales?: number;
+  varianceTax: number;
+  isUnderdeclared: boolean;
+  isOverpaymentCredit: boolean;
+  creditCarriedOver: number;
+  status: 'PAID' | 'UNDERDECLARED' | 'OVERPAID_CREDIT' | 'UNFILED';
+  filingDeadline?: string;
 }
 
 export interface Collection {

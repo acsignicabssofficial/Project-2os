@@ -43,6 +43,7 @@ interface PurchaseTransactionTabProps {
   specialEntries?: SpecialEntry[];
   setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
   onDeleteRecord?: (bookType: string, record: UniformBookRecord) => void;
+  closedFiscalYears?: string[];
 }
 
 export default function PurchaseTransactionTab({
@@ -63,7 +64,8 @@ export default function PurchaseTransactionTab({
   setAccountTitles,
   specialEntries = [],
   setSpecialEntries,
-  onDeleteRecord
+  onDeleteRecord,
+  closedFiscalYears = []
 }: PurchaseTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   // Company-scoped, blank-safe matching between a payable (voucher / invoice) and its Payments Book rows
@@ -176,6 +178,10 @@ export default function PurchaseTransactionTab({
   const [disbursementRef, setDisbursementRef] = useState(`PYMT #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
 
   // Quick payment modal for open payables
+  const [priorYearWarning, setPriorYearWarning] = useState<{
+    invoiceYear: string;
+    currentYear: string;
+  } | null>(null);
   const [selectedPayableToPay, setSelectedPayableToPay] = useState<UniformBookRecord | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [payWtax, setPayWtax] = useState('0');
@@ -290,8 +296,8 @@ export default function PurchaseTransactionTab({
   }, [openPayables, openSearch, globalSearch]);
 
   // SUBMIT NEW PURCHASE TRANSACTION
-  const handleSubmitPurchase = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmitPurchase = (e?: React.FormEvent, isConfirmedOptionC: boolean = false) => {
+    if (e) e.preventDefault();
 
     if (!activeCompany || !activeCompany.company_name || activeCompany.company_name.trim() === '' || activeCompany.company_name === 'Select Company...') {
       triggerAlert('Strict Validation: Please setup or select an Entity Profile first before entering purchase transactions! (Saan mapupunta ang transaction kung walang designated entity?)', 'error');
@@ -307,6 +313,17 @@ export default function PurchaseTransactionTab({
     const parsedUnitPrice = parseFloat(unitPrice) || 0;
     if (parsedUnitPrice <= 0) {
       triggerAlert('Please enter a valid Unit Price greater than 0.', 'error');
+      return;
+    }
+
+    // Option C: Check if transaction date belongs to a CLOSED fiscal year
+    const expYear = (date || '').slice(0, 4);
+    const curYear = String(new Date().getFullYear());
+    if (!isConfirmedOptionC && closedFiscalYears && closedFiscalYears.includes(expYear) && expYear !== curYear) {
+      setPriorYearWarning({
+        invoiceYear: expYear,
+        currentYear: curYear
+      });
       return;
     }
 
@@ -376,7 +393,9 @@ export default function PurchaseTransactionTab({
       invoice_type: invoiceType,
       voucher_number: voucherNo.trim(),
       invoice_number: invoiceNo.trim() || `INV-${voucherNo.trim()}`,
-      particulars: `[${expenseType}] ${cleanParticulars}`,
+      particulars: isConfirmedOptionC
+        ? `[Prior FY ${expYear} Omission - Reflected in FY ${curYear} (PAS 8)] [${expenseType}] ${cleanParticulars}`
+        : `[${expenseType}] ${cleanParticulars}`,
       qty: parseFloat(qty) || 1,
       unit_price: parsedUnitPrice,
       amount: liveFormulas.amount,
@@ -393,6 +412,10 @@ export default function PurchaseTransactionTab({
       amount_paid: purchaseMode === 'ON CASH' ? netCashForFullPayable : (purchaseMode === 'ON PARTIAL' ? parseFloat(downPaymentAmount) || 0 : 0),
       pending_balance: purchaseMode === 'ON CASH' ? 0 : (purchaseMode === 'ON PARTIAL' ? Math.max(0, totalDue - (parseFloat(downPaymentAmount) || 0)) : totalDue),
       is_cancelled: false,
+      is_prior_year_omission: isConfirmedOptionC,
+      original_year: isConfirmedOptionC ? expYear : undefined,
+      effective_year: isConfirmedOptionC ? curYear : undefined,
+      omission_acknowledged_at: isConfirmedOptionC ? nowIso : undefined,
       created_at: nowIso,
       // Compatibility aliases for BIR tools, Reports, Notes to FS
       expense_date: date,
@@ -1688,6 +1711,61 @@ export default function PurchaseTransactionTab({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* OPTION C: PRIOR-YEAR CLOSED FISCAL PERIOD CONFIRMATION MODAL */}
+      {priorYearWarning && (
+        <div className="fixed inset-0 z-[220] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg p-6 rounded-3xl border ${isDark ? 'bg-zinc-950 border-amber-500/40 text-zinc-100' : 'bg-white border-amber-400 text-slate-900'} shadow-2xl space-y-4`}>
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-amber-500/20 text-amber-400 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black">
+                  Prior-Year Transaction Warning (Option C - PAS 8)
+                </h3>
+                <p className="text-xs text-amber-500 font-bold">
+                  Fiscal Year {priorYearWarning.invoiceYear} Books of Accounts are CLOSED &amp; REVERSED
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-black/30 border border-zinc-800 text-xs space-y-2 leading-relaxed">
+              <p className="text-zinc-200">
+                You are recording a purchase / expense transaction dated <strong>{date}</strong> (Fiscal Year <strong>{priorYearWarning.invoiceYear}</strong>).
+              </p>
+              <p className="text-zinc-300">
+                Under Philippine Financial Reporting Standards (PAS 8 - Accounting Policies, Changes in Accounting Estimates and Errors) and BIR rules:
+              </p>
+              <ul className="list-disc list-inside space-y-1.5 text-zinc-400">
+                <li>The audited books and expenses of closed FY <strong>{priorYearWarning.invoiceYear}</strong> will <strong>NOT be altered</strong> retrospectively.</li>
+                <li>This transaction will be recognized as a <strong>Prior-Period Omission</strong> and will reflect in the <strong>present active year ({priorYearWarning.currentYear})</strong>.</li>
+                <li>A permanent audit log will be created in the <strong>Entity Status &amp; Compliance Hub</strong>.</li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPriorYearWarning(null);
+                  handleSubmitPurchase(undefined, true);
+                }}
+                className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-sm cursor-pointer"
+              >
+                ✓ Proceed &amp; Post to Present Year ({priorYearWarning.currentYear}) (Option C)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPriorYearWarning(null)}
+                className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-zinc-700 hover:bg-white/5 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

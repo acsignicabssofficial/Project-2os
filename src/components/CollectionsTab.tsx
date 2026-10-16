@@ -75,11 +75,12 @@ export default function CollectionsTab({
         setCollCustName(foundSale.registered_name);
         
         // Find previous collections on this invoice
-        const prevColls = collections.filter(c => normalizeDocNo(c.invoice_number) === normalizeDocNo(foundSale.invoice_number));
+        const prevColls = collections.filter(c => !c.is_cancelled && normalizeDocNo(c.invoice_number) === normalizeDocNo(foundSale.invoice_number));
         const totalPrevCollected = prevColls.reduce((sum, col) => sum + (Number(col.amount_collected) || 0), 0);
-        const totalPrevWithheld = prevColls.reduce((sum, col) => sum + (Number(col.amount_withheld_2307) || 0), 0);
+        const totalPrevWithheld = prevColls.reduce((sum, col) => sum + (Number(col.amount_withheld_2307 ?? col.tax_withheld) || 0), 0);
+        const totalPrevDiscount = prevColls.reduce((sum, col) => sum + (Number(col.discount ?? col.discounts) || 0), 0);
 
-        const outstanding = Math.max(0, foundSale.total_amount_due - (foundSale.down_payment || 0) - totalPrevCollected - totalPrevWithheld);
+        const outstanding = Math.max(0, foundSale.total_amount_due - (foundSale.down_payment || 0) - totalPrevCollected - totalPrevDiscount - totalPrevWithheld);
         setCollAmt(outstanding.toString());
 
         triggerAlert(`Found Invoice ${foundSale.invoice_number}. Total Amount Due: ₱${foundSale.total_amount_due.toLocaleString()}`, 'info');
