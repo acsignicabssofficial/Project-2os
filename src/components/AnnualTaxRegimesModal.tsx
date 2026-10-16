@@ -55,6 +55,7 @@ export const AnnualTaxRegimesModal: React.FC<AnnualTaxRegimesModalProps> = ({
   const [vatStatus, setVatStatus] = useState<'VATABLE' | 'NON-VAT' | 'EXEMPT'>(
     incomeTaxType === 'EIGHT_PERCENT' ? 'NON-VAT' : ((company.vat_or_non_vat as any) || 'VATABLE')
   );
+  const [taxpayerClassification, setTaxpayerClassification] = useState<'MICRO' | 'SMALL' | 'MEDIUM' | 'LARGE'>('MICRO');
   const [allow250k, setAllow250k] = useState<boolean>(true);
   const [notes, setNotes] = useState<string>('');
 
@@ -63,6 +64,7 @@ export const AnnualTaxRegimesModal: React.FC<AnnualTaxRegimesModalProps> = ({
     setIncomeTaxType(isIndiv && p.income_tax_type === 'EIGHT_PERCENT' ? 'EIGHT_PERCENT' : 'GRADUATED');
     setExpenseDeduction(p.expense_deduction_type || 'ITEMIZED');
     setVatStatus(p.vat_or_non_vat || 'NON-VAT');
+    setTaxpayerClassification(p.taxpayer_classification || 'MICRO');
     setAllow250k(p.allow_250k_exemption !== false);
     setNotes(p.notes || '');
   };
@@ -75,6 +77,7 @@ export const AnnualTaxRegimesModal: React.FC<AnnualTaxRegimesModalProps> = ({
       income_tax_type: isIndiv && incomeTaxType === 'EIGHT_PERCENT' ? 'EIGHT_PERCENT' : 'GRADUATED',
       expense_deduction_type: incomeTaxType === 'EIGHT_PERCENT' ? 'ITEMIZED' : expenseDeduction,
       vat_or_non_vat: incomeTaxType === 'EIGHT_PERCENT' ? 'NON-VAT' : vatStatus,
+      taxpayer_classification: taxpayerClassification,
       allow_250k_exemption: incomeTaxType === 'EIGHT_PERCENT' ? allow250k : true,
       notes: notes.trim()
     };
@@ -215,6 +218,7 @@ export const AnnualTaxRegimesModal: React.FC<AnnualTaxRegimesModalProps> = ({
                   <thead>
                     <tr className="border-b border-zinc-800 bg-zinc-900/80 text-zinc-400 uppercase font-bold tracking-wider text-[10px]">
                       <th className="p-3">Tax Year</th>
+                      <th className="p-3">Classification</th>
                       <th className="p-3">Income Tax Regime</th>
                       <th className="p-3">Deduction Method</th>
                       <th className="p-3">VAT Status</th>
@@ -233,6 +237,11 @@ export const AnnualTaxRegimesModal: React.FC<AnnualTaxRegimesModalProps> = ({
                       >
                         <td className="p-3 font-mono font-bold text-sm text-purple-400">
                           {p.year}
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-full font-bold text-[10px] bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+                            {p.taxpayer_classification || 'MICRO'}
+                          </span>
                         </td>
                         <td className="p-3">
                           {p.income_tax_type === 'EIGHT_PERCENT' ? (
@@ -389,7 +398,24 @@ export const AnnualTaxRegimesModal: React.FC<AnnualTaxRegimesModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+              {/* Classification */}
+              <div>
+                <label className="block text-zinc-400 font-semibold mb-1 text-[11px]">
+                  Classification (EOPT RA 11976)
+                </label>
+                <select
+                  value={taxpayerClassification}
+                  onChange={(e) => setTaxpayerClassification(e.target.value as any)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-zinc-900 text-white font-semibold focus:border-purple-500 focus:outline-hidden"
+                >
+                  <option value="MICRO">Micro (&lt; ₱3M Sales)</option>
+                  <option value="SMALL">Small (₱3M to &lt; ₱20M)</option>
+                  <option value="MEDIUM">Medium (₱20M to &lt; ₱1B)</option>
+                  <option value="LARGE">Large (₱1B+)</option>
+                </select>
+              </div>
+
               {/* VAT Registration for that year */}
               <div>
                 <label className="block text-zinc-400 font-semibold mb-1 text-[11px]">
@@ -422,7 +448,7 @@ export const AnnualTaxRegimesModal: React.FC<AnnualTaxRegimesModalProps> = ({
                     className="rounded border-zinc-700 text-purple-600 focus:ring-purple-500 h-4 w-4"
                   />
                   <label htmlFor="allow250k" className="text-zinc-300 text-xs">
-                    Allow ₱250,000 threshold deduction (pure business income)
+                    Allow ₱250k deduction
                   </label>
                 </div>
               </div>
@@ -434,7 +460,7 @@ export const AnnualTaxRegimesModal: React.FC<AnnualTaxRegimesModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Switched to OSD per Q1 1701Q election"
+                  placeholder="e.g. Switched to OSD per Q1 1701Q"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-zinc-900 text-white focus:border-purple-500 focus:outline-hidden"

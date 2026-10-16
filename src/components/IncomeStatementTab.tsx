@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
-import { TrendingUp, FileText, CheckCircle2 } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { TrendingUp, FileText, CheckCircle2, Calendar } from 'lucide-react';
 import { Sale, Expense, PPEAsset, SpecialEntry, PayrollRecord, Company } from '../types';
 import { computeAccountingSummaries } from '../utils/accounting';
+import { getAvailableTaxYears } from '../utils/taxProfiles';
 
 interface IncomeStatementTabProps {
   sales: Sale[];
@@ -11,6 +12,8 @@ interface IncomeStatementTabProps {
   payrollRecords?: PayrollRecord[];
   activeCompany: Company | null;
   theme: any;
+  selectedYear?: number;
+  onYearChange?: (year: number) => void;
 }
 
 export default function IncomeStatementTab({
@@ -20,17 +23,61 @@ export default function IncomeStatementTab({
   specialEntries,
   payrollRecords = [],
   activeCompany,
-  theme
+  theme,
+  selectedYear: propYear,
+  onYearChange
 }: IncomeStatementTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const [presentationMode, setPresentationMode] = React.useState<'single' | 'two_statement'>('single');
 
+  // Selectable years: strictly present year + years with input transactions
+  const availableYears = useMemo(() => {
+    return getAvailableTaxYears(activeCompany, [...sales, ...expenses]);
+  }, [activeCompany, sales, expenses]);
+
+  const defaultYear = propYear || (availableYears.length > 0 ? availableYears[0] : new Date().getFullYear());
+  const [currentYear, setCurrentYear] = useState<number>(defaultYear);
+
+  useEffect(() => {
+    if (propYear && propYear !== currentYear) {
+      setCurrentYear(propYear);
+    }
+  }, [propYear]);
+
+  const handleYearSelect = (yr: number) => {
+    setCurrentYear(yr);
+    if (onYearChange) onYearChange(yr);
+  };
+
   const incomeStatementData = useMemo(() => {
-    const compSales = sales.filter(s => !activeCompanyName || s.company_name === activeCompanyName);
-    const compExp = expenses.filter(e => !activeCompanyName || e.company_name === activeCompanyName);
+    const yrStr = String(currentYear);
+
+    // Strict year boundary filtering to prevent prior year leakage into current period
+    const compSales = sales.filter(s => {
+      if (activeCompanyName && s.company_name && s.company_name !== activeCompanyName) return false;
+      const d = s.invoice_date || s.issue_date || (s as any).date || '';
+      return d.startsWith(yrStr);
+    });
+
+    const compExp = expenses.filter(e => {
+      if (activeCompanyName && e.company_name && e.company_name !== activeCompanyName) return false;
+      const d = e.expense_date || (e as any).date || '';
+      return d.startsWith(yrStr);
+    });
+
     const compPpe = ppeAssets.filter(p => !activeCompanyName || p.company_name === activeCompanyName);
-    const compSpecial = specialEntries.filter(s => !activeCompanyName || s.company_name === activeCompanyName);
-    const compPayroll = payrollRecords.filter(p => !activeCompanyName || p.company_name === activeCompanyName);
+    
+    const compSpecial = specialEntries.filter(s => {
+      if (activeCompanyName && s.company_name && s.company_name !== activeCompanyName) return false;
+      const d = (s as any).date || (s as any).special_entry_date || (s as any).entry_date || '';
+      return d.startsWith(yrStr);
+    });
+
+    const compPayroll = payrollRecords.filter(p => {
+      if (activeCompanyName && p.company_name && p.company_name !== activeCompanyName) return false;
+      const d = (p as any).period_end || (p as any).date || '';
+      return !d || d.startsWith(yrStr);
+    });
 
     const s = computeAccountingSummaries({
       sales: compSales,
@@ -63,15 +110,35 @@ export default function IncomeStatementTab({
       actuarialRemeasurementOCI: s.actuarialRemeasurementOCI,
       fvociReserveOCI: s.fvociReserveOCI,
       totalOCI: s.totalOCI,
-      totalComprehensiveIncome: s.totalComprehensiveIncome
+      totalComprehensiveIncome: s.totalComprehensiveIncome,
+      periodSalesCount: compSales.length,
+      periodExpCount: compExp.length
     };
-  }, [sales, expenses, ppeAssets, specialEntries, payrollRecords, activeCompanyName]);
+  }, [sales, expenses, ppeAssets, specialEntries, payrollRecords, activeCompanyName, currentYear]);
 
   return (
     <div className="flex flex-col gap-4 w-full">
       <div className={`${theme.bgCard} border ${theme.borderCard} rounded-2xl shadow-sm p-4 transition-colors duration-200`}>
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-500/10 border border-zinc-700/30 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Fiscal Year Selector (Present Year + Input Years Only) */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-700 bg-zinc-900/80 text-xs font-bold text-white shadow-xs">
+              <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-zinc-400 font-medium">Fiscal Year:</span>
+              <select
+                value={currentYear}
+                onChange={(e) => handleYearSelect(Number(e.target.value))}
+                className="bg-transparent text-cyan-400 font-bold focus:outline-hidden cursor-pointer"
+              >
+                {availableYears.map(yr => (
+                  <option key={yr} value={yr} className="bg-zinc-900 text-white">
+                    {yr}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-500/10 border border-zinc-700/30 text-xs">
               <button
                 type="button"
                 onClick={() => setPresentationMode('single')}
@@ -91,6 +158,7 @@ export default function IncomeStatementTab({
                 Two-Statement Setup (PAS 1.81B)
               </button>
             </div>
+          </div>
 
             <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl font-mono text-right">
               <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Total Comprehensive Income:</span>

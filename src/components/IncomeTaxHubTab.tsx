@@ -30,6 +30,7 @@ import {
   getTaxpayerClassification 
 } from '../utils/statutoryTaxEngine';
 import BIR2307CertificateView from './BIR2307CertificateView';
+import BookToTaxSchedule from './BookToTaxSchedule';
 import {
   normalizeTransactions,
   latestPeriod,
@@ -54,7 +55,8 @@ export type IncomeTaxSubTab =
   | 'itax_1701' 
   | 'itax_1702rt' 
   | 'itax_1702ex' 
-  | 'itax_sawt';
+  | 'itax_sawt'
+  | 'itax_book_to_tax';
 
 /**
  * Individuals strictly means: Sole Proprietor and Professionals only.
@@ -584,6 +586,19 @@ function isSampleTransaction(record: any): boolean {
         >
           <FileCheck2 className="w-4 h-4" />
           <span>SAWT[attachment to ITR]</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('itax_book_to_tax')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeSubTab === 'itax_book_to_tax'
+              ? 'bg-violet-600 text-white shadow-sm'
+              : `${theme.textMuted} hover:${theme.textTitle} hover:bg-black/5 dark:hover:bg-white/5`
+          }`}
+        >
+          <Scale className="w-4 h-4 text-purple-400" />
+          <span>Book-to-Tax Reconciliation</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">Sch 4 / Part VI</span>
         </button>
       </div>
 
@@ -1475,6 +1490,23 @@ function isSampleTransaction(record: any): boolean {
           })()}
 
         </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB CONTENT 5: BOOK-TO-TAX RECONCILIATION SCHEDULE (PFRS vs. NIRC)   */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'itax_book_to_tax' && (
+        <BookToTaxSchedule
+          sales={sales}
+          expenses={expenses}
+          ppeAssets={ppeAssets}
+          specialEntries={specialEntries}
+          activeCompany={activeCompany}
+          theme={theme}
+          triggerAlert={triggerAlert}
+          selectedYear={Number(taxYear) || new Date().getFullYear()}
+          onYearChange={(yr) => setTaxYear(String(yr))}
+        />
       )}
 
       {/* POPUP MODAL: ANNUAL TAX REGIMES LEDGER */}

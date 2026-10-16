@@ -2250,6 +2250,8 @@ export default function App() {
                   payrollRecords={companyPayrollRecords}
                   activeCompany={activeCompany}
                   theme={activeTheme}
+                  selectedYear={selectedYear}
+                  onYearChange={setSelectedYear}
                 />
               )}
 
@@ -2360,6 +2362,7 @@ export default function App() {
                     activeTab === 'itax_1702rt' ? 'itax_1702rt' :
                     activeTab === 'itax_1702ex' ? 'itax_1702ex' :
                     activeTab === 'itax_sawt' || activeTab === 'bir_sawt' || activeTab === 'cwt_customers' ? 'itax_sawt' :
+                    activeTab === 'itax_book_to_tax' || activeTab === 'book_to_tax' ? 'itax_book_to_tax' :
                     activeTab === 'itax_1701' ? 'itax_1701' :
                     activeCompany?.entity_type && !isIndividualEntity(activeCompany?.entity_type) ? 'itax_1702rt' :
                     'itax_1701'
@@ -2367,7 +2370,7 @@ export default function App() {
                 />
               )}
 
-              {(activeTab === 'reports' || activeTab === 'reports_turnovers' || activeTab === 'reports_horizontal' || activeTab === 'reports_vertical' || activeTab === 'reports_ratios') && (
+              {(activeTab === 'reports' || activeTab === 'reports_turnovers' || activeTab === 'reports_horizontal' || activeTab === 'reports_vertical' || activeTab === 'reports_ratios' || activeTab === 'reports_book_to_tax') && (
                 <ReportsTab 
                   sales={companySales}
                   collections={companyCollections}
@@ -2383,7 +2386,8 @@ export default function App() {
                   initialSubTab={
                     activeTab === 'reports_horizontal' ? 'horizontal' :
                     activeTab === 'reports_vertical' ? 'vertical' :
-                    activeTab === 'reports_ratios' ? 'ratios' : 'turnovers'
+                    activeTab === 'reports_ratios' ? 'ratios' :
+                    activeTab === 'reports_book_to_tax' ? 'book_to_tax' : 'turnovers'
                   }
                   selectedMonthIdx={selectedMonthIdx}
                   selectedYear={selectedYear}

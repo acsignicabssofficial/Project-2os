@@ -42,6 +42,7 @@ import {
 } from 'recharts';
 import { Sale, Collection, Expense, Payment, SpecialEntry, PPEAsset, PayrollRecord, AccountTitle, Company } from '../types';
 import { safeNum } from '../utils/accounting';
+import BookToTaxSchedule from './BookToTaxSchedule';
 
 interface ReportsTabProps {
   sales: Sale[];
@@ -55,7 +56,7 @@ interface ReportsTabProps {
   activeCompany: Company | null;
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
-  initialSubTab?: 'turnovers' | 'horizontal' | 'vertical' | 'ratios' | 'exports';
+  initialSubTab?: 'turnovers' | 'horizontal' | 'vertical' | 'ratios' | 'exports' | 'book_to_tax';
   selectedMonthIdx?: number;
   selectedYear?: number;
   selectedPrefix?: string;
@@ -85,7 +86,7 @@ export default function ReportsTab({
   selectedPrefix: propPrefix = 'FOR THE MONTH OF',
   onMonthYearChange
 }: ReportsTabProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'turnovers' | 'horizontal' | 'vertical' | 'ratios' | 'exports'>(initialSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<'turnovers' | 'horizontal' | 'vertical' | 'ratios' | 'exports' | 'book_to_tax'>(initialSubTab);
   const [privacyMode, setPrivacyMode] = useState(false);
   
   // Period filter mode: default to 'year' so all transactions in fiscal year are immediately visible
@@ -447,6 +448,15 @@ export default function ReportsTab({
               <Download className="w-3 h-3" />
               <span>Export Schedules</span>
             </button>
+            <button
+              onClick={() => setActiveSubTab('book_to_tax')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition cursor-pointer ${
+                activeSubTab === 'book_to_tax' ? 'bg-purple-600 text-white shadow-xs' : `${theme.textMuted} hover:text-purple-400`
+              }`}
+            >
+              <Scale className="w-3 h-3 text-purple-300" />
+              <span>Book-to-Tax (PFRS vs. BIR)</span>
+            </button>
           </div>
 
           <span className="text-[10px] text-zinc-400 font-mono hidden sm:inline whitespace-nowrap">
@@ -456,67 +466,69 @@ export default function ReportsTab({
       </div>
 
       {/* 2. TOP COMPACT 4-KPI SUMMARY GRID */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-        <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col justify-between`}>
-          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-            <span>NET REVENUE</span>
-            <span className="text-emerald-500 font-bold">100%</span>
-          </div>
-          <div className="my-1">
-            <div className={`text-base sm:text-lg font-black font-mono ${theme.textTitle}`}>
-              {fmtMoney(totalSales)}
+      {activeSubTab !== 'book_to_tax' && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col justify-between`}>
+            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+              <span>NET REVENUE</span>
+              <span className="text-emerald-500 font-bold">100%</span>
             </div>
-            <div className="text-[10px] font-mono text-zinc-400">
-              Collections: <strong className="text-cyan-400">{fmtShortMoney(totalCollections)}</strong>
+            <div className="my-1">
+              <div className={`text-base sm:text-lg font-black font-mono ${theme.textTitle}`}>
+                {fmtMoney(totalSales)}
+              </div>
+              <div className="text-[10px] font-mono text-zinc-400">
+                Collections: <strong className="text-cyan-400">{fmtShortMoney(totalCollections)}</strong>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col justify-between`}>
-          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-            <span>GROSS PROFIT</span>
-            <span className="text-cyan-500 font-bold">{grossMargin.toFixed(1)}%</span>
-          </div>
-          <div className="my-1">
-            <div className={`text-base sm:text-lg font-black font-mono ${grossProfit >= 0 ? 'text-cyan-400' : 'text-rose-500'}`}>
-              {fmtMoney(grossProfit)}
+          <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col justify-between`}>
+            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+              <span>GROSS PROFIT</span>
+              <span className="text-cyan-500 font-bold">{grossMargin.toFixed(1)}%</span>
             </div>
-            <div className="text-[10px] font-mono text-zinc-400">
-              COGS: {fmtShortMoney(costOfSales)}
+            <div className="my-1">
+              <div className={`text-base sm:text-lg font-black font-mono ${grossProfit >= 0 ? 'text-cyan-400' : 'text-rose-500'}`}>
+                {fmtMoney(grossProfit)}
+              </div>
+              <div className="text-[10px] font-mono text-zinc-400">
+                COGS: {fmtShortMoney(costOfSales)}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col justify-between`}>
-          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-            <span>OPERATING INCOME</span>
-            <span className="text-amber-500 font-bold">{operatingMargin.toFixed(1)}%</span>
-          </div>
-          <div className="my-1">
-            <div className={`text-base sm:text-lg font-black font-mono ${operatingIncome >= 0 ? theme.textTitle : 'text-rose-500'}`}>
-              {fmtMoney(operatingIncome)}
+          <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col justify-between`}>
+            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+              <span>OPERATING INCOME</span>
+              <span className="text-amber-500 font-bold">{operatingMargin.toFixed(1)}%</span>
             </div>
-            <div className="text-[10px] font-mono text-zinc-400">
-              OPEX: {fmtShortMoney(opex)}
+            <div className="my-1">
+              <div className={`text-base sm:text-lg font-black font-mono ${operatingIncome >= 0 ? theme.textTitle : 'text-rose-500'}`}>
+                {fmtMoney(operatingIncome)}
+              </div>
+              <div className="text-[10px] font-mono text-zinc-400">
+                OPEX: {fmtShortMoney(opex)}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col justify-between`}>
-          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-            <span>NET PROFIT (NIAT)</span>
-            <span className="text-emerald-500 font-bold">{netProfitMargin.toFixed(1)}%</span>
-          </div>
-          <div className="my-1">
-            <div className={`text-base sm:text-lg font-black font-mono text-emerald-500`}>
-              {fmtMoney(netIncome)}
+          <div className={`p-3 rounded-xl border ${theme.borderCard} ${theme.bgCard} shadow-xs flex flex-col justify-between`}>
+            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+              <span>NET PROFIT (NIAT)</span>
+              <span className="text-emerald-500 font-bold">{netProfitMargin.toFixed(1)}%</span>
             </div>
-            <div className="text-[10px] font-mono text-zinc-400">
-              Income Tax: {fmtShortMoney(incomeTaxExpense)}
+            <div className="my-1">
+              <div className={`text-base sm:text-lg font-black font-mono text-emerald-500`}>
+                {fmtMoney(netIncome)}
+              </div>
+              <div className="text-[10px] font-mono text-zinc-400">
+                Income Tax: {fmtShortMoney(incomeTaxExpense)}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* 3. SUBTAB VIEWS */}
 
@@ -1091,6 +1103,21 @@ export default function ReportsTab({
             </button>
           </div>
         </div>
+      )}
+
+      {/* SUBTAB 6: BOOK-TO-TAX RECONCILIATION */}
+      {activeSubTab === 'book_to_tax' && (
+        <BookToTaxSchedule
+          sales={sales}
+          expenses={expenses}
+          ppeAssets={ppeAssets}
+          specialEntries={specialEntries}
+          activeCompany={activeCompany}
+          theme={theme}
+          triggerAlert={triggerAlert}
+          selectedYear={currentYear}
+          onYearChange={(yr) => setCurrentYear(yr)}
+        />
       )}
 
     </div>

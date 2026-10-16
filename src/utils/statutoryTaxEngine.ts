@@ -124,7 +124,7 @@ export const STATUTORY_TAX_RULES: StatutoryTaxRule[] = [
     shortName: 'EOPT Act (2024–Present)',
     citation: 'Republic Act No. 11976 / RR 3-2024, RR 4-2024, RR 8-2024, RR 11-2024',
     effectiveFrom: '2024-01-22',
-    // Ongoing/current law
+    effectiveTo: '2024-12-31',
     percentageTaxRate: 3,
     rcitRateRegular: 0.25,
     rcitRateMsme: 0.20,
@@ -144,6 +144,30 @@ export const STATUTORY_TAX_RULES: StatutoryTaxRule[] = [
       'CIVIL PENALTY REDUCTION: Micro & Small enjoy 10% surcharge (vs 25%) and 50% interest rate reduction',
       'FILE & PAY ANYWHERE: Tax returns may be filed and taxes paid at ANY authorized agent bank/RDO nationwide without 25% surcharge',
       'SIMPLIFIED RETURNS: Maximum 2-page return for Micro and Small taxpayers'
+    ]
+  },
+  {
+    code: 'CREATE_MORE',
+    name: 'CREATE MORE Act & EOPT Regime (RA 12066)',
+    shortName: 'CREATE MORE (2025–Present)',
+    citation: 'Republic Act No. 12066 & RA 11976 (Enacted Nov 2024, effective 2025+)',
+    effectiveFrom: '2025-01-01',
+    percentageTaxRate: 3,
+    rcitRateRegular: 0.25,
+    rcitRateMsme: 0.20,
+    mcitRate: 0.02,
+    vatThreshold: 3000000,
+    eightPercentOptionAllowed: true,
+    eightPercentExemptionAmount: 250000,
+    primaryDocumentType: 'INVOICE',
+    microSmallPenaltyReduction: true,
+    microExemptionWithholding: true,
+    keyFeatures: [
+      'RBE INCENTIVES: Refined 20% corporate income tax rate on registered business enterprises under enhanced deductions',
+      'VAT ZERO-RATING & REFUND: Streamlined electronic processing and 90-day BIR decision timeline for VAT refunds',
+      'CONTINUATION OF EOPT: Harmonized Invoice substantiation, 4-tier taxpayer categorization, reduced penalties for Micro/Small',
+      'RIT & OSD RULES: 40% OSD retained, 8% Gross Income Tax option preserved for eligible non-VAT individuals',
+      'ENHANCED DEDUCTIONS: Additional 50% power expense deduction, trade exhibition expenses, and local tax ceilings'
     ]
   }
 ];

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Calendar as CalendarIcon, 
   X, 
@@ -16,7 +16,8 @@ interface PeriodModalProps {
   selectedYear: number;
   selectedPrefix: string;
   onApply: (monthIdx: number, year: number, prefix: string) => void;
-  themeMode: ThemeMode;
+  themeMode?: ThemeMode;
+  availableYears?: number[];
 }
 
 const MONTHS = [
@@ -62,8 +63,6 @@ const PREFIX_OPTIONS = [
   },
 ];
 
-const COMMON_YEARS = [2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030];
-
 export default function PeriodModal({
   isOpen,
   onClose,
@@ -71,11 +70,22 @@ export default function PeriodModal({
   selectedYear,
   selectedPrefix,
   onApply,
-  themeMode
+  themeMode,
+  availableYears
 }: PeriodModalProps) {
   const [tempMonth, setTempMonth] = useState<number>(selectedMonthIdx);
   const [tempYear, setTempYear] = useState<number>(selectedYear);
   const [tempPrefix, setTempPrefix] = useState<string>(selectedPrefix || 'FOR THE MONTH OF');
+
+  const presentYear = new Date().getFullYear();
+  const selectableYears = useMemo(() => {
+    if (availableYears && availableYears.length > 0) {
+      const set = new Set([presentYear, ...availableYears, tempYear, selectedYear]);
+      return Array.from(set).sort((a, b) => b - a);
+    }
+    const set = new Set([presentYear, tempYear, selectedYear]);
+    return Array.from(set).sort((a, b) => b - a);
+  }, [availableYears, tempYear, selectedYear, presentYear]);
 
   // Sync state when opening
   useEffect(() => {
@@ -250,7 +260,7 @@ export default function PeriodModal({
           </div>
           
           <div className="flex flex-wrap gap-1.5">
-            {COMMON_YEARS.map((yr) => {
+            {selectableYears.map((yr) => {
               const isSelected = tempYear === yr;
               return (
                 <button

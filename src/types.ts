@@ -60,6 +60,7 @@ export interface EntityTaxYearProfile {
   vat_or_non_vat?: 'VATABLE' | 'NON-VAT' | 'EXEMPT';
   allow_250k_exemption?: boolean;
   notes?: string;
+  taxpayer_classification?: 'MICRO' | 'SMALL' | 'MEDIUM' | 'LARGE';
 }
 
 export type StatutoryTaxEraCode = 
@@ -68,6 +69,7 @@ export type StatutoryTaxEraCode =
   | 'CREATE_RELIEF' 
   | 'CREATE_PERMANENT' 
   | 'EOPT' 
+  | 'CREATE_MORE'
   | 'CUSTOM';
 
 export interface StatutoryTaxRule {

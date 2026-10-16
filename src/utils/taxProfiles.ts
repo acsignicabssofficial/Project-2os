@@ -43,7 +43,8 @@ export function getEntityTaxProfileForYear(
     expense_deduction_type: defaultIncomeTaxType === 'EIGHT_PERCENT' ? 'ITEMIZED' : defaultExpenseDeduction,
     vat_or_non_vat: defaultVat,
     allow_250k_exemption: true,
-    notes: 'Default registration profile'
+    notes: 'Default registration profile',
+    taxpayer_classification: 'MICRO'
   };
 
   if (!company || !company.tax_year_profiles || company.tax_year_profiles.length === 0) {
@@ -60,7 +61,8 @@ export function getEntityTaxProfileForYear(
       expense_deduction_type: finalTaxType === 'EIGHT_PERCENT' ? 'ITEMIZED' : (match.expense_deduction_type || 'ITEMIZED'),
       vat_or_non_vat: match.vat_or_non_vat || defaultVat,
       allow_250k_exemption: match.allow_250k_exemption !== false,
-      notes: match.notes || ''
+      notes: match.notes || '',
+      taxpayer_classification: match.taxpayer_classification || 'MICRO'
     };
   }
 
@@ -84,7 +86,8 @@ export function upsertEntityTaxProfile(
     expense_deduction_type: profile.income_tax_type === 'EIGHT_PERCENT' ? 'ITEMIZED' : profile.expense_deduction_type,
     vat_or_non_vat: profile.vat_or_non_vat || 'NON-VAT',
     allow_250k_exemption: profile.allow_250k_exemption !== false,
-    notes: (profile.notes || '').trim()
+    notes: (profile.notes || '').trim(),
+    taxpayer_classification: profile.taxpayer_classification || 'MICRO'
   };
 
   if (idx >= 0) {
@@ -114,8 +117,10 @@ export function removeEntityTaxProfile(company: Company, year: number): Company 
 }
 
 /**
- * Generates an array of available tax years spanning from 2018 through 2030,
- * plus any years detected in company profiles and transactions.
+ * Generates an array of available tax years containing ONLY:
+ * 1. The present year (current calendar year)
+ * 2. Any other years that have actual input transactions or configured tax profiles.
+ * Example: If transactions exist for 2015 and the current year is 2026, returns [2026, 2015].
  */
 export function getAvailableTaxYears(
   company?: Company | null,
@@ -123,29 +128,28 @@ export function getAvailableTaxYears(
 ): number[] {
   const yearsSet = new Set<number>();
 
-  // Baseline standard range (covers TRAIN law 2018 up to future 2028)
-  for (let y = 2018; y <= 2028; y++) {
-    yearsSet.add(y);
-  }
+  // 1. Present calendar year is always included
+  const presentYear = new Date().getFullYear();
+  yearsSet.add(presentYear);
 
-  // Include configured years in entity profiles
-  if (company?.tax_year_profiles) {
-    company.tax_year_profiles.forEach(p => {
-      const yr = Number(p.year);
-      if (!isNaN(yr) && yr > 1900) yearsSet.add(yr);
-    });
-  }
-
-  // Include years found in transactions
+  // 2. Include any years found in actual input transactions
   if (Array.isArray(transactions)) {
     transactions.forEach(t => {
-      const d = t?.invoice_date || t?.expense_date || t?.date || t?.transaction_date || t?.issue_date;
+      const d = t?.invoice_date || t?.expense_date || t?.date || t?.transaction_date || t?.issue_date || t?.collection_date || t?.payment_date;
       if (typeof d === 'string' && d.length >= 4) {
         const yr = parseInt(d.slice(0, 4), 10);
-        if (!isNaN(yr) && yr > 1900) yearsSet.add(yr);
+        if (!isNaN(yr) && yr > 1900 && yr < 2100) yearsSet.add(yr);
       }
     });
   }
 
-  return Array.from(yearsSet).sort((a, b) => b - a); // Descending (e.g. 2028, 2027, 2026, ...)
+  // 3. Include any years configured in company tax profiles
+  if (company?.tax_year_profiles) {
+    company.tax_year_profiles.forEach(p => {
+      const yr = Number(p.year);
+      if (!isNaN(yr) && yr > 1900 && yr < 2100) yearsSet.add(yr);
+    });
+  }
+
+  return Array.from(yearsSet).sort((a, b) => b - a); // Descending (e.g. 2026, 2015)
 }
