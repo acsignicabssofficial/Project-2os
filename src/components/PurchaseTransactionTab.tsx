@@ -17,7 +17,9 @@ import {
   Layers,
   ArrowDownRight,
   Trash2,
-  Eye
+  Eye,
+  AlertTriangle,
+  Unlock
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import AutoSuggestInput from './AutoSuggestInput';
@@ -44,6 +46,7 @@ interface PurchaseTransactionTabProps {
   setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
   onDeleteRecord?: (bookType: string, record: UniformBookRecord) => void;
   closedFiscalYears?: string[];
+  onUpdateClosedFiscalYears?: (years: string[]) => void;
 }
 
 export default function PurchaseTransactionTab({
@@ -65,7 +68,8 @@ export default function PurchaseTransactionTab({
   specialEntries = [],
   setSpecialEntries,
   onDeleteRecord,
-  closedFiscalYears = []
+  closedFiscalYears = [],
+  onUpdateClosedFiscalYears
 }: PurchaseTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   // Company-scoped, blank-safe matching between a payable (voucher / invoice) and its Payments Book rows
@@ -419,6 +423,7 @@ export default function PurchaseTransactionTab({
       created_at: nowIso,
       // Compatibility aliases for BIR tools, Reports, Notes to FS
       expense_date: date,
+      record_date: new Date().toISOString().slice(0, 10),
       issue_date: date,
       expense_invoice_amount: liveFormulas.total_amount_vat_inclusive || liveFormulas.amount,
       vatable_expense: liveFormulas.vatable_purchases,
@@ -1146,6 +1151,60 @@ export default function PurchaseTransactionTab({
               </div>
             </div>
 
+            {/* REAL-TIME FISCAL YEAR OPEN / CLOSED AUDIT STATUS BANNER */}
+            {(() => {
+              const expYear = (date || '').slice(0, 4);
+              const curYear = String(new Date().getFullYear());
+              const todayRecordDate = new Date().toISOString().slice(0, 10);
+              const isYearClosed = closedFiscalYears && closedFiscalYears.includes(expYear) && expYear !== curYear;
+
+              return (
+                <div className={`p-3 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all ${
+                  isYearClosed
+                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                }`}>
+                  <div className="flex items-start sm:items-center gap-2.5">
+                    {isYearClosed ? (
+                      <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0 mt-0.5 sm:mt-0">
+                        <Lock className="w-4 h-4" />
+                      </div>
+                    ) : (
+                      <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 shrink-0 mt-0.5 sm:mt-0">
+                        <Unlock className="w-4 h-4" />
+                      </div>
+                    )}
+                    <div>
+                      <div className="font-bold flex items-center gap-2 flex-wrap">
+                        <span>Date of Expense: <strong className="font-mono text-white">{date}</strong> (FY {expYear})</span>
+                        <span className="opacity-50">&bull;</span>
+                        <span>Record Date: <strong className="font-mono text-purple-300">Today ({todayRecordDate})</strong></span>
+                      </div>
+                      <p className="text-[11px] mt-0.5 opacity-90 leading-tight">
+                        {isYearClosed ? (
+                          <span>
+                            <strong>Books for FY {expYear} are CLOSED &amp; REVERSED:</strong> Under <strong>Option B (PAS 8)</strong>, FY {expYear} expenses will not change. This entry will be recognized in present year ({curYear}) records via Retained Earnings [3020]. (Reopening is also available).
+                          </span>
+                        ) : (
+                          <span>
+                            <strong>Books for FY {expYear} are OPEN:</strong> This transaction will be posted directly into FY {expYear} Purchases/Expenses and nominal accounts.
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase font-mono tracking-wider shrink-0 self-start sm:self-auto border ${
+                    isYearClosed
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  }`}>
+                    {isYearClosed ? `FY ${expYear} CLOSED (OPTION B)` : `FY ${expYear} OPEN`}
+                  </span>
+                </div>
+              );
+            })()}
+
             <div>
               <label className={`block text-xs font-bold mb-1 ${theme.textMuted}`}>Provider Registered Address</label>
               <input
@@ -1715,7 +1774,7 @@ export default function PurchaseTransactionTab({
         </div>
       )}
 
-      {/* OPTION C: PRIOR-YEAR CLOSED FISCAL PERIOD CONFIRMATION MODAL */}
+      {/* OPTION B: PRIOR-YEAR CLOSED FISCAL PERIOD CONFIRMATION MODAL */}
       {priorYearWarning && (
         <div className="fixed inset-0 z-[220] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg p-6 rounded-3xl border ${isDark ? 'bg-zinc-950 border-amber-500/40 text-zinc-100' : 'bg-white border-amber-400 text-slate-900'} shadow-2xl space-y-4`}>
@@ -1725,7 +1784,7 @@ export default function PurchaseTransactionTab({
               </div>
               <div>
                 <h3 className="text-base font-black">
-                  Prior-Year Transaction Warning (Option C - PAS 8)
+                  Prior-Period Transaction Detected (Option B)
                 </h3>
                 <p className="text-xs text-amber-500 font-bold">
                   Fiscal Year {priorYearWarning.invoiceYear} Books of Accounts are CLOSED &amp; REVERSED
@@ -1735,35 +1794,54 @@ export default function PurchaseTransactionTab({
 
             <div className="p-4 rounded-2xl bg-black/30 border border-zinc-800 text-xs space-y-2 leading-relaxed">
               <p className="text-zinc-200">
-                You are recording a purchase / expense transaction dated <strong>{date}</strong> (Fiscal Year <strong>{priorYearWarning.invoiceYear}</strong>).
+                You are recording a purchase / expense transaction dated <strong>{date}</strong> (Fiscal Year <strong>{priorYearWarning.invoiceYear}</strong>) with a system record date of today (<strong>{new Date().toISOString().slice(0, 10)}</strong>).
               </p>
               <p className="text-zinc-300">
-                Under Philippine Financial Reporting Standards (PAS 8 - Accounting Policies, Changes in Accounting Estimates and Errors) and BIR rules:
+                Under Philippine Accounting Standards (PAS 8 - Prior Period Adjustments) and BIR compliance rules, choose how to treat this entry:
               </p>
               <ul className="list-disc list-inside space-y-1.5 text-zinc-400">
-                <li>The audited books and expenses of closed FY <strong>{priorYearWarning.invoiceYear}</strong> will <strong>NOT be altered</strong> retrospectively.</li>
-                <li>This transaction will be recognized as a <strong>Prior-Period Omission</strong> and will reflect in the <strong>present active year ({priorYearWarning.currentYear})</strong>.</li>
-                <li>A permanent audit log will be created in the <strong>Entity Status &amp; Compliance Hub</strong>.</li>
+                <li><strong>Choice 1 (Post to Present Year):</strong> Books of closed FY {priorYearWarning.invoiceYear} remain closed and unaltered. This omission is recognized in present year {priorYearWarning.currentYear} records via Retained Earnings [3020].</li>
+                <li><strong>Choice 2 (Reopen Fiscal Year):</strong> Unlocks FY {priorYearWarning.invoiceYear} books upon supervisory authorization to record directly into FY {priorYearWarning.invoiceYear} expenses and nominal accounts.</li>
               </ul>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <div className="flex flex-col gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => {
                   setPriorYearWarning(null);
                   handleSubmitPurchase(undefined, true);
                 }}
-                className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-sm cursor-pointer"
+                className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-sm cursor-pointer text-left flex items-center justify-between"
               >
-                ✓ Proceed &amp; Post to Present Year ({priorYearWarning.currentYear}) (Option C)
+                <span>✓ Option B (Choice 1): Post to Present Year ({priorYearWarning.currentYear}) via PAS 8 Retained Earnings</span>
+                <ArrowRight className="w-4 h-4 shrink-0" />
               </button>
+
+              {onUpdateClosedFiscalYears && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const yearToReopen = priorYearWarning.invoiceYear;
+                    const updatedYears = closedFiscalYears.filter(y => y !== yearToReopen);
+                    onUpdateClosedFiscalYears(updatedYears);
+                    triggerAlert(`Fiscal Year ${yearToReopen} books have been reopened upon authorization. Transaction will be recorded directly into FY ${yearToReopen} expenses.`, 'info');
+                    setPriorYearWarning(null);
+                    handleSubmitPurchase(undefined, false);
+                  }}
+                  className="w-full px-4 py-2.5 text-xs font-bold rounded-xl border border-cyan-500/50 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 transition shadow-sm cursor-pointer text-left flex items-center justify-between"
+                >
+                  <span>🔓 Option B (Choice 2): Reopen Fiscal Year {priorYearWarning.invoiceYear} &amp; Record Directly</span>
+                  <Unlock className="w-4 h-4 shrink-0" />
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setPriorYearWarning(null)}
-                className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-zinc-700 hover:bg-white/5 transition cursor-pointer"
+                className="w-full px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-700 hover:bg-white/5 transition cursor-pointer text-center"
               >
-                Cancel
+                Cancel Transaction
               </button>
             </div>
           </div>

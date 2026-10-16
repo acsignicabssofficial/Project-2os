@@ -835,5 +835,11 @@ export interface UniformBookRecord {
   vatable_expense?: number;
   vatable_expense_amount?: number;
   ewt_amount?: number;
+  record_date?: string;
+  date_of_sale?: string;
+  is_prior_year_omission?: boolean;
+  original_year?: string;
+  effective_year?: string;
+  omission_acknowledged_at?: string;
 }
 

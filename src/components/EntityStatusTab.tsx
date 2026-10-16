@@ -27,7 +27,8 @@ import {
   X,
   FilePlus,
   ArrowUpRight,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Scale
 } from 'lucide-react';
 import {
   Company,
@@ -38,6 +39,7 @@ import {
   MissingInvoiceRecord,
   TaxComplianceStatusRecord
 } from '../types';
+import { buildMasterJournalEntries, getJournalImbalances } from '../utils/accounting';
 
 interface EntityStatusTabProps {
   activeCompany: Company | null;
@@ -75,7 +77,7 @@ export default function EntityStatusTab({
   triggerAlert
 }: EntityStatusTabProps) {
   // Active sub-section within Entity Status
-  const [activeSection, setActiveSection] = useState<'ALL' | 'BOOKS' | 'INVOICES' | 'TAX' | 'OMISSIONS'>('ALL');
+  const [activeSection, setActiveSection] = useState<'ALL' | 'BOOKS' | 'INVOICES' | 'IMBALANCES' | 'TAX' | 'OMISSIONS'>('ALL');
   const [selectedYearFilter, setSelectedYearFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -240,11 +242,12 @@ export default function EntityStatusTab({
     const list: MissingInvoiceRecord[] = [];
 
     // Group sales invoices by prefix pattern
-    const prefixMap: Record<string, { num: number; full: string; date: string; year: string }[]> = {};
+    const prefixMap: Record<string, { num: number; full: string; date: string; recordDate?: string; year: string; separator: string; numDigits: number; prefix: string }[]> = {};
 
     sales.forEach(s => {
       const invNo = (s.invoice_number || (s as any).invoice_no || '').trim();
       const dateStr = s.invoice_date || (s as any).date || '';
+      const recDate = s.record_date || (s as any).created_at?.slice(0, 10) || dateStr;
       const year = dateStr.slice(0, 4) || '2026';
 
       if (!invNo) {
@@ -263,19 +266,38 @@ export default function EntityStatusTab({
         return;
       }
 
-      // Match prefix and numeric portion (e.g. "INV-0001", "SI-1002", "005")
-      const match = invNo.match(/^([A-Za-z_-]*?)0*(\d+)$/);
-      if (match) {
-        const prefix = match[1] || 'NUM-';
-        const num = parseInt(match[2], 10);
-        if (!prefixMap[prefix]) prefixMap[prefix] = [];
-        prefixMap[prefix].push({ num, full: invNo, date: dateStr, year });
+      // Match prefix / invoice type and numeric portion (e.g. "Sales Invoice 001", "Sales Invoice_001", "INV-0001", "SI-1002", "005")
+      let prefix = '';
+      let separator = ' ';
+      let num = 0;
+      let numDigits = 3;
+
+      const spaceMatch = invNo.match(/^(.*?)([\s_-]+)0*(\d+)$/);
+      if (spaceMatch) {
+        prefix = spaceMatch[1].trim();
+        separator = spaceMatch[2];
+        num = parseInt(spaceMatch[3], 10);
+        numDigits = (invNo.match(/\d+$/) || ['000'])[0].length;
+      } else {
+        const simpleMatch = invNo.match(/^([A-Za-z_-]*?)0*(\d+)$/);
+        if (simpleMatch) {
+          prefix = simpleMatch[1] || 'Sales Invoice';
+          separator = simpleMatch[1] ? '' : ' ';
+          num = parseInt(simpleMatch[2], 10);
+          numDigits = (invNo.match(/\d+$/) || ['000'])[0].length;
+        }
+      }
+
+      if (num > 0) {
+        const groupKey = prefix || 'Sales Invoice';
+        if (!prefixMap[groupKey]) prefixMap[groupKey] = [];
+        prefixMap[groupKey].push({ num, full: invNo, date: dateStr, recordDate: recDate, year, separator, numDigits, prefix: groupKey });
       }
     });
 
     // Detect integer gaps in each prefix series
-    Object.keys(prefixMap).forEach(prefix => {
-      const entries = prefixMap[prefix].sort((a, b) => a.num - b.num);
+    Object.keys(prefixMap).forEach(groupKey => {
+      const entries = prefixMap[groupKey].sort((a, b) => a.num - b.num);
       if (entries.length < 2) return;
 
       const minNum = entries[0].num;
@@ -287,15 +309,13 @@ export default function EntityStatusTab({
 
       for (let n = minNum; n <= maxNum; n++) {
         if (!existingNums.has(n)) {
-          // Format missing invoice # according to prefix length
-          const sampleFull = entries[0].full;
-          const numDigits = (sampleFull.match(/\d+$/) || ['0000'])[0].length;
-          const formattedMissing = `${prefix}${String(n).padStart(numDigits, '0')}`;
+          const sample = entries[0];
+          const formattedMissing = `${sample.prefix}${sample.separator}${String(n).padStart(sample.numDigits, '0')}`;
           const isVoided = Boolean(voidedInvoices[formattedMissing]);
 
           list.push({
-            id: `gap-${prefix}-${n}`,
-            seriesPrefix: prefix,
+            id: `gap-${groupKey}-${n}`,
+            seriesPrefix: groupKey,
             missingNumber: n,
             formattedInvoiceNo: formattedMissing,
             type: 'SALES_INVOICE',
@@ -307,6 +327,39 @@ export default function EntityStatusTab({
               : `Numerical sequence skip: Invoice #${n} is absent between ${entries[0].full} and ${entries[entries.length - 1].full}.`
           });
         }
+      }
+    });
+
+    // Duplicate invoice number detector across transactions
+    const invoiceOccurrenceMap = new Map<string, Array<{ id: number; date: string; customer: string; full: string }>>();
+    sales.forEach(s => {
+      const invNo = (s.invoice_number || (s as any).invoice_no || '').trim();
+      if (!invNo) return;
+      const key = invNo.toLowerCase();
+      if (!invoiceOccurrenceMap.has(key)) {
+        invoiceOccurrenceMap.set(key, []);
+      }
+      invoiceOccurrenceMap.get(key)!.push({
+        id: s.id,
+        date: s.invoice_date || (s as any).date || '',
+        customer: s.customer_name || s.registered_name || 'Customer',
+        full: invNo
+      });
+    });
+
+    invoiceOccurrenceMap.forEach((occurrences) => {
+      if (occurrences.length > 1) {
+        list.push({
+          id: `dup-${occurrences[0].full}`,
+          seriesPrefix: 'DUPLICATE',
+          missingNumber: 0,
+          formattedInvoiceNo: `[DUPLICATE INVOICE] ${occurrences[0].full}`,
+          type: 'SALES_INVOICE',
+          year: occurrences[0].date.slice(0, 4) || '2026',
+          detectedAt: occurrences[0].date || new Date().toISOString(),
+          status: 'MISSING',
+          reason: `Invoice #${occurrences[0].full} is duplicated across ${occurrences.length} transactions (${occurrences.map(o => `${o.customer} on ${o.date}`).join(', ')}). BIR invoices must be strictly unique.`
+        });
       }
     });
 
@@ -333,6 +386,121 @@ export default function EntityStatusTab({
 
     return list;
   }, [sales, expenses, voidedInvoices]);
+
+  /* ========================================================================= */
+  /* 4. GENERAL LEDGER TRIAL BALANCE & IMBALANCES AUDITOR                      */
+  /* ========================================================================= */
+  const masterJournalEntries = useMemo(() => {
+    return buildMasterJournalEntries({
+      sales,
+      collections,
+      cashReceipts,
+      expenses,
+      payments,
+      cashDisbursements,
+      specialEntries,
+      accountTitles,
+      companyName
+    });
+  }, [sales, collections, cashReceipts, expenses, payments, cashDisbursements, specialEntries, accountTitles, companyName]);
+
+  const ledgerImbalanceAudit = useMemo(() => {
+    let totalDebits = 0;
+    let totalCredits = 0;
+    const accountBalances: Record<string, { code: string; title: string; debits: number; credits: number }> = {};
+
+    masterJournalEntries.forEach(entry => {
+      (entry.debits || []).forEach(l => {
+        const amt = Number(l.amount) || 0;
+        totalDebits += amt;
+        const code = l.account_code || '9999';
+        if (!accountBalances[code]) {
+          accountBalances[code] = { code, title: l.account_title || 'Unknown Account', debits: 0, credits: 0 };
+        }
+        accountBalances[code].debits += amt;
+      });
+
+      (entry.credits || []).forEach(l => {
+        const amt = Number(l.amount) || 0;
+        totalCredits += amt;
+        const code = l.account_code || '9999';
+        if (!accountBalances[code]) {
+          accountBalances[code] = { code, title: l.account_title || 'Unknown Account', debits: 0, credits: 0 };
+        }
+        accountBalances[code].credits += amt;
+      });
+    });
+
+    totalDebits = Math.round(totalDebits * 100) / 100;
+    totalCredits = Math.round(totalCredits * 100) / 100;
+    const discrepancy = Math.abs(Math.round((totalDebits - totalCredits) * 100) / 100);
+    const isBalanced = discrepancy < 0.01;
+
+    // Check individual voucher-level imbalances
+    const voucherImbalances = getJournalImbalances(masterJournalEntries);
+
+    // Sub-ledger vs GL Reconciliations:
+    // 1. Accounts Receivable [1020]
+    const glArDebits = accountBalances['1020']?.debits || 0;
+    const glArCredits = accountBalances['1020']?.credits || 0;
+    const glArBalance = Math.max(0, Math.round((glArDebits - glArCredits) * 100) / 100);
+
+    const subSalesArBalance = Math.round(
+      sales
+        .filter(s => s.status !== 'Paid' && !s.is_cancelled)
+        .reduce((acc, s) => {
+          const due = Number(s.total_amount_due) || 0;
+          const collected = Number(s.amount_collected) || 0;
+          const withheld = Number(s.tax_withheld) || Number(s.withholding_2307) || 0;
+          return acc + Math.max(0, due - collected - withheld);
+        }, 0) * 100
+    ) / 100;
+
+    const arVariance = Math.abs(Math.round((glArBalance - subSalesArBalance) * 100) / 100);
+
+    // 2. Accounts Payable [2010]
+    const glApDebits = accountBalances['2010']?.debits || 0;
+    const glApCredits = accountBalances['2010']?.credits || 0;
+    const glApBalance = Math.max(0, Math.round((glApCredits - glApDebits) * 100) / 100);
+
+    const subPurchasesApBalance = Math.round(
+      expenses
+        .filter(e => e.status !== 'Paid' && !e.is_cancelled)
+        .reduce((acc, e) => {
+          const due = Number(e.total_amount_due) || 0;
+          const paid = Number(e.amount_paid) || 0;
+          return acc + Math.max(0, due - paid);
+        }, 0) * 100
+    ) / 100;
+
+    const apVariance = Math.abs(Math.round((glApBalance - subPurchasesApBalance) * 100) / 100);
+
+    // 3. Cash balance checks
+    const cashOnHand = (accountBalances['1010']?.debits || 0) - (accountBalances['1010']?.credits || 0);
+    const cashInBank = (accountBalances['1011']?.debits || 0) - (accountBalances['1011']?.credits || 0);
+    const hasNegativeCash = cashOnHand < -0.01 || cashInBank < -0.01;
+
+    const issuesCount = (isBalanced ? 0 : 1) + voucherImbalances.length + (arVariance > 0.05 ? 1 : 0) + (apVariance > 0.05 ? 1 : 0) + (hasNegativeCash ? 1 : 0);
+
+    return {
+      totalDebits,
+      totalCredits,
+      discrepancy,
+      isBalanced,
+      voucherImbalances,
+      glArBalance,
+      subSalesArBalance,
+      arVariance,
+      glApBalance,
+      subPurchasesApBalance,
+      apVariance,
+      cashOnHand,
+      cashInBank,
+      hasNegativeCash,
+      issuesCount,
+      accountBalances: Object.values(accountBalances)
+    };
+  }, [masterJournalEntries, sales, expenses]);
 
   /* ========================================================================= */
   /* 4. TAX COMPUTED vs DECLARED vs PAID MONITOR                               */
@@ -433,7 +601,7 @@ export default function EntityStatusTab({
   }, [allRecordedYears, selectedYearFilter, sales, expenses, isVat, taxDeclarations]);
 
   /* ========================================================================= */
-  /* 5. PRIOR YEAR OMISSIONS (OPTION C AUDIT LOGS)                             */
+  /* 5. PRIOR YEAR OMISSIONS (OPTION B AUDIT LOGS)                             */
   /* ========================================================================= */
   const priorYearOmissions = useMemo(() => {
     const list: any[] = [];
@@ -446,13 +614,14 @@ export default function EntityStatusTab({
           docType: 'SALES INVOICE',
           docNo: s.invoice_number || `SALE-${s.id}`,
           date: s.invoice_date || (s as any).date,
+          recordDate: s.record_date || (s as any).created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
           originalYear: s.original_year || (s.invoice_date ? s.invoice_date.slice(0, 4) : 'Unknown'),
           effectiveYear: s.effective_year || '2026',
           partyName: s.customer_name || s.registered_name || 'Customer',
           amount: Number(s.total_amount_due) || Number(s.invoice_amount) || 0,
           taxAmount: Number(s.output_vat) || 0,
           status: 'Recognized in Present Year (PAS 8)',
-          notes: 'Fiscal Year closed. Adjustment posted to current active year retained earnings & revenue.'
+          notes: 'Fiscal Year closed. Adjustment posted to current active year Retained Earnings [3020] (Option B - PAS 8).'
         });
       }
     });
@@ -465,13 +634,14 @@ export default function EntityStatusTab({
           docType: 'PURCHASE / EXPENSE',
           docNo: e.invoice_number || e.voucher_number || `EXP-${e.id}`,
           date: e.expense_date || (e as any).date,
+          recordDate: e.record_date || (e as any).created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
           originalYear: e.original_year || (e.expense_date ? e.expense_date.slice(0, 4) : 'Unknown'),
           effectiveYear: e.effective_year || '2026',
           partyName: e.service_provider_name || 'Vendor',
           amount: Number(e.total_amount_due) || Number(e.expense_invoice_amount) || 0,
           taxAmount: Number(e.vat_input_amount) || 0,
           status: 'Recognized in Present Year (PAS 8)',
-          notes: 'Fiscal Year closed. Prior-period expense recognized in present year without modifying closed audited books.'
+          notes: 'Fiscal Year closed. Prior-period expense recognized in present year without modifying closed audited books (Option B - PAS 8).'
         });
       }
     });
@@ -490,7 +660,7 @@ export default function EntityStatusTab({
       if (!closedFiscalYears.includes(year)) {
         const updated = [...closedFiscalYears, year];
         onUpdateClosedFiscalYears(updated);
-        triggerAlert(`Fiscal Year ${year} Books of Accounts are now officially CLOSED & REVERSED. All nominal revenue and expense accounts transferred to Retained Earnings (3020). Direct additions to ${year} are now locked under Option C.`, 'success');
+        triggerAlert(`Fiscal Year ${year} Books of Accounts are now officially CLOSED & REVERSED. All nominal revenue and expense accounts transferred to Retained Earnings (3020). Direct additions to ${year} are now locked under Option B.`, 'success');
       }
     } else {
       const updated = closedFiscalYears.filter(y => y !== year);
@@ -609,7 +779,8 @@ export default function EntityStatusTab({
         </div>
 
         {/* COMPLIANCE HEALTH KPI METRICS */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 mt-6 pt-6 border-t border-zinc-800/40">
+        {/* COMPLIANCE HEALTH KPI METRICS */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5 mt-6 pt-6 border-t border-zinc-800/40">
           
           {/* Metric 1: Books Closed */}
           <div className="p-3.5 rounded-2xl bg-black/20 dark:bg-black/40 border border-zinc-800/60">
@@ -639,7 +810,21 @@ export default function EntityStatusTab({
             </div>
           </div>
 
-          {/* Metric 3: Underdeclared Taxes */}
+          {/* Metric 3: Ledger Imbalances */}
+          <div className={`p-3.5 rounded-2xl border ${!ledgerImbalanceAudit.isBalanced || ledgerImbalanceAudit.issuesCount > 0 ? 'bg-rose-500/10 border-rose-500/30' : 'bg-emerald-500/10 border-emerald-500/30'}`}>
+            <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+              <span>Ledger Parity</span>
+              <Scale className={`w-3.5 h-3.5 ${ledgerImbalanceAudit.isBalanced ? 'text-emerald-400' : 'text-rose-400'}`} />
+            </div>
+            <div className={`text-lg font-black font-mono ${ledgerImbalanceAudit.isBalanced ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {ledgerImbalanceAudit.isBalanced ? 'Balanced' : `₱${ledgerImbalanceAudit.discrepancy.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+            </div>
+            <div className="text-[11px] text-zinc-500 mt-0.5">
+              {ledgerImbalanceAudit.isBalanced ? 'Debits = Credits (₱0.00)' : `${ledgerImbalanceAudit.issuesCount} discrepancy alert(s)`}
+            </div>
+          </div>
+
+          {/* Metric 4: Underdeclared Taxes */}
           <div className={`p-3.5 rounded-2xl border ${taxComplianceList.filter(t => t.isUnderdeclared).length > 0 ? 'bg-rose-500/10 border-rose-500/30' : 'bg-black/20 border-zinc-800/60'}`}>
             <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>Underdeclarations</span>
@@ -653,7 +838,7 @@ export default function EntityStatusTab({
             </div>
           </div>
 
-          {/* Metric 4: Option C Prior Year Omissions */}
+          {/* Metric 5: Option B Prior Year Omissions */}
           <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/30">
             <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>Prior-Year Omissions</span>
@@ -663,7 +848,7 @@ export default function EntityStatusTab({
               {priorYearOmissions.length} <span className="text-xs font-normal text-zinc-400">Transferred</span>
             </div>
             <div className="text-[11px] text-cyan-300 mt-0.5">
-              Option C PAS 8 adjustments
+              Option B PAS 8 adjustments
             </div>
           </div>
 
@@ -678,6 +863,7 @@ export default function EntityStatusTab({
             { id: 'ALL', label: 'All Modules' },
             { id: 'BOOKS', label: 'Books of Accounts (Open/Closed)' },
             { id: 'INVOICES', label: `Missing Invoices (${missingInvoicesData.filter(m => m.status === 'MISSING').length})` },
+            { id: 'IMBALANCES', label: `Ledger Imbalances (${ledgerImbalanceAudit.issuesCount})` },
             { id: 'TAX', label: 'Tax Computed vs Declared vs Paid' },
             { id: 'OMISSIONS', label: `Prior-Year Omissions (${priorYearOmissions.length})` }
           ].map(tab => (
@@ -727,7 +913,7 @@ export default function EntityStatusTab({
               </div>
               <p className={`text-xs ${theme.textMuted} mt-0.5`}>
                 Official BIR Books of Accounts (General Journal, General Ledger, Sales Journal, Purchase Journal, Cash Receipts, Cash Disbursements).
-                Once closed, backdated additions to that year will be rerouted to the present year under <strong>Option C (PAS 8)</strong>.
+                Once closed, backdated additions to that year will be rerouted to the present year under <strong>Option B (PAS 8)</strong>.
               </p>
             </div>
             
@@ -969,7 +1155,203 @@ export default function EntityStatusTab({
       )}
 
       {/* ===================================================================== */}
-      {/* SECTION 3: TAX COMPUTED vs DECLARED vs PAID                           */}
+      {/* SECTION 3: GENERAL LEDGER TRIAL BALANCE & IMBALANCES AUDITOR          */}
+      {/* ===================================================================== */}
+      {(activeSection === 'ALL' || activeSection === 'IMBALANCES') && (
+        <div className={`p-6 rounded-3xl border ${theme.borderCard} ${theme.bgCard} shadow-sm space-y-5`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Scale className="w-5 h-5 text-cyan-500" />
+                <h2 className={`font-black text-base ${theme.textTitle}`}>
+                  General Ledger Trial Balance &amp; Book Imbalances Auditor
+                </h2>
+              </div>
+              <p className={`text-xs ${theme.textMuted} mt-0.5`}>
+                Verifies mathematical parity across double-entry books (Total Debits = Total Credits), individual journal voucher balancing, and reconciles subsidiary ledgers (A/R and A/P) against control accounts.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className={`px-3 py-1 rounded-xl text-xs font-bold border font-mono flex items-center gap-1.5 ${
+                ledgerImbalanceAudit.isBalanced
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+              }`}>
+                {ledgerImbalanceAudit.isBalanced ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Balanced (Debits = Credits)</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Imbalance: ₱{ledgerImbalanceAudit.discrepancy.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </>
+                )}
+              </span>
+            </div>
+          </div>
+
+          {/* 3 COMPARATIVE RECONCILIATION CARDS */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            
+            {/* Card 1: Trial Balance Equality */}
+            <div className="p-4 rounded-2xl bg-black/20 border border-zinc-800 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-zinc-300">
+                <span className="flex items-center gap-1.5">
+                  <Scale className="w-4 h-4 text-cyan-400" />
+                  <span>1. General Ledger Trial Balance</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${ledgerImbalanceAudit.isBalanced ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
+                  {ledgerImbalanceAudit.isBalanced ? 'BALANCED' : 'IMBALANCE'}
+                </span>
+              </div>
+              <div className="text-xs space-y-1 font-mono pt-1">
+                <div className="flex justify-between text-zinc-400">
+                  <span>Total Debits:</span>
+                  <span className="text-zinc-200 font-bold">₱{ledgerImbalanceAudit.totalDebits.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-zinc-400">
+                  <span>Total Credits:</span>
+                  <span className="text-zinc-200 font-bold">₱{ledgerImbalanceAudit.totalCredits.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between border-t border-zinc-800 pt-1 text-zinc-300">
+                  <span>Discrepancy:</span>
+                  <span className={ledgerImbalanceAudit.isBalanced ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                    ₱{ledgerImbalanceAudit.discrepancy.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 2: Accounts Receivable Sub-ledger Reconciled */}
+            <div className="p-4 rounded-2xl bg-black/20 border border-zinc-800 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-zinc-300">
+                <span className="flex items-center gap-1.5">
+                  <TrendingUp className="w-4 h-4 text-cyan-400" />
+                  <span>2. Accounts Receivable [1020]</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${ledgerImbalanceAudit.arVariance <= 0.05 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                  {ledgerImbalanceAudit.arVariance <= 0.05 ? 'RECONCILED' : 'DISCREPANCY'}
+                </span>
+              </div>
+              <div className="text-xs space-y-1 font-mono pt-1">
+                <div className="flex justify-between text-zinc-400">
+                  <span>GL Control Balance:</span>
+                  <span className="text-zinc-200">₱{ledgerImbalanceAudit.glArBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-zinc-400">
+                  <span>Sub-Sales Unpaid:</span>
+                  <span className="text-zinc-200">₱{ledgerImbalanceAudit.subSalesArBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between border-t border-zinc-800 pt-1 text-zinc-300">
+                  <span>Variance:</span>
+                  <span className={ledgerImbalanceAudit.arVariance <= 0.05 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                    ₱{ledgerImbalanceAudit.arVariance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 3: Accounts Payable Sub-ledger Reconciled */}
+            <div className="p-4 rounded-2xl bg-black/20 border border-zinc-800 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-zinc-300">
+                <span className="flex items-center gap-1.5">
+                  <Coins className="w-4 h-4 text-purple-400" />
+                  <span>3. Accounts Payable [2010]</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${ledgerImbalanceAudit.apVariance <= 0.05 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                  {ledgerImbalanceAudit.apVariance <= 0.05 ? 'RECONCILED' : 'DISCREPANCY'}
+                </span>
+              </div>
+              <div className="text-xs space-y-1 font-mono pt-1">
+                <div className="flex justify-between text-zinc-400">
+                  <span>GL Control Balance:</span>
+                  <span className="text-zinc-200">₱{ledgerImbalanceAudit.glApBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-zinc-400">
+                  <span>Sub-Purchases Unpaid:</span>
+                  <span className="text-zinc-200">₱{ledgerImbalanceAudit.subPurchasesApBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between border-t border-zinc-800 pt-1 text-zinc-300">
+                  <span>Variance:</span>
+                  <span className={ledgerImbalanceAudit.apVariance <= 0.05 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                    ₱{ledgerImbalanceAudit.apVariance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* VOUCHER-LEVEL IMBALANCE AUDIT TABLE */}
+          {ledgerImbalanceAudit.voucherImbalances.length > 0 && (
+            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 space-y-3">
+              <div className="flex items-center gap-2 text-rose-300 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 text-rose-400" />
+                <span>Detected {ledgerImbalanceAudit.voucherImbalances.length} Asymmetric / Out-of-Balance Journal Entry Voucher(s):</span>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-rose-500/20">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-zinc-950/60 text-zinc-400 uppercase text-[10px] border-b border-zinc-800">
+                    <tr>
+                      <th className="p-2.5">Entry / Voucher #</th>
+                      <th className="p-2.5">Description</th>
+                      <th className="p-2.5 text-right">Debit (₱)</th>
+                      <th className="p-2.5 text-right">Credit (₱)</th>
+                      <th className="p-2.5 text-right">Difference (₱)</th>
+                      <th className="p-2.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800 font-mono">
+                    {ledgerImbalanceAudit.voucherImbalances.map((v, i) => (
+                      <tr key={i} className="hover:bg-white/5">
+                        <td className="p-2.5 font-bold text-rose-400">{v.entry_no}</td>
+                        <td className="p-2.5 font-sans text-zinc-200">{v.description}</td>
+                        <td className="p-2.5 text-right text-zinc-300">₱{v.debit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td className="p-2.5 text-right text-zinc-300">₱{v.credit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td className="p-2.5 text-right font-bold text-rose-400">₱{v.difference.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td className="p-2.5 text-right font-sans">
+                          <button
+                            type="button"
+                            onClick={() => onSelectTab('general_journal')}
+                            className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-bold transition cursor-pointer"
+                          >
+                            Inspect in GJ
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* LIQUIDITY / CASH INTEGRITY NOTICE */}
+          {ledgerImbalanceAudit.hasNegativeCash && (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Negative Cash Balance Alert:</strong> Cash on Hand (₱{ledgerImbalanceAudit.cashOnHand.toLocaleString(undefined, { minimumFractionDigits: 2 })}) or Cash in Bank (₱{ledgerImbalanceAudit.cashInBank.toLocaleString(undefined, { minimumFractionDigits: 2 })}) reflects a credit balance. Review recorded disbursements vs actual cash receipts.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onSelectTab('collections')}
+                className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold transition cursor-pointer text-[11px] shrink-0"
+              >
+                Reconcile Cash
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* SECTION 4: TAX COMPUTED vs DECLARED vs PAID                           */}
       {/* ===================================================================== */}
       {(activeSection === 'ALL' || activeSection === 'TAX') && (
         <div className={`p-6 rounded-3xl border ${theme.borderCard} ${theme.bgCard} shadow-sm space-y-4`}>
@@ -1042,7 +1424,7 @@ export default function EntityStatusTab({
                       ) : t.isOverpaymentCredit ? (
                         <div className="space-y-1">
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-1 w-max">
-                            <Sparkles className="w-3 h-3 text-cyan-400" />
+                            <CheckCircle2 className="w-3 h-3 text-cyan-400" />
                             <span>Excess Tax Credit / Overpayment</span>
                           </span>
                           <p className="text-[11px] text-cyan-300 leading-tight">
@@ -1086,7 +1468,7 @@ export default function EntityStatusTab({
       )}
 
       {/* ===================================================================== */}
-      {/* SECTION 4: PRIOR YEAR OMISSIONS (OPTION C AUDIT LOGS)                 */}
+      {/* SECTION 5: PRIOR YEAR OMISSIONS (OPTION B AUDIT LOGS)                 */}
       {/* ===================================================================== */}
       {(activeSection === 'ALL' || activeSection === 'OMISSIONS') && (
         <div className={`p-6 rounded-3xl border ${theme.borderCard} ${theme.bgCard} shadow-sm space-y-4`}>
@@ -1095,7 +1477,7 @@ export default function EntityStatusTab({
               <div className="flex items-center gap-2">
                 <History className="w-5 h-5 text-cyan-500" />
                 <h2 className={`font-black text-base ${theme.textTitle}`}>
-                  Prior-Year Omission &amp; Adjustment Audit Ledger (Option C)
+                  Prior-Year Omission &amp; Adjustment Audit Ledger (Option B - PAS 8)
                 </h2>
               </div>
               <p className={`text-xs ${theme.textMuted} mt-0.5`}>
@@ -1113,7 +1495,7 @@ export default function EntityStatusTab({
               <History className="w-8 h-8 text-zinc-500 mx-auto" />
               <h3 className="font-bold text-zinc-300 text-sm">No Prior-Year Omissions Recorded</h3>
               <p className="text-xs text-zinc-400 max-w-md mx-auto">
-                Whenever a transaction is backdated to a closed fiscal year, Option C will warn the user and post the adjustment to the present active year without modifying the closed year. Those entries will be audited here.
+                Whenever a transaction is backdated to a closed fiscal year, Option B will warn the user and post the adjustment to the present active year without modifying the closed year. Those entries will be audited here.
               </p>
             </div>
           ) : (
@@ -1122,7 +1504,8 @@ export default function EntityStatusTab({
                 <thead className="bg-zinc-900/80 text-zinc-400 font-bold uppercase tracking-wider text-[11px] border-b border-zinc-800">
                   <tr>
                     <th className="p-3">Doc #</th>
-                    <th className="p-3">Original Date (Closed FY)</th>
+                    <th className="p-3">Original Invoice Date (Closed FY)</th>
+                    <th className="p-3">System Record Date</th>
                     <th className="p-3">Effective Recognition FY</th>
                     <th className="p-3">Party / Particulars</th>
                     <th className="p-3 text-right">Amount (₱)</th>
@@ -1139,6 +1522,9 @@ export default function EntityStatusTab({
                       <td className="p-3 font-mono text-rose-400">
                         {o.date} (FY {o.originalYear} - CLOSED)
                       </td>
+                      <td className="p-3 font-mono text-zinc-300">
+                        {o.recordDate || new Date().toISOString().slice(0, 10)}
+                      </td>
                       <td className="p-3 font-mono font-bold text-emerald-400">
                         FY {o.effectiveYear} (PRESENT YEAR)
                       </td>
@@ -1152,7 +1538,7 @@ export default function EntityStatusTab({
                         ₱{o.taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
                       <td className="p-3 text-zinc-400 text-[11px]">
-                        <span className="font-bold text-cyan-300">Option C:</span> {o.notes}
+                        <span className="font-bold text-cyan-300">Option B:</span> {o.notes}
                       </td>
                     </tr>
                   ))}

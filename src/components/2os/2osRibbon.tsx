@@ -538,6 +538,23 @@ export default function TwoOSRibbon({
                   <span className="text-[9px] leading-tight font-black">Audit Log</span>
                 </button>
 
+                {/* Entity Status Diagnostic Hub */}
+                <button
+                  onClick={() => {
+                    onSelectTab('entity_status');
+                    triggerAlert('Opened Entity Status & Compliance Hub', 'info');
+                  }}
+                  className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer min-w-[70px] text-center ${
+                    isDark
+                      ? 'bg-[#0D1E45] hover:bg-[#142A5C] text-emerald-300 border border-emerald-500/40 font-bold shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold shadow-2xs'
+                  }`}
+                  title="Entity Status: Missing Invoices, Books Open/Closed & Tax Discrepancies"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mb-0.5" />
+                  <span className="text-[9px] leading-tight font-black whitespace-pre-line">Entity{"\n"}Status</span>
+                </button>
+
                 {/* Validation Controls */}
                 <div className="flex flex-col justify-center gap-1.5 px-2 py-0.5">
                   <label className="flex items-center gap-1.5 text-[10px] font-medium text-slate-700 dark:text-zinc-300 cursor-pointer">

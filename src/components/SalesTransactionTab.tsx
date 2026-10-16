@@ -20,7 +20,9 @@ import {
   Eye,
   UserPlus,
   Trash2,
-  X
+  X,
+  AlertTriangle,
+  Unlock
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import AutoSuggestInput from './AutoSuggestInput';
@@ -45,6 +47,7 @@ interface SalesTransactionTabProps {
   setSpecialEntries?: React.Dispatch<React.SetStateAction<SpecialEntry[]>>;
   onDeleteRecord?: (bookType: string, record: UniformBookRecord) => void;
   closedFiscalYears?: string[];
+  onUpdateClosedFiscalYears?: (years: string[]) => void;
 }
 
 export default function SalesTransactionTab({
@@ -64,7 +67,8 @@ export default function SalesTransactionTab({
   specialEntries = [],
   setSpecialEntries,
   onDeleteRecord,
-  closedFiscalYears = []
+  closedFiscalYears = [],
+  onUpdateClosedFiscalYears
 }: SalesTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const isDark = !theme || !theme.isLight;
@@ -93,7 +97,7 @@ export default function SalesTransactionTab({
   const [tin, setTin] = useState('');
   const [branchCode, setBranchCode] = useState('00000');
   const [address, setAddress] = useState('');
-  const [invoiceType, setInvoiceType] = useState('INVOICE');
+  const [invoiceType, setInvoiceType] = useState('Sales Invoice');
 
   // Helper to extract sequential integer from invoice number
   const extractInvoiceSeqNum = (invStr?: string): number | null => {
@@ -105,7 +109,7 @@ export default function SalesTransactionTab({
     return null;
   };
 
-  // Compute next sequential invoice number (starting at 1, or filling/continuing the sequence)
+  // Compute next sequential invoice number in format [invoice type] [invoice #], e.g. "Sales Invoice 001"
   const nextSequentialInvoiceNo = useMemo(() => {
     const companyRecords = subsidiarySales.filter(
       s => !activeCompanyName || !s.company_name || s.company_name === activeCompanyName
@@ -113,17 +117,17 @@ export default function SalesTransactionTab({
     const nums = companyRecords
       .map(s => extractInvoiceSeqNum(s.invoice_number))
       .filter((n): n is number => n !== null && n > 0 && n < 1000000);
-    if (nums.length === 0) return '1';
-    const maxNum = Math.max(...nums);
-    return String(maxNum + 1);
-  }, [subsidiarySales, activeCompanyName]);
+    const nextNum = nums.length === 0 ? 1 : Math.max(...nums) + 1;
+    const padded = String(nextNum).padStart(3, '0');
+    return `${invoiceType} ${padded}`;
+  }, [subsidiarySales, activeCompanyName, invoiceType]);
 
   const [invoiceNo, setInvoiceNo] = useState(() => nextSequentialInvoiceNo);
 
   // Sync default invoiceNo to next sequential number when company changes or records update (if untouched)
   React.useEffect(() => {
     setInvoiceNo(prev => {
-      if (!prev || prev.startsWith('INV #') || /^\d+$/.test(prev.trim())) {
+      if (!prev || prev.startsWith('INV #') || /^\d+$/.test(prev.trim()) || prev.match(/^[A-Za-z\s]+ \d+$/)) {
         return nextSequentialInvoiceNo;
       }
       return prev;
@@ -460,6 +464,13 @@ export default function SalesTransactionTab({
       assignedTransactionType = 'ON ACCOUNT';
     }
 
+    let formattedInvoiceNo = invoiceNo.trim();
+    if (/^\d+$/.test(formattedInvoiceNo)) {
+      formattedInvoiceNo = `${invoiceType} ${formattedInvoiceNo.padStart(3, '0')}`;
+    }
+
+    const todayRecordDate = new Date().toISOString().slice(0, 10);
+
     const saleRecord: UniformBookRecord = {
       id: commonId,
       company_name: activeCompanyName,
@@ -472,9 +483,11 @@ export default function SalesTransactionTab({
       address: effectiveAddressStr.trim(),
       type_of_transaction: assignedTransactionType,
       date: date,
+      date_of_sale: date,
+      record_date: todayRecordDate,
       invoice_type: invoiceType,
       voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
-      invoice_number: invoiceNo.trim(),
+      invoice_number: formattedInvoiceNo,
       particulars: priorYearAdjustment
         ? `[Prior FY ${priorYearAdjustment.originalYear} Omission - Reflected in FY ${priorYearAdjustment.effectiveYear} (PAS 8)] ${particulars.trim()}`.trim()
         : particulars.trim(),
@@ -516,6 +529,44 @@ export default function SalesTransactionTab({
       less_discount: liveFormulas.less_discount
     };
 
+    // If recorded as Prior-Period Omission under PAS 8, generate adjusting Retained Earnings journal entry in present year
+    if (priorYearAdjustment && setSpecialEntries) {
+      const jvId = Date.now() + 50;
+      const jvNum = `JV-PAS8-${Date.now().toString().slice(-4)}`;
+      const debitAccountCode = saleMode === 'ON CASH' ? '1010' : '1020';
+      const debitAccountTitle = saleMode === 'ON CASH' ? 'Cash and Cash Equivalents' : 'Accounts Receivable';
+      
+      const pas8Voucher: SpecialEntry = {
+        id: jvId,
+        jv_number: jvNum,
+        voucher_no: jvNum,
+        company_name: activeCompanyName,
+        entry_date: todayRecordDate,
+        entry_type: 'Adjusting Entry',
+        description: `[PAS 8 Prior-Period Adjustment] FY ${priorYearAdjustment.originalYear} Closed Sale ${formattedInvoiceNo} recognized via Retained Earnings in FY ${priorYearAdjustment.effectiveYear}`,
+        accounting_treatment: 'Retrospective Restatement',
+        total_debit: totalDue,
+        total_credit: totalDue,
+        lines: [
+          {
+            id: `l-${jvId}-1`,
+            type: 'Debit',
+            account_code: debitAccountCode,
+            account_title: debitAccountTitle,
+            amount: totalDue
+          },
+          {
+            id: `l-${jvId}-2`,
+            type: 'Credit',
+            account_code: '3020',
+            account_title: 'Retained Earnings (Prior Period Adjustment)',
+            amount: totalDue
+          }
+        ]
+      };
+      setSpecialEntries(prev => [pas8Voucher, ...prev]);
+    }
+
     // 2. Routing Logic based on user specification:
     // 5.1 / 6.1 Sales (other transaction) single-entry method -> recorded in Subsidiary Sales
     setSubsidiarySales(prev => [saleRecord, ...prev]);
@@ -526,7 +577,8 @@ export default function SalesTransactionTab({
         ...saleRecord,
         id: commonId + 1,
         invoice_type: invoiceType,
-        particulars: `Receivable Tracking for Invoice #${invoiceNo.trim()} (Pending Balance: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+        record_date: todayRecordDate,
+        particulars: `Receivable Tracking for Invoice #${formattedInvoiceNo} (Pending Balance: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
         amount_collected: 0,
         pending_balance: totalDue,
         amount_withheld_2307: liveFormulas.less_withholding_tax,
@@ -534,7 +586,7 @@ export default function SalesTransactionTab({
         installments: []
       };
       setCollections(prev => [onAccountTrackingRecord, ...prev]);
-      triggerAlert(`Sale ${invoiceNo} recorded to Subsidiary Sales & tracked in Collections Book (Pending Receivable: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`, 'success');
+      triggerAlert(`Sale ${formattedInvoiceNo} recorded to Subsidiary Sales & tracked in Collections Book (Pending Receivable: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`, 'success');
     } else if (saleMode === 'ON CASH') {
       // 5.3 Record to Cash Receipts (Fully paid sales only -> Journalizes Dr Cash, Dr CWT 2307, Cr A/R)
       const cashReceiptRecord: UniformBookRecord = {
@@ -549,10 +601,12 @@ export default function SalesTransactionTab({
         address: effectiveAddressStr.trim(),
         type_of_transaction: 'CASH',
         date: date,
+        date_of_sale: date,
+        record_date: todayRecordDate,
         invoice_type: invoiceType,
         voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
-        invoice_number: invoiceNo.trim(),
-        particulars: `Full Cash Settlement for Invoice #${invoiceNo.trim()}${particulars.trim() ? ` - ${particulars.trim()}` : ''}`,
+        invoice_number: formattedInvoiceNo,
+        particulars: `Full Cash Settlement for Invoice #${formattedInvoiceNo}${particulars.trim() ? ` - ${particulars.trim()}` : ''}`,
         qty: parseFloat(qty) || 1,
         unit_price: parseFloat(unitPrice) || 0,
         amount: liveFormulas.amount,
@@ -584,7 +638,7 @@ export default function SalesTransactionTab({
       };
       setCollections(prev => [collectionRecord, ...prev]);
 
-      triggerAlert(`Full Cash Sale ${invoiceNo} recorded to Subsidiary Sales, Cash Receipts & Collections Book (Cash Received: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})!`, 'success');
+      triggerAlert(`Full Cash Sale ${formattedInvoiceNo} recorded to Subsidiary Sales, Cash Receipts & Collections Book (Cash Received: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})!`, 'success');
     } else if (saleMode === 'ON PARTIAL') {
       // Requirement 6: Simply ask for Down Payment (do not auto-calculate 2nd payment)
       const downPmt = parseFloat(downPaymentAmount) || 0;
@@ -612,10 +666,12 @@ export default function SalesTransactionTab({
         address: effectiveAddressStr.trim(),
         type_of_transaction: 'ON ACCOUNT',
         date: date,
+        date_of_sale: date,
+        record_date: todayRecordDate,
         invoice_type: invoiceType,
         voucher_number: collectionRef.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
-        invoice_number: invoiceNo.trim(),
-        particulars: `COLLECTION 1 (Down Payment) for Invoice #${invoiceNo.trim()} — ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+        invoice_number: formattedInvoiceNo,
+        particulars: `COLLECTION 1 (Down Payment) for Invoice #${formattedInvoiceNo} — ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
         qty: parseFloat(qty) || 1,
         unit_price: parseFloat(unitPrice) || 0,
         amount: liveFormulas.amount,
@@ -1277,7 +1333,7 @@ export default function SalesTransactionTab({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <label className={`block text-[11px] font-bold mb-1 ${theme.textMuted}`}>
-                    Transaction Date *
+                    Date of Sale / Invoice Date *
                   </label>
                   <input
                     type="date"
@@ -1294,28 +1350,57 @@ export default function SalesTransactionTab({
                   </label>
                   <select
                     value={invoiceType}
-                    onChange={(e) => setInvoiceType(e.target.value)}
+                    onChange={(e) => {
+                      const newType = e.target.value;
+                      setInvoiceType(newType);
+                      // Update invoiceNo prefix if it matched previous invoice type
+                      setInvoiceNo(prev => {
+                        const trimmed = prev.trim();
+                        const match = trimmed.match(/^(.*?)([\s_-]+)(\d+)$/);
+                        if (match) {
+                          return `${newType}${match[2]}${match[3]}`;
+                        } else if (/^\d+$/.test(trimmed)) {
+                          return `${newType} ${trimmed.padStart(3, '0')}`;
+                        }
+                        return prev;
+                      });
+                    }}
                     className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-medium cursor-pointer ${theme.borderInput} ${theme.textMain} focus:ring-1 focus:ring-cyan-500`}
                   >
-                    <option value="INVOICE" className="bg-zinc-900 text-white">INVOICE</option>
-                    <option value="SALES INVOICE" className="bg-zinc-900 text-white">SALES INVOICE</option>
-                    <option value="OFFICIAL RECEIPT" className="bg-zinc-900 text-white">OFFICIAL RECEIPT</option>
-                    <option value="BILLING STATEMENT" className="bg-zinc-900 text-white">BILLING STATEMENT</option>
+                    <option value="Sales Invoice" className="bg-zinc-900 text-white">Sales Invoice</option>
+                    <option value="Official Receipt" className="bg-zinc-900 text-white">Official Receipt</option>
+                    <option value="Billing Statement" className="bg-zinc-900 text-white">Billing Statement</option>
+                    <option value="Collection Receipt" className="bg-zinc-900 text-white">Collection Receipt</option>
+                    <option value="Commercial Invoice" className="bg-zinc-900 text-white">Commercial Invoice</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-bold mb-1 text-cyan-400">
-                    Invoice Number (Unique) *
+                    Invoice Number (Format: [Type]_[#] or [Type] [#]) *
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. SI-2026-0001"
+                    placeholder="e.g. Sales Invoice 001 or Sales Invoice_001"
                     value={invoiceNo}
                     onChange={(e) => setInvoiceNo(e.target.value)}
+                    onBlur={() => {
+                      const trimmed = invoiceNo.trim();
+                      if (/^\d+$/.test(trimmed)) {
+                        setInvoiceNo(`${invoiceType} ${trimmed.padStart(3, '0')}`);
+                      } else {
+                        const match = trimmed.match(/^(.*?)([\s_-]+)(\d+)$/);
+                        if (match) {
+                          setInvoiceNo(`${match[1]}${match[2]}${match[3].padStart(3, '0')}`);
+                        }
+                      }
+                    }}
                     className={`w-full px-3 py-2 text-xs rounded-xl border bg-transparent font-mono font-bold text-cyan-400 ${theme.borderInput} focus:ring-1 focus:ring-cyan-500`}
                     required
                   />
+                  <span className="text-[10px] text-zinc-500 mt-0.5 block">
+                    Enter number (e.g. 5) &rarr; auto-formats to &quot;{invoiceType} 005&quot;
+                  </span>
                 </div>
 
                 <div>
@@ -1331,6 +1416,60 @@ export default function SalesTransactionTab({
                   />
                 </div>
               </div>
+
+              {/* REAL-TIME FISCAL YEAR OPEN / CLOSED AUDIT STATUS BANNER */}
+              {(() => {
+                const invYear = (date || '').slice(0, 4);
+                const curYear = String(new Date().getFullYear());
+                const todayRecordDate = new Date().toISOString().slice(0, 10);
+                const isYearClosed = closedFiscalYears && closedFiscalYears.includes(invYear) && invYear !== curYear;
+
+                return (
+                  <div className={`p-3 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all ${
+                    isYearClosed
+                      ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                      : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  }`}>
+                    <div className="flex items-start sm:items-center gap-2.5">
+                      {isYearClosed ? (
+                        <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0 mt-0.5 sm:mt-0">
+                          <Lock className="w-4 h-4" />
+                        </div>
+                      ) : (
+                        <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 shrink-0 mt-0.5 sm:mt-0">
+                          <Unlock className="w-4 h-4" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-bold flex items-center gap-2 flex-wrap">
+                          <span>Date of Sale: <strong className="font-mono text-white">{date}</strong> (FY {invYear})</span>
+                          <span className="opacity-50">&bull;</span>
+                          <span>Record Date: <strong className="font-mono text-cyan-300">Today ({todayRecordDate})</strong></span>
+                        </div>
+                        <p className="text-[11px] mt-0.5 opacity-90 leading-tight">
+                          {isYearClosed ? (
+                            <span>
+                              <strong>Books for FY {invYear} are CLOSED &amp; REVERSED:</strong> Under <strong>Option B (PAS 8)</strong>, FY {invYear} sales will not change. This entry will be recognized in present year ({curYear}) records via Retained Earnings [3020]. (Reopening is also available).
+                            </span>
+                          ) : (
+                            <span>
+                              <strong>Books for FY {invYear} are OPEN:</strong> This transaction will be posted directly into FY {invYear} Sales revenue and nominal accounts.
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase font-mono tracking-wider shrink-0 self-start sm:self-auto border ${
+                      isYearClosed
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    }`}>
+                      {isYearClosed ? `FY ${invYear} CLOSED (OPTION B)` : `FY ${invYear} OPEN`}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* 3. CUSTOMER & TAXPAYER IDENTITY */}
@@ -2588,7 +2727,7 @@ export default function SalesTransactionTab({
         </div>
       )}
 
-      {/* OPTION C: PRIOR-YEAR CLOSED FISCAL PERIOD CONFIRMATION MODAL */}
+      {/* OPTION B: PRIOR-YEAR CLOSED FISCAL PERIOD CONFIRMATION MODAL */}
       {priorYearWarning && (
         <div className="fixed inset-0 z-[220] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg p-6 rounded-3xl border ${isDark ? 'bg-zinc-950 border-amber-500/40 text-zinc-100' : 'bg-white border-amber-400 text-slate-900'} shadow-2xl space-y-4`}>
@@ -2598,7 +2737,7 @@ export default function SalesTransactionTab({
               </div>
               <div>
                 <h3 className="text-base font-black">
-                  Prior-Year Transaction Warning (Option C - PAS 8)
+                  Prior-Period Transaction Detected (Option B)
                 </h3>
                 <p className="text-xs text-amber-500 font-bold">
                   Fiscal Year {priorYearWarning.invoiceYear} Books of Accounts are CLOSED &amp; REVERSED
@@ -2608,19 +2747,18 @@ export default function SalesTransactionTab({
 
             <div className="p-4 rounded-2xl bg-black/30 border border-zinc-800 text-xs space-y-2 leading-relaxed">
               <p className="text-zinc-200">
-                You are recording a sales transaction dated <strong>{date}</strong> (Fiscal Year <strong>{priorYearWarning.invoiceYear}</strong>).
+                You are recording a sales transaction dated <strong>{date}</strong> (Fiscal Year <strong>{priorYearWarning.invoiceYear}</strong>) with a system record date of today (<strong>{new Date().toISOString().slice(0, 10)}</strong>).
               </p>
               <p className="text-zinc-300">
-                Under Philippine Financial Reporting Standards (PAS 8 - Accounting Policies, Changes in Accounting Estimates and Errors) and BIR rules:
+                Under Philippine Accounting Standards (PAS 8 - Prior Period Adjustments) and BIR compliance rules, choose how to treat this entry:
               </p>
               <ul className="list-disc list-inside space-y-1.5 text-zinc-400">
-                <li>The audited books and sales of closed FY <strong>{priorYearWarning.invoiceYear}</strong> will <strong>NOT be altered</strong> retrospectively.</li>
-                <li>This transaction will be recognized as a <strong>Prior-Period Omission</strong> and will reflect in the <strong>present active year ({priorYearWarning.currentYear})</strong>.</li>
-                <li>A permanent audit log will be created in the <strong>Entity Status &amp; Compliance Hub</strong>.</li>
+                <li><strong>Choice 1 (Post to Present Year):</strong> Books of closed FY {priorYearWarning.invoiceYear} remain closed and unaltered. This omission is recognized in present year {priorYearWarning.currentYear} records via Retained Earnings [3020].</li>
+                <li><strong>Choice 2 (Reopen Fiscal Year):</strong> Unlocks FY {priorYearWarning.invoiceYear} books upon supervisory authorization to record directly into FY {priorYearWarning.invoiceYear} sales and nominal accounts.</li>
               </ul>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <div className="flex flex-col gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => {
@@ -2631,16 +2769,36 @@ export default function SalesTransactionTab({
                   setPriorYearWarning(null);
                   executeRecordSale(false, false, tin, branchCode, address, customerName, warningInfo);
                 }}
-                className="flex-1 px-4 py-2.5 text-xs font-bold rounded-xl text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-sm cursor-pointer"
+                className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-sm cursor-pointer text-left flex items-center justify-between"
               >
-                ✓ Proceed &amp; Post to Present Year ({priorYearWarning.currentYear}) (Option C)
+                <span>✓ Option B (Choice 1): Post to Present Year ({priorYearWarning.currentYear}) via PAS 8 Retained Earnings</span>
+                <ArrowRight className="w-4 h-4 shrink-0" />
               </button>
+
+              {onUpdateClosedFiscalYears && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const yearToReopen = priorYearWarning.invoiceYear;
+                    const updatedYears = closedFiscalYears.filter(y => y !== yearToReopen);
+                    onUpdateClosedFiscalYears(updatedYears);
+                    triggerAlert(`Fiscal Year ${yearToReopen} books have been reopened upon authorization. Transaction will be recorded directly into FY ${yearToReopen} sales.`, 'info');
+                    setPriorYearWarning(null);
+                    executeRecordSale(false, false, tin, branchCode, address, customerName, undefined);
+                  }}
+                  className="w-full px-4 py-2.5 text-xs font-bold rounded-xl border border-cyan-500/50 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 transition shadow-sm cursor-pointer text-left flex items-center justify-between"
+                >
+                  <span>🔓 Option B (Choice 2): Reopen Fiscal Year {priorYearWarning.invoiceYear} &amp; Record Directly</span>
+                  <Unlock className="w-4 h-4 shrink-0" />
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setPriorYearWarning(null)}
-                className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-zinc-700 hover:bg-white/5 transition cursor-pointer"
+                className="w-full px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-700 hover:bg-white/5 transition cursor-pointer text-center"
               >
-                Cancel
+                Cancel Transaction
               </button>
             </div>
           </div>

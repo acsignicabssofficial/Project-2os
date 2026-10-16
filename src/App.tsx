@@ -2022,6 +2022,7 @@ export default function App() {
                   setSpecialEntries={setSpecialEntries}
                   onDeleteRecord={handleCascadingDeleteFromBook}
                   closedFiscalYears={closedFiscalYears}
+                  onUpdateClosedFiscalYears={handleUpdateClosedFiscalYears}
                 />
               )}
 
@@ -2046,6 +2047,7 @@ export default function App() {
                   setSpecialEntries={setSpecialEntries}
                   onDeleteRecord={handleCascadingDeleteFromBook}
                   closedFiscalYears={closedFiscalYears}
+                  onUpdateClosedFiscalYears={handleUpdateClosedFiscalYears}
                 />
               )}
 
