@@ -293,8 +293,8 @@ export default function PurchaseTransactionTab({
     return openPayables.filter(p => 
       (p.voucher_number || '').toLowerCase().includes(q) ||
       (p.invoice_number || '').toLowerCase().includes(q) ||
-      p.registered_name.toLowerCase().includes(q) ||
-      p.tin.includes(q) ||
+      (p.registered_name || p.service_provider_name || '').toLowerCase().includes(q) ||
+      (p.tin || p.service_provider_tin || '').includes(q) ||
       (p.particulars || '').toLowerCase().includes(q)
     );
   }, [openPayables, openSearch, globalSearch]);
@@ -323,6 +323,16 @@ export default function PurchaseTransactionTab({
     // Option C: Check if transaction date belongs to a CLOSED fiscal year
     const expYear = (date || '').slice(0, 4);
     const curYear = String(new Date().getFullYear());
+
+    // Validate that transaction date is not earlier than entity date of registration (Req 2 & 4)
+    const rawRegDate = activeCompany?.date_of_registration || activeCompany?.birthday_or_incorporation_date;
+    const regYear = rawRegDate && rawRegDate.length >= 4 ? parseInt(rawRegDate.slice(0, 4), 10) : null;
+    const transYear = parseInt(expYear, 10);
+    if (regYear && !isNaN(transYear) && transYear < regYear) {
+      triggerAlert(`year must start at the year of registration (${regYear}). You entered ${transYear}.`, 'error');
+      return;
+    }
+
     if (!isConfirmedOptionC && closedFiscalYears && closedFiscalYears.includes(expYear) && expYear !== curYear) {
       setPriorYearWarning({
         invoiceYear: expYear,

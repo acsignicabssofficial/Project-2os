@@ -18,6 +18,7 @@ interface PeriodModalProps {
   onApply: (monthIdx: number, year: number, prefix: string) => void;
   themeMode?: ThemeMode;
   availableYears?: number[];
+  registrationYear?: number | null;
 }
 
 const MONTHS = [
@@ -71,11 +72,14 @@ export default function PeriodModal({
   selectedPrefix,
   onApply,
   themeMode,
-  availableYears
+  availableYears,
+  registrationYear
 }: PeriodModalProps) {
   const [tempMonth, setTempMonth] = useState<number>(selectedMonthIdx);
   const [tempYear, setTempYear] = useState<number>(selectedYear);
   const [tempPrefix, setTempPrefix] = useState<string>(selectedPrefix || 'FOR THE MONTH OF');
+
+  const isYearTooEarly = Boolean(registrationYear && tempYear < registrationYear);
 
   const presentYear = new Date().getFullYear();
   const selectableYears = useMemo(() => {
@@ -117,6 +121,7 @@ export default function PeriodModal({
   };
 
   const handleConfirm = () => {
+    if (isYearTooEarly) return;
     onApply(tempMonth, tempYear, tempPrefix);
     onClose();
   };
@@ -282,6 +287,12 @@ export default function PeriodModal({
               );
             })}
           </div>
+
+          {isYearTooEarly && (
+            <div className="mt-2 p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-500 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5">
+              <span>⚠️ Year must start at the year of registration ({registrationYear}). You selected {tempYear}.</span>
+            </div>
+          )}
         </div>
 
         {/* 4. LIVE PREVIEW CARD */}
@@ -317,11 +328,14 @@ export default function PeriodModal({
             <button
               type="button"
               onClick={handleConfirm}
-              className={`flex items-center gap-1.5 px-5 py-1.5 rounded-xl text-xs font-bold text-white transition cursor-pointer shadow-sm ${
-                isNeon
-                  ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-300'
+              disabled={isYearTooEarly}
+              className={`flex items-center gap-1.5 px-5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer shadow-sm ${
+                isYearTooEarly
+                  ? 'bg-zinc-600/50 text-zinc-400 cursor-not-allowed'
+                  : isNeon
+                  ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sky-300'
                   : themeMode === 'clean'
-                  ? 'bg-violet-600 hover:bg-violet-700 shadow-violet-300'
+                  ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-300'
                   : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black shadow-[0_0_12px_rgba(6,182,212,0.4)]'
               }`}
             >

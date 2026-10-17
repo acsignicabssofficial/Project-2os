@@ -344,9 +344,9 @@ export default function SalesTransactionTab({
     const q = (openSearch || globalSearch).toLowerCase().trim();
     if (!q) return openInvoices;
     return openInvoices.filter(i => 
-      i.invoice_number.toLowerCase().includes(q) ||
-      i.registered_name.toLowerCase().includes(q) ||
-      i.tin.includes(q) ||
+      (i.invoice_number || '').toLowerCase().includes(q) ||
+      (i.registered_name || i.customer_name || '').toLowerCase().includes(q) ||
+      (i.tin || i.customer_tin || '').includes(q) ||
       (i.particulars || '').toLowerCase().includes(q)
     );
   }, [openInvoices, openSearch, globalSearch]);
@@ -735,6 +735,7 @@ export default function SalesTransactionTab({
     setZeroRated('0');
     setVatExempt('0');
     setDownPaymentAmount('');
+    setDate(new Date().toISOString().split('T')[0]);
     setCollectionRef(`COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`);
     setNewCustomerPrompt(null);
     setExistingCustomerMatchPrompt(null);
@@ -782,6 +783,16 @@ export default function SalesTransactionTab({
     // Option C: Check if transaction date belongs to a CLOSED fiscal year
     const invYear = (date || '').slice(0, 4);
     const curYear = String(new Date().getFullYear());
+
+    // Validate that transaction date is not earlier than entity date of registration (Req 2 & 4)
+    const rawRegDate = activeCompany?.date_of_registration || activeCompany?.birthday_or_incorporation_date;
+    const regYear = rawRegDate && rawRegDate.length >= 4 ? parseInt(rawRegDate.slice(0, 4), 10) : null;
+    const transYear = parseInt(invYear, 10);
+    if (regYear && !isNaN(transYear) && transYear < regYear) {
+      triggerAlert(`year must start at the year of registration (${regYear}). You entered ${transYear}.`, 'error');
+      return;
+    }
+
     if (closedFiscalYears && closedFiscalYears.includes(invYear) && invYear !== curYear) {
       setPriorYearWarning({
         invoiceYear: invYear,

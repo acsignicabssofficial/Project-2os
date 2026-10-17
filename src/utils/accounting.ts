@@ -798,6 +798,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       vNo.startsWith('SJ-COL-') ||
       vNo.startsWith('SJ-PUR-') ||
       vNo.startsWith('SJ-DIS-') ||
+      vNo.startsWith('JV-PAS8-') ||
       eType === 'Sales Recognition' ||
       eType === 'Cash Collection & Settlement' ||
       eType === 'Partial Collection & Settlement' ||
@@ -835,20 +836,29 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const saleDate = s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0];
 
     const entry1Credits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-    if (vatableSales > 0) {
-      entry1Credits.push({ account_code: '4010', account_title: isVat ? 'Vatable Sales' : 'Sales Revenue', amount: vatableSales });
-    }
-    if (vatOutput > 0) {
-      entry1Credits.push({ account_code: '2020', account_title: 'Output VAT Payable', amount: vatOutput });
-    }
-    if (zeroRated > 0) {
-      entry1Credits.push({ account_code: '4020', account_title: 'Zero-Rated Sales', amount: zeroRated });
-    }
-    if (vatExempt > 0) {
-      entry1Credits.push({ account_code: '4030', account_title: 'VAT-Exempt Sales', amount: vatExempt });
-    }
-    if (entry1Credits.length === 0) {
-      entry1Credits.push({ account_code: '4010', account_title: 'Sales Revenue', amount: totalGrossSales });
+    if (s.is_prior_year_omission) {
+      // Prior-Period Omission under PAS 8: Credits Retained Earnings directly (does NOT distort current year 4010 Sales)
+      const revBase = vatableSales > 0 ? vatableSales : totalGrossSales;
+      entry1Credits.push({ account_code: '3020', account_title: 'Retained Earnings (Prior Period Adjustment)', amount: revBase });
+      if (vatOutput > 0) {
+        entry1Credits.push({ account_code: '2020', account_title: 'Output VAT Payable', amount: vatOutput });
+      }
+    } else {
+      if (vatableSales > 0) {
+        entry1Credits.push({ account_code: '4010', account_title: isVat ? 'Vatable Sales' : 'Sales Revenue', amount: vatableSales });
+      }
+      if (vatOutput > 0) {
+        entry1Credits.push({ account_code: '2020', account_title: 'Output VAT Payable', amount: vatOutput });
+      }
+      if (zeroRated > 0) {
+        entry1Credits.push({ account_code: '4020', account_title: 'Zero-Rated Sales', amount: zeroRated });
+      }
+      if (vatExempt > 0) {
+        entry1Credits.push({ account_code: '4030', account_title: 'VAT-Exempt Sales', amount: vatExempt });
+      }
+      if (entry1Credits.length === 0) {
+        entry1Credits.push({ account_code: '4010', account_title: 'Sales Revenue', amount: totalGrossSales });
+      }
     }
 
     const saleDebits: Array<{ account_code: string; account_title: string; amount: number }> = [
@@ -866,7 +876,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       date: saleDate,
       ref_type: 'Sales',
       ref_no: s.invoice_number,
-      description: `Subsidiary Sales: Invoice #${s.invoice_number} - ${customerName} (${s.status || s.sales_status || 'Recorded'})`,
+      description: s.is_prior_year_omission
+        ? `[PAS 8 Prior-Period Omission] Subsidiary Sales: Invoice #${s.invoice_number} - ${customerName} (Reflected via Retained Earnings)`
+        : `Subsidiary Sales: Invoice #${s.invoice_number} - ${customerName} (${s.status || s.sales_status || 'Recorded'})`,
       debits: saleDebits,
       credits: entry1Credits
     } as any);
@@ -1038,9 +1050,13 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const expDate = e.date || e.expense_date || new Date().toISOString().split('T')[0];
     const vNo = e.voucher_number || e.invoice_number || `EXP-${e.id}`;
 
-    const expDebits: Array<{ account_code: string; account_title: string; amount: number }> = [
-      { account_code: expCode, account_title: matched ? matched.title : `Expense: ${expType}`, amount: expBase }
-    ];
+    const expDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
+    if (e.is_prior_year_omission) {
+      // Prior-Period Omission under PAS 8: Debits Retained Earnings directly (does NOT distort current year 6000s Expense)
+      expDebits.push({ account_code: '3020', account_title: 'Retained Earnings (Prior Period Adjustment)', amount: expBase });
+    } else {
+      expDebits.push({ account_code: expCode, account_title: matched ? matched.title : `Expense: ${expType}`, amount: expBase });
+    }
     if (inputVat > 0) {
       expDebits.push({ account_code: '1030', account_title: 'Input VAT', amount: inputVat });
     }
@@ -1053,7 +1069,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       date: expDate,
       ref_type: 'Expense',
       ref_no: vNo,
-      description: `Subsidiary Purchases: Voucher #${vNo} - ${providerName} (${expType})`,
+      description: e.is_prior_year_omission
+        ? `[PAS 8 Prior-Period Omission] Subsidiary Purchases: Voucher #${vNo} - ${providerName} (Reflected via Retained Earnings)`
+        : `Subsidiary Purchases: Voucher #${vNo} - ${providerName} (${expType})`,
       debits: expDebits,
       credits: [{ account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }]
     } as any);

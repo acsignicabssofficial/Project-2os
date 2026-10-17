@@ -117,10 +117,25 @@ export function removeEntityTaxProfile(company: Company, year: number): Company 
 }
 
 /**
- * Generates an array of available tax years containing ONLY:
+/**
+ * Extracts the starting entity registration year from date_of_registration or incorporation date
+ */
+export function getEntityRegistrationYear(company?: Company | null): number | null {
+  if (!company) return null;
+  const rawDate = company.date_of_registration || company.birthday_or_incorporation_date;
+  if (typeof rawDate === 'string' && rawDate.length >= 4) {
+    const yr = parseInt(rawDate.slice(0, 4), 10);
+    if (!isNaN(yr) && yr > 1900 && yr < 2100) return yr;
+  }
+  return null;
+}
+
+/**
+ * Generates an array of available tax years containing:
  * 1. The present year (current calendar year)
- * 2. Any other years that have actual input transactions or configured tax profiles.
- * Example: If transactions exist for 2015 and the current year is 2026, returns [2026, 2015].
+ * 2. Entity books starting from the Date of Registration (BIR Form 2303 / COR) onwards up to present year
+ * 3. Any other years that have actual input transactions or configured tax profiles.
+ * Example: If registration starts at October 2014, then available books start from 2014 onwards (2014...2026).
  */
 export function getAvailableTaxYears(
   company?: Company | null,
@@ -132,7 +147,17 @@ export function getAvailableTaxYears(
   const presentYear = new Date().getFullYear();
   yearsSet.add(presentYear);
 
-  // 2. Include any years found in actual input transactions
+  // 2. Entity books start on the Date of Registration from BIR 2303 / COR
+  const regYear = getEntityRegistrationYear(company);
+  if (regYear && regYear <= presentYear) {
+    for (let y = regYear; y <= presentYear; y++) {
+      yearsSet.add(y);
+    }
+  } else if (regYear) {
+    yearsSet.add(regYear);
+  }
+
+  // 3. Include any years found in actual input transactions
   if (Array.isArray(transactions)) {
     transactions.forEach(t => {
       const d = t?.invoice_date || t?.expense_date || t?.date || t?.transaction_date || t?.issue_date || t?.collection_date || t?.payment_date;
@@ -143,7 +168,7 @@ export function getAvailableTaxYears(
     });
   }
 
-  // 3. Include any years configured in company tax profiles
+  // 4. Include any years configured in company tax profiles
   if (company?.tax_year_profiles) {
     company.tax_year_profiles.forEach(p => {
       const yr = Number(p.year);
@@ -151,5 +176,5 @@ export function getAvailableTaxYears(
     });
   }
 
-  return Array.from(yearsSet).sort((a, b) => b - a); // Descending (e.g. 2026, 2015)
+  return Array.from(yearsSet).sort((a, b) => b - a); // Descending (e.g. 2026, 2025... 2014)
 }

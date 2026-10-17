@@ -317,7 +317,15 @@ function mapSaleToUniform(s: any): UniformBookRecord {
     zero_rated: safeNum(s.zero_rated_amount) || safeNum(s.zero_rated),
     vat_exempt: safeNum(s.vat_exempt_amount) || safeNum(s.vat_exempt),
     less_discount: discount,
-    discounts: discount
+    discounts: discount,
+    is_prior_year_omission: Boolean(s.is_prior_year_omission),
+    original_year: s.original_year,
+    effective_year: s.effective_year,
+    record_date: s.record_date,
+    omission_acknowledged_at: s.omission_acknowledged_at,
+    down_payment: s.down_payment,
+    is_various: Boolean(s.is_various),
+    branch_code: s.branch_code || s.tin_branch_code
   };
 }
 
@@ -374,15 +382,19 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
     vatable_expense: vatable,
     vatable_expense_amount: vatable,
     vat_input_amount: vat,
-    add_vat: vat,
     withholding_2307_2306: withheld,
-    amount_withheld_2307: withheld,
     less_withholding_tax: withheld,
     ewt_amount: withheld,
     zero_rated: safeNum(e.zero_rated_amount) || safeNum(e.zero_rated),
     vat_exempt: safeNum(e.vat_exempt_amount) || safeNum(e.vat_exempt),
     less_discount: discount,
-    discounts: discount
+    discounts: discount,
+    is_prior_year_omission: Boolean(e.is_prior_year_omission),
+    original_year: e.original_year,
+    effective_year: e.effective_year,
+    record_date: e.record_date,
+    omission_acknowledged_at: e.omission_acknowledged_at,
+    branch_code: e.branch_code || e.tin_branch_code
   };
 }
 

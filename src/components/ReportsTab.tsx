@@ -42,6 +42,7 @@ import {
 } from 'recharts';
 import { Sale, Collection, Expense, Payment, SpecialEntry, PPEAsset, PayrollRecord, AccountTitle, Company } from '../types';
 import { safeNum } from '../utils/accounting';
+import { getAvailableTaxYears, getEntityRegistrationYear } from '../utils/taxProfiles';
 import BookToTaxSchedule from './BookToTaxSchedule';
 
 interface ReportsTabProps {
@@ -94,6 +95,28 @@ export default function ReportsTab({
 
   const [currentMonthIdx, setCurrentMonthIdx] = useState(propMonthIdx);
   const [currentYear, setCurrentYear] = useState(propYear);
+  const [typedYearInput, setTypedYearInput] = useState<string>(String(propYear));
+  const [yearValidationError, setYearValidationError] = useState<string | null>(null);
+
+  const regYear = useMemo(() => getEntityRegistrationYear(activeCompany), [activeCompany]);
+  const availableYears = useMemo(() => getAvailableTaxYears(activeCompany, [...sales, ...expenses]), [activeCompany, sales, expenses]);
+
+  useEffect(() => {
+    setTypedYearInput(String(currentYear));
+  }, [currentYear]);
+
+  const handleApplyYear = (targetYearNum: number) => {
+    if (isNaN(targetYearNum)) return;
+    if (regYear && targetYearNum < regYear) {
+      const errMsg = `year must start at the year of registration (${regYear})`;
+      setYearValidationError(errMsg);
+      triggerAlert(errMsg, 'error');
+      return;
+    }
+    setYearValidationError(null);
+    setCurrentYear(targetYearNum);
+    handlePeriodChange(currentMonthIdx, targetYearNum, periodFilterMode);
+  };
 
   // Auto-align default period to actual transaction dates when transactions are present
   useEffect(() => {
@@ -104,11 +127,14 @@ export default function ReportsTab({
       const latestDateStr = allDates.sort().reverse()[0];
       const d = new Date(latestDateStr);
       if (!isNaN(d.getTime())) {
-        setCurrentMonthIdx(d.getMonth());
-        setCurrentYear(d.getFullYear());
+        const foundYr = d.getFullYear();
+        if (!regYear || foundYr >= regYear) {
+          setCurrentMonthIdx(d.getMonth());
+          setCurrentYear(foundYr);
+        }
       }
     }
-  }, [sales, collections, expenses, payments]);
+  }, [sales, collections, expenses, payments, regYear]);
 
   useEffect(() => {
     if (initialSubTab) {
@@ -372,19 +398,62 @@ export default function ReportsTab({
               </select>
             )}
 
-            {/* Year Dropdown */}
-            <select
-              value={currentYear}
-              onChange={(e) => handlePeriodChange(currentMonthIdx, parseInt(e.target.value), periodFilterMode)}
-              aria-label="Filter report by year"
-              className={`text-xs px-2 py-1 rounded-lg border ${theme.borderCard} bg-black/5 dark:bg-white/5 font-semibold ${theme.textMain} cursor-pointer outline-none focus:border-cyan-500`}
-            >
-              <option value={2024}>2024</option>
-              <option value={2025}>2025</option>
-              <option value={2026}>2026</option>
-              <option value={2027}>2027</option>
-              <option value={2028}>2028</option>
-            </select>
+            {/* Type YYYY to go to year (User Request #4) */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-zinc-400 font-mono">FY:</span>
+              <div className="relative">
+                <input
+                  type="text"
+                  maxLength={4}
+                  value={typedYearInput}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    setTypedYearInput(val);
+                    if (val.length === 4) {
+                      const yr = parseInt(val, 10);
+                      handleApplyYear(yr);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (typedYearInput.length === 4) {
+                      handleApplyYear(parseInt(typedYearInput, 10));
+                    } else {
+                      setTypedYearInput(String(currentYear));
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (typedYearInput.length === 4) {
+                        handleApplyYear(parseInt(typedYearInput, 10));
+                      }
+                    }
+                  }}
+                  placeholder="YYYY"
+                  title="Type YYYY to jump to year (must start at year of registration)"
+                  className={`w-16 px-2 py-1 text-xs font-mono font-bold rounded-lg border text-center outline-none transition ${
+                    yearValidationError
+                      ? 'border-rose-500 bg-rose-500/10 text-rose-400'
+                      : `${theme.borderCard} bg-black/5 dark:bg-white/5 ${theme.textMain} focus:border-cyan-500`
+                  }`}
+                />
+              </div>
+
+              {/* Quick Jump Dropdown with all available years starting from registration date */}
+              <select
+                value={currentYear}
+                onChange={(e) => {
+                  const yr = parseInt(e.target.value, 10);
+                  setTypedYearInput(String(yr));
+                  handleApplyYear(yr);
+                }}
+                aria-label="Filter report by registered year"
+                className={`text-xs px-2 py-1 rounded-lg border ${theme.borderCard} bg-black/5 dark:bg-white/5 font-semibold ${theme.textMain} cursor-pointer outline-none focus:border-cyan-500`}
+              >
+                {availableYears.map(yr => (
+                  <option key={yr} value={yr}>{yr}</option>
+                ))}
+              </select>
+            </div>
 
             {/* Privacy Mode */}
             <button
@@ -399,6 +468,13 @@ export default function ReportsTab({
             </button>
           </div>
         </div>
+
+        {yearValidationError && (
+          <div className="mt-2.5 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center justify-between">
+            <span>⚠️ {yearValidationError}</span>
+            <button type="button" onClick={() => setYearValidationError(null)} className="text-rose-400 hover:text-white text-xs font-bold ml-2 cursor-pointer">×</button>
+          </div>
+        )}
 
         {/* Sub-Tab Navigation Strip */}
         <div className="flex items-center justify-between gap-2 overflow-x-auto">

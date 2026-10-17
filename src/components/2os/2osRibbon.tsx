@@ -58,6 +58,7 @@ import {
   getTabInfo
 } from './2osTypes';
 import { Company, ThemeMode } from '../../types';
+import { getEntityRegistrationYear, getAvailableTaxYears } from '../../utils/taxProfiles';
 import AuditTrailModal from './AuditTrailModal';
 import ModalPromptEntry from './ModalPromptEntry';
 import PeriodModal from './PeriodModal';
@@ -742,6 +743,8 @@ export default function TwoOSRibbon({
           triggerAlert(`Reporting period updated: ${newPrefix} ${MONTH_NAMES[newMonth].toUpperCase()} ${newYear}`, 'success');
         }}
         themeMode={themeMode}
+        registrationYear={getEntityRegistrationYear(activeCompany)}
+        availableYears={getAvailableTaxYears(activeCompany)}
       />
 
     </div>

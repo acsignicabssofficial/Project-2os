@@ -99,12 +99,14 @@ export default function CompaniesTab({
   const [entityEmail, setEntityEmail] = useState('');
   const [entityContact, setEntityContact] = useState('');
   const [incorporationDate, setIncorporationDate] = useState('');
+  const [dateOfRegistration, setDateOfRegistration] = useState('');
   const [rdo, setRdo] = useState('');
   const [lineOfBusiness, setLineOfBusiness] = useState('');
 
   // BIR 2303 Certificate of Registration (YES / NO fields)
+  // Default is 'No' as requested per BIR 2303 / RA 11976 (EOPT) guidelines
   const [vatType, setVatType] = useState<'VATABLE' | 'NON-VAT' | 'EXEMPT'>('VATABLE');
-  const [regFee, setRegFee] = useState<'Yes' | 'No'>('Yes');
+  const [regFee, setRegFee] = useState<'Yes' | 'No'>('No');
   const [incomeTax, setIncomeTax] = useState<'Yes' | 'No'>('Yes');
   const [incomeTaxType, setIncomeTaxType] = useState<'GRADUATED' | 'EIGHT_PERCENT'>('GRADUATED');
   const [expenseDeductionType, setExpenseDeductionType] = useState<'ITEMIZED' | 'OSD_40'>('ITEMIZED');
@@ -214,10 +216,11 @@ export default function CompaniesTab({
     setEntityEmail('');
     setEntityContact('');
     setIncorporationDate('');
+    setDateOfRegistration('');
     setRdo('');
     setLineOfBusiness('');
     setVatType('VATABLE');
-    setRegFee('Yes');
+    setRegFee('No');
     setIncomeTax('Yes');
     setIncomeTaxType('GRADUATED');
     setExpenseDeductionType('ITEMIZED');
@@ -326,7 +329,8 @@ export default function CompaniesTab({
       entity_email: entityEmail.trim(),
       company_contact: entityContact.trim(),
       entity_contact: entityContact.trim(),
-      birthday_or_incorporation_date: incorporationDate,
+      birthday_or_incorporation_date: incorporationDate || dateOfRegistration.trim(),
+      date_of_registration: dateOfRegistration.trim() || incorporationDate,
       rdo: rdo.trim(),
       rdo_code: rdo.trim(),
       line_of_business: lineOfBusiness.trim(),
@@ -343,7 +347,7 @@ export default function CompaniesTab({
       date_of_entry: new Date().toISOString().split('T')[0]
     };
 
-    const createdYear = incorporationDate ? incorporationDate.slice(0, 4) : 2026;
+    const createdYear = (dateOfRegistration || incorporationDate) ? (dateOfRegistration || incorporationDate).slice(0, 4) : 2026;
 
     // Trigger local desktop & server filesystem entity directory creation
     fetch('/api/create-entity-directory', {
@@ -476,13 +480,14 @@ export default function CompaniesTab({
     setEntityAddress(c.company_address || c.registered_address || c.entity_address || '');
     setEntityEmail(c.company_email || c.entity_email || '');
     setEntityContact(c.company_contact || c.entity_contact || '');
-    setIncorporationDate(c.birthday_or_incorporation_date || '');
+    setIncorporationDate(c.birthday_or_incorporation_date || c.date_of_registration || '');
+    setDateOfRegistration(c.date_of_registration || c.birthday_or_incorporation_date || '');
     setRdo(c.rdo || c.rdo_code || '');
     setLineOfBusiness(c.line_of_business || '');
 
     // BIR 2303
     setVatType((c.vat_or_non_vat as any) || 'VATABLE');
-    setRegFee(c.registration_fee ? 'Yes' : 'No');
+    setRegFee(c.registration_fee === true || c.registration_fee === 'Yes' ? 'Yes' : 'No');
     setIncomeTax(c.income_tax === false || c.income_tax === 'No' ? 'No' : (c.income_tax ? 'Yes' : 'No'));
     setIncomeTaxType(isIndiv && c.income_tax_type === 'EIGHT_PERCENT' ? 'EIGHT_PERCENT' : 'GRADUATED');
     setExpenseDeductionType(c.expense_deduction_type === 'OSD_40' ? 'OSD_40' : 'ITEMIZED');
@@ -605,7 +610,7 @@ export default function CompaniesTab({
                 <th className="p-3.5">Entity Type</th>
                 <th className="p-3.5">Annual Tax Regimes</th>
                 <th className="p-3.5">RDO Code</th>
-                <th className="p-3.5">Birthday / Incorp Date</th>
+                <th className="p-3.5">Registration / Incorp Date</th>
                 <th className="p-3.5 text-right">Actions</th>
               </tr>
             </thead>
@@ -737,7 +742,7 @@ export default function CompaniesTab({
                           {c.rdo || c.rdo_code || '—'}
                         </td>
                         <td className="p-3.5 font-mono text-zinc-500 dark:text-zinc-400">
-                          {c.birthday_or_incorporation_date || '—'}
+                          {c.date_of_registration || c.birthday_or_incorporation_date || '—'}
                         </td>
                         <td className="p-3.5 text-right">
                           <div className="flex items-center justify-end gap-1.5">
@@ -1135,11 +1140,41 @@ export default function CompaniesTab({
                       <input
                         type="date"
                         value={incorporationDate}
-                        onChange={(e) => setIncorporationDate(e.target.value)}
+                        onChange={(e) => {
+                          setIncorporationDate(e.target.value);
+                          if (!dateOfRegistration) setDateOfRegistration(e.target.value);
+                        }}
                         className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
                         required
                       />
                     </div>
+                  </div>
+
+                  {/* Date of Registration from COR / BIR Form 2303 (User Request #2) */}
+                  <div className={`p-3.5 rounded-xl border ${theme.borderCard} bg-cyan-500/5`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                      <div>
+                        <label className={`block text-xs font-bold ${theme.textTitle}`}>
+                          Date of Registration (from COR / BIR Form 2303) *
+                        </label>
+                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                          Entity fiscal year and available books start from this registration date onwards (e.g. October 2014 opens FY 2014 onwards).
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold self-start sm:self-auto">
+                        COR BIR 2303
+                      </span>
+                    </div>
+                    <input
+                      type="date"
+                      value={dateOfRegistration || incorporationDate}
+                      onChange={(e) => {
+                        setDateOfRegistration(e.target.value);
+                        if (!incorporationDate) setIncorporationDate(e.target.value);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-xs rounded-xl border bg-transparent font-medium ${theme.borderInput} ${theme.textMain}`}
+                      required
+                    />
                   </div>
 
                   {/* RDO Code & Line of Business */}
