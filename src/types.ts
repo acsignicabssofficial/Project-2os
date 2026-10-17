@@ -279,6 +279,11 @@ export interface Sale {
   original_year?: string;
   effective_year?: string;
   omission_acknowledged_at?: string;
+  /** PAS 8.42 restatement: date the record is recognised in the financial statements (tax tabs keep the document date) */
+  fs_effective_date?: string;
+  /** COMPARATIVE = restates the prior (comparative) year; OPENING = restates opening balances only */
+  prior_period_case?: 'COMPARATIVE' | 'OPENING';
+  reclassified_from_closed_year?: boolean;
 }
 
 export interface Expense {
@@ -346,6 +351,11 @@ export interface Expense {
   original_year?: string;
   effective_year?: string;
   omission_acknowledged_at?: string;
+  /** PAS 8.42 restatement: date the record is recognised in the financial statements (tax tabs keep the document date) */
+  fs_effective_date?: string;
+  /** COMPARATIVE = restates the prior (comparative) year; OPENING = restates opening balances only */
+  prior_period_case?: 'COMPARATIVE' | 'OPENING';
+  reclassified_from_closed_year?: boolean;
 }
 
 export interface FiscalYearBookStatus {
@@ -844,5 +854,10 @@ export interface UniformBookRecord {
   original_year?: string;
   effective_year?: string;
   omission_acknowledged_at?: string;
+  /** PAS 8.42 restatement: date the record is recognised in the financial statements (tax tabs keep the document date) */
+  fs_effective_date?: string;
+  /** COMPARATIVE = restates the prior (comparative) year; OPENING = restates opening balances only */
+  prior_period_case?: 'COMPARATIVE' | 'OPENING';
+  reclassified_from_closed_year?: boolean;
 }
 

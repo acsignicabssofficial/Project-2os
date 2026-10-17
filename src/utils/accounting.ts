@@ -405,6 +405,30 @@ export function normalizeDocNo(num?: string): string {
 // ============================================================================
 
 const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+
+/**
+ * PAS 8.42 - retrospective restatement of a material prior-period error found after the books of that year were closed.
+ *   - error made in the PRIOR year (the comparative period)      -> COMPARATIVE: restate that year's figures as if the
+ *     transaction had been recorded on its original date (P&L of the comparative year, tax date = original date).
+ *   - error made EARLIER than the comparative period             -> OPENING: restate only the opening balances of the
+ *     earliest comparative period (adjust opening Retained Earnings as of 1 Jan of the comparative year; no P&L restated).
+ *   - error made in the CURRENT year                             -> not a prior-period error: recorded as a normal transaction.
+ * `originalDate` = the transaction (document) date; `correctionDate` = the date the omission is being recorded.
+ */
+export type PriorPeriodCase = 'COMPARATIVE' | 'OPENING';
+export function resolvePriorPeriodTreatment(originalDate: string, correctionDate: string): {
+  priorCase: PriorPeriodCase; fsEffectiveDate: string; originalYear: string; correctionYear: string;
+} | null {
+  const yo = parseInt(String(originalDate || '').slice(0, 4), 10);
+  const yc = parseInt(String(correctionDate || '').slice(0, 4), 10);
+  if (!yo || !yc || yo >= yc) return null;
+  if (yo === yc - 1) {
+    return { priorCase: 'COMPARATIVE', fsEffectiveDate: String(originalDate).slice(0, 10), originalYear: String(yo), correctionYear: String(yc) };
+  }
+  return { priorCase: 'OPENING', fsEffectiveDate: `${yc - 1}-01-01`, originalYear: String(yo), correctionYear: String(yc) };
+}
+/** Date a record is recognised in the FINANCIAL STATEMENTS (tax tabs keep using the original document date). */
+export const fsDateOf = (r: any): string => String((r && (r.fs_effective_date)) || '').slice(0, 10);
 const numOf = (v: any): number => {
   const n = Number(v);
   return isNaN(n) ? 0 : n;
@@ -524,7 +548,7 @@ export function getSaleSettlementEvents(sale: any, collections: any[]): Settleme
     const particulars = String(c.particulars || '');
     // Zero-amount "Receivable Tracking" placeholders never settle anything
     if (/receivable tracking/i.test(particulars)) return;
-    const colDate = c.date || c.collection_date || '';
+    const colDate = c.fs_effective_date || c.date || c.collection_date || '';
 
     if (Array.isArray(c.installments) && c.installments.length > 0) {
       c.installments.forEach((inst: any, i: number) => {
@@ -533,7 +557,7 @@ export function getSaleSettlementEvents(sale: any, collections: any[]): Settleme
         const withholding = numOf(inst.wtax_2307);
         if (cash <= 0 && discount <= 0 && withholding <= 0) return;
         events.push({
-          date: inst.date || colDate,
+          date: c.fs_effective_date || inst.date || colDate,
           cash, discount, withholding,
           sourceId: Number(c.id) || 0,
           seq: i,
@@ -595,7 +619,7 @@ export function computeSaleSettlement(sale: any, collections: any[]): Settlement
   if (isDirectFullCashSale(sale, collections)) {
     const cashDue = Math.max(0, r2(b.netReceivable - b.w2307));
     return summarizeSettlement(b.netReceivable, b.w2307, [{
-      date: sale.date || '', cash: cashDue, discount: 0, withholding: b.w2307, sourceId: Number(sale.id) || 0, seq: 0, installmentNo: 1
+      date: sale.fs_effective_date || sale.date || '', cash: cashDue, discount: 0, withholding: b.w2307, sourceId: Number(sale.id) || 0, seq: 0, installmentNo: 1
     }]);
   }
   return summarizeSettlement(b.netReceivable, b.w2307, getSaleSettlementEvents(sale, collections));
@@ -643,7 +667,7 @@ export function getPurchaseSettlementEvents(exp: any, payments: any[]): Settleme
 
   const events: SettlementEvent[] = [];
   rows.forEach(p => {
-    const payDate = p.date || p.payment_date || '';
+    const payDate = p.fs_effective_date || p.date || p.payment_date || '';
     if (Array.isArray(p.installments) && p.installments.length > 0) {
       p.installments.forEach((inst: any, i: number) => {
         const cash = numOf(inst.cash_amount);
@@ -651,7 +675,7 @@ export function getPurchaseSettlementEvents(exp: any, payments: any[]): Settleme
         const withholding = numOf(inst.wtax_2307);
         if (cash <= 0 && discount <= 0 && withholding <= 0) return;
         events.push({
-          date: inst.date || payDate,
+          date: p.fs_effective_date || inst.date || payDate,
           cash, discount, withholding,
           sourceId: Number(p.id) || 0,
           seq: i,
@@ -703,7 +727,7 @@ export function computePurchaseSettlement(exp: any, payments: any[]): Settlement
   if (isDirectFullCashPurchase(exp, payments)) {
     const cashDue = Math.max(0, r2(b.netPayable - b.w2307));
     return summarizeSettlement(b.netPayable, b.w2307, [{
-      date: exp.date || '', cash: cashDue, discount: 0, withholding: b.w2307, sourceId: Number(exp.id) || 0, seq: 0, installmentNo: 1
+      date: exp.fs_effective_date || exp.date || '', cash: cashDue, discount: 0, withholding: b.w2307, sourceId: Number(exp.id) || 0, seq: 0, installmentNo: 1
     }]);
   }
   return summarizeSettlement(b.netPayable, b.w2307, getPurchaseSettlementEvents(exp, payments));
@@ -833,13 +857,18 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const normInvRecognized = normalizeDocNo(s.invoice_number);
     if (normInvRecognized) recognizedSaleInvoices.add(normInvRecognized);
 
-    // PAS 8 omissions post on the present-year (record) date, never on the closed prior-year date
-    const saleDate = (s.is_prior_year_omission && (s.record_date || s.created_at))
-      ? String(s.record_date || s.created_at).slice(0, 10)
-      : (s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0]);
+    // PAS 8 restatement: a record carries its FS recognition date (fs_effective_date). Legacy omissions (no prior_period_case) post on
+    // the record date. COMPARATIVE restatements are ordinary transactions of the restated comparative year.
+    const isLegacyOmission = Boolean(s.is_prior_year_omission) && !s.prior_period_case;
+    const saleDate = s.fs_effective_date
+      ? String(s.fs_effective_date).slice(0, 10)
+      : (isLegacyOmission && (s.record_date || s.created_at))
+        ? String(s.record_date || s.created_at).slice(0, 10)
+        : (s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0]);
 
     const entry1Credits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-    const isOmission = Boolean(s.is_prior_year_omission);
+    // Only OPENING-balance corrections (and legacy omissions) go through Retained Earnings; COMPARATIVE restatements restate the P&L
+    const isOmission = Boolean(s.is_prior_year_omission) && s.prior_period_case !== 'COMPARATIVE';
     // Omitted sale of a CLOSED prior year (PAS 8 / correcting-entry reference #31, #33, #43):
     //   Dr Accounts Receivable (or Cash)        Cr Opening Retained Earnings   Cr Output VAT
     // The discount, zero-rated / exempt portions and everything else are netted INTO the Retained Earnings credit, so
@@ -890,7 +919,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       date: saleDate,
       ref_type: 'Sales',
       ref_no: s.invoice_number,
-      description: s.is_prior_year_omission
+      description: (s.is_prior_year_omission && s.prior_period_case === 'COMPARATIVE')
+        ? `[Restated per PAS 8 - FY ${s.original_year || ''} comparative] Subsidiary Sales: Invoice #${s.invoice_number} - ${customerName} (${s.status || s.sales_status || 'Recorded'})`
+        : isOmission
         ? `Correcting entry - omitted FY ${s.original_year || 'prior-year'} sale (PAS 8): Invoice #${s.invoice_number} - ${customerName} (Dr ${omissionCashSale ? 'Cash' : 'Accounts Receivable'} / Cr Retained Earnings${vatOutput > 0 ? ' & Output VAT' : ''}; closed books untouched)`
         : `Subsidiary Sales: Invoice #${s.invoice_number} - ${customerName} (${s.status || s.sales_status || 'Recorded'})`,
       debits: saleDebits,
@@ -1061,13 +1092,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const expType = e.expense_type || e.particulars || 'Operating Expense';
     const matched = accountTitles.find(a => a.title.toLowerCase() === expType.toLowerCase() || a.category === expType);
     const expCode = matched ? matched.code : '6100';
-    const expDate = (e.is_prior_year_omission && (e.record_date || e.created_at))
-      ? String(e.record_date || e.created_at).slice(0, 10)
-      : (e.date || e.expense_date || new Date().toISOString().split('T')[0]);
+    const isLegacyExpOmission = Boolean(e.is_prior_year_omission) && !e.prior_period_case;
+    const expDate = e.fs_effective_date
+      ? String(e.fs_effective_date).slice(0, 10)
+      : (isLegacyExpOmission && (e.record_date || e.created_at))
+        ? String(e.record_date || e.created_at).slice(0, 10)
+        : (e.date || e.expense_date || new Date().toISOString().split('T')[0]);
     const vNo = e.voucher_number || e.invoice_number || `EXP-${e.id}`;
 
     const expDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-    const isExpOmission = Boolean(e.is_prior_year_omission);
+    const isExpOmission = Boolean(e.is_prior_year_omission) && e.prior_period_case !== 'COMPARATIVE';
     if (isExpOmission) {
       // Omitted expense of a CLOSED prior year (PAS 8 / reference #34, #35): Dr Opening Retained Earnings, Dr Input VAT, Cr A/P (or Cash)
       expDebits.push({ account_code: '3020', account_title: 'Retained Earnings - Prior Period Adjustment (PAS 8)', amount: expBase });
@@ -1096,7 +1130,9 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       date: expDate,
       ref_type: 'Expense',
       ref_no: vNo,
-      description: isExpOmission
+      description: (e.is_prior_year_omission && e.prior_period_case === 'COMPARATIVE')
+        ? `[Restated per PAS 8 - FY ${e.original_year || ''} comparative] Subsidiary Purchases: Voucher #${vNo} - ${providerName} (${expType})`
+        : isExpOmission
         ? `Correcting entry - omitted FY ${e.original_year || 'prior-year'} expense (PAS 8): Voucher #${vNo} - ${providerName} (Dr Retained Earnings${inputVat > 0 ? ' & Input VAT' : ''} / Cr ${omissionCashPurchase ? 'Cash' : 'Accounts Payable'}; closed books untouched)`
         : `Subsidiary Purchases: Voucher #${vNo} - ${providerName} (${expType})`,
       debits: expDebits,

@@ -103,6 +103,7 @@ import CWTForProvidersTab from './components/CWTForProvidersTab';
 import FinancialPositionTab from './components/FinancialPositionTab';
 import FsPeriodBar from './components/FsPeriodBar';
 import { getPeriodRange, filterByPeriod, FsPeriodScope } from './utils/taxProfiles';
+import { resolvePriorPeriodTreatment } from './utils/accounting';
 import IncomeStatementTab from './components/IncomeStatementTab';
 import ChangesInEquityTab from './components/ChangesInEquityTab';
 import CashFlowsTab from './components/CashFlowsTab';
@@ -302,6 +303,9 @@ function mapSaleToUniform(s: any): UniformBookRecord {
     installments: Array.isArray(s.installments) ? s.installments : undefined,
     is_cancelled: Boolean(s.is_cancelled || s.sales_status === 'Cancelled'),
     created_at: s.created_at || new Date().toISOString(),
+    fs_effective_date: s.fs_effective_date,
+    prior_period_case: s.prior_period_case,
+    reclassified_from_closed_year: Boolean(s.reclassified_from_closed_year),
     customer_name: s.registered_name || s.customer_name,
     customer_tin: s.tin || s.customer_tin || s.client_TIN,
     client_TIN: s.tin || s.customer_tin || s.client_TIN,
@@ -376,6 +380,9 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
     installments: Array.isArray(e.installments) ? e.installments : undefined,
     is_cancelled: Boolean(e.is_cancelled || e.expense_status === 'Cancelled'),
     created_at: e.created_at || new Date().toISOString(),
+    fs_effective_date: e.fs_effective_date,
+    prior_period_case: e.prior_period_case,
+    reclassified_from_closed_year: Boolean(e.reclassified_from_closed_year),
     service_provider_name: e.registered_name || e.service_provider_name,
     service_provider_tin: e.tin || e.service_provider_tin || e.sp_tin,
     sp_tin: e.tin || e.service_provider_tin || e.sp_tin,
@@ -447,6 +454,9 @@ function mapCollectionToUniform(c: any): UniformBookRecord {
     installments: Array.isArray(c.installments) ? c.installments : undefined,
     is_cancelled: Boolean(c.is_cancelled),
     created_at: c.created_at || new Date().toISOString(),
+    fs_effective_date: c.fs_effective_date,
+    prior_period_case: c.prior_period_case,
+    reclassified_from_closed_year: Boolean(c.reclassified_from_closed_year),
     amount_collected: collected,
     pending_balance: pending,
     amount_withheld_2307: withheld
@@ -496,6 +506,9 @@ function mapPaymentToUniform(p: any): UniformBookRecord {
     installments: Array.isArray(p.installments) ? p.installments : undefined,
     is_cancelled: Boolean(p.is_cancelled),
     created_at: p.created_at || new Date().toISOString(),
+    fs_effective_date: p.fs_effective_date,
+    prior_period_case: p.prior_period_case,
+    reclassified_from_closed_year: Boolean(p.reclassified_from_closed_year),
     amount_paid: paid,
     pending_balance: pending,
     withholding_tax_2307: withheld
@@ -1251,11 +1264,10 @@ export default function App() {
   // =========================================================================
   // CLOSED-BOOKS GUARD (single choke point for EVERY entry screen, import and mobile form)
   // A closed fiscal year must never change. Any NEW book record whose transaction date falls in a closed year of its
-  // own entity (and that was not explicitly re-opened) is re-posted on today's date:
-  //   - Sales / Purchases are flagged is_prior_year_omission -> the journal engine books them to Retained Earnings [3020]
-  //     (+ Output/Input VAT) in the present year, so present-year Sales/Expenses are NOT touched but Equity is.
-  //   - Collections / Payments / Cash Receipts / Cash Disbursements are settled on today's date (cash actually moved today).
-  // The original date is preserved on the record for the audit trail. The Sales / Purchase forms still ask first
+  // own entity (and that was not explicitly re-opened) is treated as a PAS 8.42 prior-period correction:
+  //   - error of the PRIOR year  -> COMPARATIVE: that year's figures are restated (as if recorded on its original date)
+  //   - error of 2+ years before -> OPENING: only the opening balances (Retained Earnings) of the comparative period are restated
+  // The document keeps its original date (tax date); present-year Sales / Expenses are never touched. The Sales / Purchase forms still ask first
   // ("Post to present year" vs "Re-open the year"); this guard catches everything else.
   // =========================================================================
   const knownBookIdsRef = useRef<Record<string, Set<any>> | null>(null);
@@ -1293,26 +1305,29 @@ export default function App() {
     const isNew = (k: string, r: any) => !known[k].has(r.id);
 
     let converted = 0;
-    const redate = (r: any, y: string, extra: any = {}) => {
+    // PAS 8.42: the record keeps its ORIGINAL document date (tax date); only its FS recognition changes.
+    const restate = (r: any, y: string, extra: any = {}) => {
+      const t = resolvePriorPeriodTreatment(recDate(r), today);
+      if (!t) return r;
       converted++;
-      const orig = recDate(r);
       return {
         ...r,
-        date: today, invoice_date: today, issue_date: today, date_of_sale: today,
-        expense_date: today, collection_date: today, payment_date: today,
         record_date: today,
         reclassified_from_closed_year: true,
+        prior_period_case: t.priorCase,
+        fs_effective_date: t.fsEffectiveDate,
         original_year: y,
-        original_invoice_date: orig,
-        effective_year: curYear,
+        original_invoice_date: recDate(r),
+        effective_year: t.correctionYear,
         ...extra
       };
     };
-    const flagOmission = (r: any, y: string, label: string) => redate(r, y, {
+    const flagOmission = (r: any, y: string, label: string) => restate(r, y, {
       is_prior_year_omission: true,
       omission_acknowledged_at: new Date().toISOString(),
-      particulars: `[Prior FY ${y} Omission (orig. date ${recDate(r)}) - Posted in FY ${curYear} (PAS 8)] ${r.particulars || ''}`.trim()
+      particulars: `[PAS 8 restatement - omitted FY ${y} ${label}, corrected in FY ${curYear}] ${r.particulars || ''}`.trim()
     });
+    const redate = restate;
 
     const patch = (k: string, setter: (u: (prev: any[]) => any[]) => void, convert: (r: any, y: string) => any) => {
       const targets = books[k].filter(r => isNew(k, r) && closedYearOf(r));
@@ -1335,7 +1350,7 @@ export default function App() {
     snapshotIds();
     if (converted > 0) {
       triggerAlert(
-        `Closed-books protection: ${converted} record(s) dated in a CLOSED fiscal year were NOT posted to the closed books. They were recorded in ${curYear} instead (sales/purchases via Retained Earnings [3020], PAS 8). To post them in the closed year, re-open that year first in Entity Status.`,
+        `Closed-books protection: ${converted} record(s) dated in a CLOSED fiscal year were not posted into the closed books. They are treated as PAS 8 prior-period corrections (restated comparative or opening balance, and disclosed in the Notes to FS). To record them directly in the closed year, re-open that year first in Entity Status.`,
         'info'
       );
     }
@@ -1549,6 +1564,25 @@ export default function App() {
   const companyCashReceipts = cashReceipts.filter(r => matchesActiveSheetScope(r.company_name));
   const companyExpenses = subsidiaryPurchases.filter(e => matchesActiveSheetScope(e.company_name));
   const companyPayments = (paymentsRecords.length > 0 ? paymentsRecords : cashDisbursements).filter(p => matchesActiveSheetScope(p.company_name));
+
+  // PAS 8 restatements keep their ORIGINAL document date, so VAT / percentage tax / income tax / SLSP / QAP / SAWT automatically
+  // land in the ORIGINAL year (where the amended return belongs) and never in the present year. Only LEGACY omissions (saved
+  // before this rule, dated today) are still kept out of the present-year tax computations here.
+  const looseDocKey = (v?: string) => String(v || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  const isLegacyOmission = (r: any) => Boolean(r.is_prior_year_omission) && !r.prior_period_case;
+  const omittedSaleDocs = new Set(companySales.filter(r => isLegacyOmission(r)).map(r => looseDocKey(r.invoice_number)).filter(Boolean));
+  const omittedPurchaseDocs = new Set(
+    companyExpenses.filter(r => isLegacyOmission(r)).flatMap(r => [looseDocKey(r.voucher_number), looseDocKey(r.invoice_number)]).filter(Boolean)
+  );
+  const taxSales = companySales.filter(r => !isLegacyOmission(r));
+  const taxExpenses = companyExpenses.filter(r => !isLegacyOmission(r));
+  const taxCollections = companyCollections.filter(r => !omittedSaleDocs.has(looseDocKey(r.invoice_number)));
+  // Management reports show P&L: OPENING-balance restatements are equity-only, so they are excluded from sales / expense reports
+  const reportSales = taxSales.filter(r => r.prior_period_case !== 'OPENING');
+  const reportExpenses = taxExpenses.filter(r => r.prior_period_case !== 'OPENING');
+  const taxPayments = companyPayments.filter(r =>
+    !(omittedPurchaseDocs.has(looseDocKey(r.voucher_number)) || omittedPurchaseDocs.has(looseDocKey(r.invoice_number)))
+  );
   const companyCashDisbursements = cashDisbursements.filter(d => matchesActiveSheetScope(d.company_name));
   const companySpecialEntries = specialEntries.filter(s => matchesActiveSheetScope(s.company_name));
   const companyIncomeTaxRecords = incomeTaxRecords.filter(r => matchesActiveSheetScope(r.company_name));
@@ -2542,6 +2576,9 @@ export default function App() {
                 <>
 <FsPeriodBar activeCompany={activeCompany} year={selectedYear} monthIdx={selectedMonthIdx} scope={fsScope} onChange={handleFsPeriodChange} theme={activeTheme} />
 <NotesToFSTab 
+                  selectedYear={selectedYear}
+                  allSales={companySales}
+                  allExpenses={companyExpenses}
                   sales={fsPer(companySales)}
                   collections={fsPer(companyCollections)}
                   expenses={fsPer(companyExpenses)}
@@ -2559,8 +2596,8 @@ export default function App() {
                   payrollRecords={companyPayrollRecords}
                   taxBrackets={taxBrackets}
                   employees={companyEmployees}
-                  expenses={companyExpenses}
-                  payments={companyPayments}
+                  expenses={taxExpenses}
+                  payments={taxPayments}
                   serviceProviders={contractors as any}
                   activeCompany={activeCompany}
                   theme={activeTheme}
@@ -2577,10 +2614,10 @@ export default function App() {
 
               {(['business_tax', 'btax_2550q', 'btax_2551q', 'btax_sales', 'btax_purchases', 'bir_slsp'].includes(activeTab)) && (
                 <BusinessTaxHubTab 
-                  sales={companySales}
-                  collections={companyCollections}
-                  expenses={companyExpenses}
-                  payments={companyPayments}
+                  sales={taxSales}
+                  collections={taxCollections}
+                  expenses={taxExpenses}
+                  payments={taxPayments}
                   customers={customers}
                   contractors={contractors}
                   activeCompany={activeCompany}
@@ -2599,8 +2636,8 @@ export default function App() {
 
               {(['income_tax', 'itax_1701', 'itax_1702rt', 'itax_1702ex', 'itax_sawt', 'tax_reports', 'bir_sawt', 'cwt_customers'].includes(activeTab)) && (
                 <IncomeTaxHubTab 
-                  sales={companySales}
-                  expenses={companyExpenses}
+                  sales={taxSales}
+                  expenses={taxExpenses}
                   ppeAssets={companyPpeAssets}
                   specialEntries={companySpecialEntries}
                   incomeTaxRecords={companyIncomeTaxRecords}
@@ -2629,10 +2666,10 @@ export default function App() {
 
               {(activeTab === 'reports' || activeTab === 'reports_turnovers' || activeTab === 'reports_horizontal' || activeTab === 'reports_vertical' || activeTab === 'reports_ratios' || activeTab === 'reports_book_to_tax') && (
                 <ReportsTab 
-                  sales={companySales}
-                  collections={companyCollections}
-                  expenses={companyExpenses}
-                  payments={companyPayments}
+                  sales={reportSales}
+                  collections={taxCollections}
+                  expenses={reportExpenses}
+                  payments={taxPayments}
                   specialEntries={companySpecialEntries}
                   ppeAssets={companyPpeAssets}
                   payrollRecords={companyPayrollRecords as any}

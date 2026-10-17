@@ -25,7 +25,7 @@ import {
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import AutoSuggestInput from './AutoSuggestInput';
 import { UniformBookRecord, Contractor, Company, AccountTitle, SpecialEntry, SpecialEntryLine } from '../types';
-import { computeExpenseVAT, computePurchaseSettlement } from '../utils/accounting';
+import { computeExpenseVAT, computePurchaseSettlement, resolvePriorPeriodTreatment } from '../utils/accounting';
 
 interface PurchaseTransactionTabProps {
   subsidiaryPurchases: UniformBookRecord[];
@@ -382,7 +382,18 @@ export default function PurchaseTransactionTab({
 
     // PAS 8: a transaction for a CLOSED year is posted on the present-year date so it never touches the closed books.
     const originalDate = date;
-    const bookDate = isConfirmedOptionC ? new Date().toISOString().slice(0, 10) : date;
+    // PAS 8.42 retrospective restatement: the voucher keeps its ORIGINAL date (tax date); the FS recognise it as a restated comparative
+    // (error made in the prior year) or as an opening-balance restatement (error made 2+ years before).
+    const bookDate = date;
+    const ppt = isConfirmedOptionC ? resolvePriorPeriodTreatment(date, new Date().toISOString().slice(0, 10)) : null;
+    const stamp = <T extends object>(rec: T): T => ppt ? ({
+      ...rec,
+      reclassified_from_closed_year: true,
+      prior_period_case: ppt.priorCase,
+      fs_effective_date: ppt.fsEffectiveDate,
+      original_year: ppt.originalYear,
+      effective_year: ppt.correctionYear
+    }) : rec;
 
     const totalDue = liveFormulas.total_amount_due;
     const nowIso = new Date().toISOString();
@@ -419,7 +430,7 @@ export default function PurchaseTransactionTab({
       voucher_number: voucherNo.trim(),
       invoice_number: invoiceNo.trim() || `INV-${voucherNo.trim()}`,
       particulars: isConfirmedOptionC
-        ? `[Prior FY ${expYear} Omission (orig. date ${originalDate}) - Posted in FY ${curYear} (PAS 8)] [${expenseType}] ${cleanParticulars}`
+        ? `[PAS 8 ${ppt?.priorCase === 'COMPARATIVE' ? 'restated comparative' : 'opening-balance restatement'} - omitted FY ${expYear} expense, corrected in FY ${curYear}] [${expenseType}] ${cleanParticulars}`
         : `[${expenseType}] ${cleanParticulars}`,
       qty: parseFloat(qty) || 1,
       unit_price: parsedUnitPrice,
@@ -438,6 +449,8 @@ export default function PurchaseTransactionTab({
       pending_balance: purchaseMode === 'ON CASH' ? 0 : (purchaseMode === 'ON PARTIAL' ? Math.max(0, totalDue - (parseFloat(downPaymentAmount) || 0)) : totalDue),
       is_cancelled: false,
       is_prior_year_omission: isConfirmedOptionC,
+      prior_period_case: ppt?.priorCase,
+      fs_effective_date: ppt?.fsEffectiveDate,
       original_year: isConfirmedOptionC ? expYear : undefined,
       original_invoice_date: isConfirmedOptionC ? originalDate : undefined,
       effective_year: isConfirmedOptionC ? curYear : undefined,
@@ -480,7 +493,7 @@ export default function PurchaseTransactionTab({
         status: 'On Account',
         installments: []
       };
-      setPayments(prev => [openPayableRecord, ...prev]);
+      setPayments(prev => [stamp(openPayableRecord), ...prev]);
 
       triggerAlert(`Purchase ${voucherNo} recorded to Subsidiary Purchases & Payments Book on Account (Payable: ₱${totalDue.toLocaleString()}).`, 'success');
     }
@@ -525,7 +538,7 @@ export default function PurchaseTransactionTab({
         is_cancelled: false,
         created_at: nowIso
       };
-      setCashDisbursements(prev => [cashDisbursementRecord, ...prev]);
+      setCashDisbursements(prev => [stamp(cashDisbursementRecord), ...prev]);
 
       // Record to Payments book
       const paymentRecord: UniformBookRecord = {
@@ -536,7 +549,7 @@ export default function PurchaseTransactionTab({
         pending_balance: 0,
         settled_via_collections: false
       };
-      setPayments(prev => [paymentRecord, ...prev]);
+      setPayments(prev => [stamp(paymentRecord), ...prev]);
 
       triggerAlert(`Paid Purchase ${voucherNo} recorded to Subsidiary Purchases, Cash Disbursements & Payments Book (Cash Disbursed: ₱${netCashForFullPayable.toLocaleString()})!`, 'success');
     }
@@ -609,16 +622,16 @@ export default function PurchaseTransactionTab({
         created_at: nowIso
       };
 
-      setPayments(prev => [partialPaymentRecord, ...prev]);
+      setPayments(prev => [stamp(partialPaymentRecord), ...prev]);
 
       if (isFull) {
-        setCashDisbursements(prev => [{
+        setCashDisbursements(prev => [stamp({
           ...partialPaymentRecord,
           id: commonId + 2,
           type_of_transaction: 'CASH',
           status: 'Paid',
           settled_via_collections: true
-        }, ...prev]);
+        }), ...prev]);
         triggerAlert(`Purchase ${voucherNo} was fully paid! Recorded to Subsidiary Purchases, Payments Book, and Cash Disbursements.`, 'success');
       } else {
         triggerAlert(`Partial Purchase ${voucherNo} recorded to Subsidiary Purchases & Payments Book. Disbursed: ₱${actualFirstCash.toLocaleString()} (Remaining payable: ₱${pendingBal.toLocaleString()}).`, 'info');
@@ -1806,7 +1819,7 @@ export default function PurchaseTransactionTab({
               </div>
               <div>
                 <h3 className="text-base font-black">
-                  Prior-Period Transaction Detected (Option B)
+                  Prior-Period Transaction Detected (PAS 8)
                 </h3>
                 <p className="text-xs text-amber-500 font-bold">
                   Fiscal Year {priorYearWarning.invoiceYear} Books of Accounts are CLOSED &amp; REVERSED
@@ -1818,13 +1831,26 @@ export default function PurchaseTransactionTab({
               <p className="text-zinc-200">
                 You are recording a purchase / expense transaction dated <strong>{date}</strong> (Fiscal Year <strong>{priorYearWarning.invoiceYear}</strong>) with a system record date of today (<strong>{new Date().toISOString().slice(0, 10)}</strong>).
               </p>
-              <p className="text-zinc-300">
-                Under Philippine Accounting Standards (PAS 8 - Prior Period Adjustments) and BIR compliance rules, choose how to treat this entry:
-              </p>
-              <ul className="list-disc list-inside space-y-1.5 text-zinc-400">
-                <li><strong>Choice 1 (Post to Present Year):</strong> Books of closed FY {priorYearWarning.invoiceYear} remain closed and unaltered. This omission is recognized in present year {priorYearWarning.currentYear} records via Retained Earnings [3020].</li>
-                <li><strong>Choice 2 (Reopen Fiscal Year):</strong> Unlocks FY {priorYearWarning.invoiceYear} books upon supervisory authorization to record directly into FY {priorYearWarning.invoiceYear} expenses and nominal accounts.</li>
-              </ul>
+              {(() => {
+                const t = resolvePriorPeriodTreatment(date, new Date().toISOString().slice(0, 10));
+                return (
+                  <>
+                    <p className="text-zinc-300">
+                      Under <strong>PAS 8.42</strong> a prior-period omission is corrected <strong>retrospectively</strong> - the financial statements are presented as if the expense had been recorded in the year it was incurred:
+                    </p>
+                    <ul className="list-disc list-inside space-y-1.5 text-zinc-400">
+                      <li>
+                        <strong>Choice 1 (Restate - PAS 8):</strong>{' '}
+                        {t?.priorCase === 'COMPARATIVE'
+                          ? <>FY {priorYearWarning.invoiceYear} is the <strong>prior (comparative) year</strong>: its figures are restated (Expense, A/P / Cash, Input VAT) and flow into the opening Retained Earnings of FY {priorYearWarning.currentYear}. FY {priorYearWarning.currentYear} Expenses are <strong>not</strong> affected.</>
+                          : <>FY {priorYearWarning.invoiceYear} is <strong>older than the comparative year</strong>: only the <strong>opening balances</strong> of the comparative period (opening Retained Earnings, A/P / Cash, Input VAT) are restated. No expense is shown in FY {priorYearWarning.currentYear} or in the comparative year.</>}
+                        {' '}The voucher keeps its original date ({date}) for tax purposes and is disclosed in the Notes to FS.
+                      </li>
+                      <li><strong>Choice 2 (Reopen Fiscal Year):</strong> Unlock FY {priorYearWarning.invoiceYear} and record the expense directly in that year as an ordinary entry (with supervisory authorization).</li>
+                    </ul>
+                  </>
+                );
+              })()}
             </div>
 
             <div className="flex flex-col gap-2 pt-2">
@@ -1836,7 +1862,7 @@ export default function PurchaseTransactionTab({
                 }}
                 className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-sm cursor-pointer text-left flex items-center justify-between"
               >
-                <span>✓ Option B (Choice 1): Post to Present Year ({priorYearWarning.currentYear}) via PAS 8 Retained Earnings</span>
+                <span>✓ Choice 1: Restate per PAS 8 (retrospective correction)</span>
                 <ArrowRight className="w-4 h-4 shrink-0" />
               </button>
 

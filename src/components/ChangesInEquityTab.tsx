@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { ShieldCheck, Info } from 'lucide-react';
 import { Sale, Expense, PPEAsset, PayrollRecord, SpecialEntry, Company } from '../types';
-import { computeAccountingSummaries } from '../utils/accounting';
+import { computeAccountingSummaries, getSaleBookedAmounts, getPurchaseBookedAmounts } from '../utils/accounting';
 import { getRecordDate } from '../utils/taxProfiles';
 
 interface ChangesInEquityTabProps {
@@ -44,7 +44,7 @@ export default function ChangesInEquityTab({
 
   const eq = useMemo(() => {
     const before = <T,>(rows: T[]): T[] =>
-      periodStart ? rows.filter(r => { const d = getRecordDate(r); return !!d && d < periodStart; }) : [];
+      periodStart ? rows.filter(r => { const d = (r as any)?.fs_effective_date ? String((r as any).fs_effective_date).slice(0, 10) : getRecordDate(r); return !!d && d < periodStart; }) : [];
 
     const summarize = (pick: <T>(rows: T[]) => T[]) =>
       computeAccountingSummaries({
@@ -80,12 +80,23 @@ export default function ChangesInEquityTab({
     const priorPeriodAdjustment = r2(re3020(close) - re3020(open));
     const oci = r2(close.totalOCI - open.totalOCI);
     const endingEquity = close.totalEquity;
+
+    // PAS 8 restatements already contained in the OPENING balance (error of an earlier year corrected after that year was closed)
+    const fsDate = (r: any) => String(r.fs_effective_date || '').slice(0, 10);
+    const restatedInOpening = periodStart
+      ? r2(
+          (sales as any[]).filter(x => x.prior_period_case && !x.is_cancelled && fsDate(x) && fsDate(x) < periodStart)
+            .reduce((a, x) => { const b = getSaleBookedAmounts(x); return a + (b.netReceivable - b.vatOutput); }, 0) -
+          (expenses as any[]).filter(x => x.prior_period_case && !x.is_cancelled && fsDate(x) && fsDate(x) < periodStart)
+            .reduce((a, x) => a + getPurchaseBookedAmounts(x).expBase, 0)
+        )
+      : 0;
     const computedEnding = r2(openingEquity + contributions - drawings + netIncome + priorPeriodAdjustment + oci);
 
     return {
       openingCapital, openingRE, openingOCI, openingEquity,
       contributions, drawings, netIncome, priorPeriodAdjustment, oci,
-      endingEquity, foots: Math.abs(computedEnding - endingEquity) < 0.02
+      restatedInOpening, endingEquity, foots: Math.abs(computedEnding - endingEquity) < 0.02
     };
   }, [sales, expenses, collections, payments, cashReceipts, cashDisbursements, ppeAssets, payrollRecords, specialEntries, periodStart, companyName]);
 
@@ -111,7 +122,7 @@ export default function ChangesInEquityTab({
         {row('Add: Owner Contributions (recorded via Special Entries)', eq.contributions, 'text-emerald-400')}
         {row('Add: Net Income for the Period', eq.netIncome, eq.netIncome < 0 ? 'text-rose-400' : 'text-emerald-400')}
         {eq.priorPeriodAdjustment !== 0 &&
-          row('Add / (Less): Prior-Period Adjustments - omitted transactions of closed years (PAS 8)', eq.priorPeriodAdjustment, eq.priorPeriodAdjustment < 0 ? 'text-rose-400' : 'text-amber-400')}
+          row('Add / (Less): Restatement of opening balance - prior-period errors (PAS 8.42(b))', eq.priorPeriodAdjustment, eq.priorPeriodAdjustment < 0 ? 'text-rose-400' : 'text-amber-400')}
         {eq.oci !== 0 && row('Add / (Less): Other Comprehensive Income', eq.oci, 'text-cyan-400')}
         {row("Less: Owner's Withdrawals / Dividends Declared", eq.drawings, 'text-rose-400', true)}
         <div className="flex justify-between text-sm font-bold p-4 bg-purple-500/15 border border-purple-500/30 rounded-xl text-purple-300">
@@ -119,10 +130,15 @@ export default function ChangesInEquityTab({
           <span className="font-mono text-base">{signed(eq.endingEquity)}</span>
         </div>
 
-        {eq.priorPeriodAdjustment !== 0 && (
+        {(eq.priorPeriodAdjustment !== 0 || eq.restatedInOpening !== 0) && (
           <div className="flex items-start gap-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
             <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-            <span>The prior-period adjustment comes from transactions omitted from fiscal years that are already CLOSED. Under PAS 8 they are corrected through Retained Earnings of the present period (Dr Cash / A/R, Cr Retained Earnings - or Dr Retained Earnings, Cr A/P / Cash); the closed years' Income Statements stay unchanged and the present-year Sales / Expenses are not affected.</span>
+            <span>
+              PAS 8.42 retrospective restatement: omitted transactions of closed years are presented as if they had been recorded in the year they were made.
+              {eq.restatedInOpening !== 0 && <> The opening balance above is <strong>as restated</strong> (includes a net {eq.restatedInOpening < 0 ? 'decrease' : 'increase'} of {fmt(eq.restatedInOpening)} from prior-period corrections).</>}
+              {eq.priorPeriodAdjustment !== 0 && <> The restatement line shows the correction of the opening balance of this (comparative) period. </>}
+              Current-period Sales / Expenses are not affected. See Note 7 to the financial statements.
+            </span>
           </div>
         )}
         {!eq.foots && (

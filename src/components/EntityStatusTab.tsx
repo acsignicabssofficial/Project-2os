@@ -521,7 +521,9 @@ export default function EntityStatusTab({
         const override = taxDeclarations[key];
 
         // Sales in this quarter
-        const qSales = sales.filter(s => {
+        // PAS 8 restatements keep their ORIGINAL document date, so they land in the original year's quarter (=> shows the under-declaration
+        // that needs an amended return). Only LEGACY omissions (dated today, no restatement case) are kept out of the present quarter.
+        const qSales = sales.filter(s => !((s as any).is_prior_year_omission && !(s as any).prior_period_case)).filter(s => {
           const d = s.invoice_date || (s as any).date;
           if (!d || !d.startsWith(year)) return false;
           const m = parseInt(d.slice(5, 7), 10);
@@ -532,7 +534,7 @@ export default function EntityStatusTab({
         });
 
         // Expenses in this quarter
-        const qExpenses = expenses.filter(e => {
+        const qExpenses = expenses.filter(e => !((e as any).is_prior_year_omission && !(e as any).prior_period_case)).filter(e => {
           const d = e.expense_date || (e as any).date;
           if (!d || !d.startsWith(year)) return false;
           const m = parseInt(d.slice(5, 7), 10);
@@ -620,8 +622,8 @@ export default function EntityStatusTab({
           partyName: s.customer_name || s.registered_name || 'Customer',
           amount: Number(s.total_amount_due) || Number(s.invoice_amount) || 0,
           taxAmount: Number(s.output_vat) || 0,
-          status: 'Recognized in Present Year (PAS 8)',
-          notes: 'Fiscal Year closed. Adjustment posted to current active year Retained Earnings [3020] (Option B - PAS 8).'
+          status: 'PAS 8 retrospective restatement',
+          notes: s.prior_period_case === 'COMPARATIVE' ? 'Prior-year error: comparative figures restated as if recorded on the original date (PAS 8.42(a)).' : 'Error of an earlier year: opening balances of the comparative period restated through Retained Earnings (PAS 8.42(b)).'
         });
       }
     });
@@ -640,8 +642,8 @@ export default function EntityStatusTab({
           partyName: e.service_provider_name || 'Vendor',
           amount: Number(e.total_amount_due) || Number(e.expense_invoice_amount) || 0,
           taxAmount: Number(e.vat_input_amount) || 0,
-          status: 'Recognized in Present Year (PAS 8)',
-          notes: 'Fiscal Year closed. Prior-period expense recognized in present year without modifying closed audited books (Option B - PAS 8).'
+          status: 'PAS 8 retrospective restatement',
+          notes: e.prior_period_case === 'COMPARATIVE' ? 'Prior-year error: comparative figures restated as if recorded on the original date (PAS 8.42(a)).' : 'Error of an earlier year: opening balances of the comparative period restated through Retained Earnings (PAS 8.42(b)).'
         });
       }
     });
@@ -1511,6 +1513,7 @@ export default function EntityStatusTab({
                     <th className="p-3 text-right">Amount (₱)</th>
                     <th className="p-3 text-right">Tax Impact (₱)</th>
                     <th className="p-3">PAS 8 Accounting Classification</th>
+                    <th className="p-3">Tax Treatment</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800 font-medium">
@@ -1539,6 +1542,10 @@ export default function EntityStatusTab({
                       </td>
                       <td className="p-3 text-zinc-400 text-[11px]">
                         <span className="font-bold text-cyan-300">Option B:</span> {o.notes}
+                      </td>
+                      <td className="p-3 text-amber-300 text-[11px]">
+                        Not counted in FY {o.effectiveYear} taxes. Keeps its original date ({o.date}), so it appears in the FY {o.originalYear} VAT / percentage
+                        tax / income tax computations as an under-declaration - assess an amended return / deficiency for that year. Disclosed in Notes to FS (PAS 8.49).
                       </td>
                     </tr>
                   ))}

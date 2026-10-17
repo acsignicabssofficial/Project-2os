@@ -1,10 +1,14 @@
 import React from 'react';
 import { FileText, Building2, Info, CheckCircle2 } from 'lucide-react';
 import { Sale, Collection, Expense, Payment, PPEAsset, Company } from '../types';
-import { safeNum } from '../utils/accounting';
+import { safeNum, getSaleBookedAmounts, getPurchaseBookedAmounts } from '../utils/accounting';
 
 interface NotesToFSTabProps {
   sales?: Sale[];
+  /** Unfiltered company records - used for the PAS 8 disclosure (Note 7) in the year the error was corrected */
+  allSales?: any[];
+  allExpenses?: any[];
+  selectedYear?: number;
   collections?: Collection[];
   expenses?: Expense[];
   payments?: Payment[];
@@ -14,6 +18,9 @@ interface NotesToFSTabProps {
 }
 
 export default function NotesToFSTab({
+  allSales = [],
+  allExpenses = [],
+  selectedYear,
   sales = [],
   collections = [],
   expenses = [],
@@ -34,8 +41,46 @@ export default function NotesToFSTab({
     return '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
-  const cleanSales = (sales || []).filter(s => s && !s.is_cancelled);
-  const cleanExpenses = (expenses || []).filter(e => e && !e.is_cancelled);
+  // PAS 8: omitted transactions of closed years are NOT revenue / expenses of this period - they are corrected through
+  // Retained Earnings and disclosed in Note 7 instead.
+  // COMPARATIVE restatements are revenue / expense of the restated year; OPENING-balance and legacy corrections are equity-only.
+  const isEquityOnlyCorrection = (r: any) => Boolean(r?.is_prior_year_omission) && r?.prior_period_case !== 'COMPARATIVE';
+  const cleanSales = (sales || []).filter(s => s && !s.is_cancelled && !isEquityOnlyCorrection(s));
+  const cleanExpenses = (expenses || []).filter(e => e && !e.is_cancelled && !isEquityOnlyCorrection(e));
+
+  const r2n = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  // Disclosed in the FS of the year in which the error was corrected (PAS 8.49)
+  const correctedThisYear = (r: any) =>
+    r && !r.is_cancelled && r.is_prior_year_omission &&
+    (selectedYear === undefined || String(r.effective_year || String(r.record_date || r.created_at || '').slice(0, 4)) === String(selectedYear));
+  const caseLabel = (r: any) =>
+    r.prior_period_case === 'COMPARATIVE'
+      ? `Restated comparative FY ${r.original_year || ''}`
+      : r.prior_period_case === 'OPENING'
+        ? `Opening balance restated as of ${r.fs_effective_date || ''}`
+        : 'Recorded in current-year equity (legacy)';
+  const priorPeriodCorrections = [
+    ...(allSales.length ? allSales : (sales || [])).filter(correctedThisYear).map((s: any) => {
+      const b = getSaleBookedAmounts(s);
+      return {
+        key: `S-${s.id}`, kind: 'Omitted sale', treatment: caseLabel(s), originalYear: s.original_year || String(s.original_invoice_date || s.date || '').slice(0, 4) || 'prior year',
+        originalDate: s.original_invoice_date || s.date || '', docNo: s.invoice_number || '', party: s.registered_name || s.customer_name || '',
+        assetOrLiab: b.netReceivable, vat: b.vatOutput,
+        retainedEarnings: r2n(b.netReceivable - b.vatOutput) // increase in equity
+      };
+    }),
+    ...(allExpenses.length ? allExpenses : (expenses || [])).filter(correctedThisYear).map((e: any) => {
+      const b = getPurchaseBookedAmounts(e);
+      return {
+        key: `E-${e.id}`, kind: 'Omitted expense', treatment: caseLabel(e), originalYear: e.original_year || String(e.original_invoice_date || e.date || '').slice(0, 4) || 'prior year',
+        originalDate: e.original_invoice_date || e.date || '', docNo: e.voucher_number || e.invoice_number || '', party: e.registered_name || e.service_provider_name || '',
+        assetOrLiab: b.netPayable, vat: b.inputVat,
+        retainedEarnings: -r2n(b.expBase) // decrease in equity
+      };
+    })
+  ];
+  const ppaTotalRE = r2n(priorPeriodCorrections.reduce((a, c) => a + c.retainedEarnings, 0));
+  const ppaYears = Array.from(new Set(priorPeriodCorrections.map(c => c.originalYear))).sort().join(', ');
   const cleanPpeAssets = (ppeAssets || []).filter(a => a);
 
   const getSaleGross = (s: any): number => {
@@ -267,6 +312,71 @@ export default function NotesToFSTab({
               <span className="text-purple-400 font-bold text-sm">{formatPeso(ppeCost)} Gross PPE</span>
             </div>
           </div>
+        </section>
+
+        {/* Note 7: PAS 8 - Correction of prior-period errors */}
+        <section className="space-y-2">
+          <h3 className={`text-sm font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2 border-b ${theme.borderCard} pb-2`}>
+            <Info className="w-4 h-4" />
+            Note 7 - Correction of Prior-Period Errors (PAS 8)
+          </h3>
+          {priorPeriodCorrections.length === 0 ? (
+            <p className={`text-xs ${theme.textMuted}`}>
+              No material prior-period errors or omissions were identified and corrected during this reporting period.
+            </p>
+          ) : (
+            <>
+              <p className={`text-xs ${theme.textMain} leading-relaxed`}>
+                During the period, {priorPeriodCorrections.length} transaction(s) that were omitted from the books of fiscal year(s) <span className="font-mono font-semibold">{ppaYears}</span> were
+                discovered after those years were closed. In accordance with PAS 8.42 these material prior-period errors were corrected <span className="font-semibold">retrospectively</span>:
+                an error made in the prior year restates that comparative year's figures as if the transaction had been recorded on its original date;
+                an error made in an earlier year restates only the opening balances (assets, liabilities and Retained Earnings) of the earliest comparative period presented.
+                The corrected amounts are <span className="font-semibold">not</span> included in the sales or expenses of the current period.
+              </p>
+              <div className="overflow-x-auto rounded-xl border border-zinc-800">
+                <table className="w-full text-left text-[11px]">
+                  <thead className="bg-zinc-900/70 text-zinc-400 uppercase tracking-wider">
+                    <tr>
+                      <th className="p-2">Nature</th>
+                      <th className="p-2">Orig. FY / Date</th>
+                      <th className="p-2">PAS 8 treatment</th>
+                      <th className="p-2">Doc # / Party</th>
+                      <th className="p-2 text-right">A/R or A/P (Cash)</th>
+                      <th className="p-2 text-right">Output / Input VAT</th>
+                      <th className="p-2 text-right">Effect on equity</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800 font-mono">
+                    {priorPeriodCorrections.map(c => (
+                      <tr key={c.key}>
+                        <td className="p-2 font-sans">{c.kind}</td>
+                        <td className="p-2">FY {c.originalYear}{c.originalDate ? ` / ${c.originalDate}` : ''}</td>
+                        <td className="p-2 font-sans">{c.treatment}</td>
+                        <td className="p-2 font-sans">{c.docNo} - {c.party}</td>
+                        <td className="p-2 text-right">{formatPeso(c.assetOrLiab)}</td>
+                        <td className="p-2 text-right">{formatPeso(c.vat)}</td>
+                        <td className={`p-2 text-right ${c.retainedEarnings < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                          {c.retainedEarnings < 0 ? `(${formatPeso(-c.retainedEarnings)})` : formatPeso(c.retainedEarnings)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="font-bold bg-zinc-900/40">
+                      <td className="p-2 font-sans" colSpan={6}>Net effect on equity (before income-tax effect)</td>
+                      <td className={`p-2 text-right ${ppaTotalRE < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        {ppaTotalRE < 0 ? `(${formatPeso(-ppaTotalRE)})` : formatPeso(ppaTotalRE)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <ul className={`list-disc list-inside text-[11px] ${theme.textMuted} space-y-1`}>
+                <li>Nature of the error (PAS 8.49(b)(i)): omission of the transactions listed above from the books of the closed fiscal year(s) {ppaYears}.</li>
+                <li>Line items affected: Sales / Expenses and Net Income of the restated comparative year (for errors of the prior year only), Accounts Receivable / Accounts Payable / Cash, Output / Input VAT, and Retained Earnings. Financial statements of the current period are not affected by these transactions; the originally issued statements of years older than the comparative period are not re-issued.</li>
+                <li>Amount of the correction at the beginning of the earliest prior period presented (PAS 8.49(b)(ii)): net effect on equity of {ppaTotalRE < 0 ? `(${formatPeso(-ppaTotalRE)})` : formatPeso(ppaTotalRE)}, before the related income-tax effect.</li>
+                <li>Tax effects: the transaction keeps its original document date, so the related VAT / percentage tax and income tax pertain to fiscal year(s) {ppaYears} and are excluded from the current year's tax computations. An amended return / deficiency or refund assessment for those year(s) must be evaluated separately (BIR). The income-tax liability (and related tax expense of the restated year) is recognized when determined (Dr Retained Earnings or Income Tax Expense of the restated year, Cr Income Tax Payable).</li>
+              </ul>
+            </>
+          )}
         </section>
       </div>
     </div>

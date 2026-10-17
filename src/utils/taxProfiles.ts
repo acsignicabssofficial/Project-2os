@@ -224,7 +224,8 @@ export function getRecordDate(r: any): string {
 export function filterByPeriod<T>(rows: T[] | undefined, range: FsPeriodRange, cumulative: boolean): T[] {
   if (!Array.isArray(rows)) return [];
   return rows.filter(r => {
-    const d = getRecordDate(r);
+    // PAS 8 restatements carry an FS recognition date (comparative year / opening balance date); tax tabs keep the document date
+    const d = (r && (r as any).fs_effective_date) ? String((r as any).fs_effective_date).slice(0, 10) : getRecordDate(r);
     if (!d) return true;
     if (d > range.end) return false;
     if (!cumulative && d < range.start) return false;

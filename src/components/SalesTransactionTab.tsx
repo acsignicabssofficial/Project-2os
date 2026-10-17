@@ -28,7 +28,7 @@ import {
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
 import AutoSuggestInput from './AutoSuggestInput';
 import { UniformBookRecord, Customer, Company, SpecialEntry, SpecialEntryLine } from '../types';
-import { computeSaleFormulas, computeSaleSettlement } from '../utils/accounting';
+import { computeSaleFormulas, computeSaleSettlement, resolvePriorPeriodTreatment } from '../utils/accounting';
 
 interface SalesTransactionTabProps {
   subsidiarySales: UniformBookRecord[];
@@ -373,9 +373,21 @@ export default function SalesTransactionTab({
     setExistingCustomerMatchPrompt(null);
     setPriorYearWarning(null);
 
-    // PAS 8: a transaction for a CLOSED year is posted on the present-year date so it never touches the closed books.
+    // PAS 8.42 (retrospective restatement) for a transaction of a CLOSED year. The document keeps its ORIGINAL date (tax date);
+    // the financial statements recognise it per prior-period case:
+    //   COMPARATIVE (error made in the prior year)   -> restates the comparative year's figures (as if recorded on the original date)
+    //   OPENING (error made 2+ years before)         -> restates only the opening balances (Retained Earnings) of the comparative period
     const originalDate = date;
-    const bookDate = priorYearAdjustment ? new Date().toISOString().slice(0, 10) : date;
+    const bookDate = date;
+    const ppt = priorYearAdjustment ? resolvePriorPeriodTreatment(date, new Date().toISOString().slice(0, 10)) : null;
+    const stamp = <T extends object>(rec: T): T => ppt ? ({
+      ...rec,
+      reclassified_from_closed_year: true,
+      prior_period_case: ppt.priorCase,
+      fs_effective_date: ppt.fsEffectiveDate,
+      original_year: ppt.originalYear,
+      effective_year: ppt.correctionYear
+    }) : rec;
 
     const effectiveName = (overrideName !== undefined ? overrideName : customerName).trim();
     const effectiveTinStr = overrideTin9 !== undefined ? overrideTin9 : tin;
@@ -500,7 +512,7 @@ export default function SalesTransactionTab({
       voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
       invoice_number: formattedInvoiceNo,
       particulars: priorYearAdjustment
-        ? `[Prior FY ${priorYearAdjustment.originalYear} Omission (orig. date ${originalDate}) - Posted in FY ${priorYearAdjustment.effectiveYear} (PAS 8)] ${particulars.trim()}`.trim()
+        ? `[PAS 8 ${ppt?.priorCase === 'COMPARATIVE' ? 'restated comparative' : 'opening-balance restatement'} - omitted FY ${priorYearAdjustment.originalYear} sale, corrected in FY ${priorYearAdjustment.effectiveYear}] ${particulars.trim()}`.trim()
         : particulars.trim(),
       qty: parseFloat(qty) || 1,
       unit_price: parseFloat(unitPrice) || 0,
@@ -519,6 +531,8 @@ export default function SalesTransactionTab({
       is_cancelled: false,
       is_various: finalIsVarious,
       is_prior_year_omission: Boolean(priorYearAdjustment),
+      prior_period_case: ppt?.priorCase,
+      fs_effective_date: ppt?.fsEffectiveDate,
       original_year: priorYearAdjustment?.originalYear,
       original_invoice_date: priorYearAdjustment ? originalDate : undefined,
       effective_year: priorYearAdjustment?.effectiveYear,
@@ -562,7 +576,7 @@ export default function SalesTransactionTab({
         status: 'On Account',
         installments: []
       };
-      setCollections(prev => [onAccountTrackingRecord, ...prev]);
+      setCollections(prev => [stamp(onAccountTrackingRecord), ...prev]);
       triggerAlert(`Sale ${formattedInvoiceNo} recorded to Subsidiary Sales & tracked in Collections Book (Pending Receivable: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`, 'success');
     } else if (saleMode === 'ON CASH') {
       // 5.3 Record to Cash Receipts (Fully paid sales only -> Journalizes Dr Cash, Dr CWT 2307, Cr A/R)
@@ -604,7 +618,7 @@ export default function SalesTransactionTab({
         is_various: finalIsVarious,
         created_at: nowIso
       };
-      setCashReceipts(prev => [cashReceiptRecord, ...prev]);
+      setCashReceipts(prev => [stamp(cashReceiptRecord), ...prev]);
 
       // 5.4 Record to Collections Book (tracks vatable sales, cash received, 2307, vat output -> no duplicate journal entry)
       const collectionRecord: UniformBookRecord = {
@@ -613,7 +627,7 @@ export default function SalesTransactionTab({
         status: 'Paid',
         pending_balance: 0
       };
-      setCollections(prev => [collectionRecord, ...prev]);
+      setCollections(prev => [stamp(collectionRecord), ...prev]);
 
       triggerAlert(`Full Cash Sale ${formattedInvoiceNo} recorded to Subsidiary Sales, Cash Receipts & Collections Book (Cash Received: ₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })})!`, 'success');
     } else if (saleMode === 'ON PARTIAL') {
@@ -671,7 +685,7 @@ export default function SalesTransactionTab({
         created_at: nowIso
       };
 
-      setCollections(prev => [partialCollectionRecord, ...prev]);
+      setCollections(prev => [stamp(partialCollectionRecord), ...prev]);
 
       // If Down Payment equals full amount due, also record to Cash Receipts
       if (pendingBal <= 0.01) {
@@ -690,7 +704,7 @@ export default function SalesTransactionTab({
           settled_via_collections: true,
           particulars: `Full Settlement Completed via Collections Book: Invoice #${invoiceNo.trim()}`
         };
-        setCashReceipts(prev => [fullCashReceipt, ...prev]);
+        setCashReceipts(prev => [stamp(fullCashReceipt), ...prev]);
       }
 
       triggerAlert(`Partial Sale ${invoiceNo} recorded to Subsidiary Sales & Collections Book (COLLECTION 1: ₱${downPmt.toLocaleString(undefined, { minimumFractionDigits: 2 })} | Pending Balance: ₱${pendingBal.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`, 'info');
@@ -2725,7 +2739,7 @@ export default function SalesTransactionTab({
               </div>
               <div>
                 <h3 className="text-base font-black">
-                  Prior-Period Transaction Detected (Option B)
+                  Prior-Period Transaction Detected (PAS 8)
                 </h3>
                 <p className="text-xs text-amber-500 font-bold">
                   Fiscal Year {priorYearWarning.invoiceYear} Books of Accounts are CLOSED &amp; REVERSED
@@ -2737,13 +2751,26 @@ export default function SalesTransactionTab({
               <p className="text-zinc-200">
                 You are recording a sales transaction dated <strong>{date}</strong> (Fiscal Year <strong>{priorYearWarning.invoiceYear}</strong>) with a system record date of today (<strong>{new Date().toISOString().slice(0, 10)}</strong>).
               </p>
-              <p className="text-zinc-300">
-                Under Philippine Accounting Standards (PAS 8 - Prior Period Adjustments) and BIR compliance rules, choose how to treat this entry:
-              </p>
-              <ul className="list-disc list-inside space-y-1.5 text-zinc-400">
-                <li><strong>Choice 1 (Post to Present Year):</strong> Books of closed FY {priorYearWarning.invoiceYear} remain closed and unaltered. This omission is recognized in present year {priorYearWarning.currentYear} records via Retained Earnings [3020].</li>
-                <li><strong>Choice 2 (Reopen Fiscal Year):</strong> Unlocks FY {priorYearWarning.invoiceYear} books upon supervisory authorization to record directly into FY {priorYearWarning.invoiceYear} sales and nominal accounts.</li>
-              </ul>
+              {(() => {
+                const t = resolvePriorPeriodTreatment(date, new Date().toISOString().slice(0, 10));
+                return (
+                  <>
+                    <p className="text-zinc-300">
+                      Under <strong>PAS 8.42</strong> a prior-period omission is corrected <strong>retrospectively</strong> - the financial statements are presented as if the sale had been recorded in the year it was made:
+                    </p>
+                    <ul className="list-disc list-inside space-y-1.5 text-zinc-400">
+                      <li>
+                        <strong>Choice 1 (Restate - PAS 8):</strong>{' '}
+                        {t?.priorCase === 'COMPARATIVE'
+                          ? <>FY {priorYearWarning.invoiceYear} is the <strong>prior (comparative) year</strong>: its figures are restated (Sales, A/R / Cash, Output VAT) and flow into the opening Retained Earnings of FY {priorYearWarning.currentYear}. FY {priorYearWarning.currentYear} Sales are <strong>not</strong> affected.</>
+                          : <>FY {priorYearWarning.invoiceYear} is <strong>older than the comparative year</strong>: only the <strong>opening balances</strong> of the comparative period (opening Retained Earnings, A/R / Cash, Output VAT) are restated. No Sales are shown in FY {priorYearWarning.currentYear} or in the comparative year.</>}
+                        {' '}The invoice keeps its original date ({date}) for tax purposes and is disclosed in the Notes to FS. The Output VAT / income tax belong to FY {priorYearWarning.invoiceYear} (amended return).
+                      </li>
+                      <li><strong>Choice 2 (Reopen Fiscal Year):</strong> Unlock FY {priorYearWarning.invoiceYear} and record the sale directly in that year as an ordinary entry (with supervisory authorization).</li>
+                    </ul>
+                  </>
+                );
+              })()}
             </div>
 
             <div className="flex flex-col gap-2 pt-2">
@@ -2759,7 +2786,7 @@ export default function SalesTransactionTab({
                 }}
                 className="w-full px-4 py-2.5 text-xs font-bold rounded-xl text-slate-950 bg-amber-400 hover:bg-amber-300 transition shadow-sm cursor-pointer text-left flex items-center justify-between"
               >
-                <span>✓ Option B (Choice 1): Post to Present Year ({priorYearWarning.currentYear}) via PAS 8 Retained Earnings</span>
+                <span>✓ Choice 1: Restate per PAS 8 (retrospective correction)</span>
                 <ArrowRight className="w-4 h-4 shrink-0" />
               </button>
 
