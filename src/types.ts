@@ -12,6 +12,7 @@ export interface Company {
   suffix?: string;
   civil_status?: string;
   birthday_or_incorporation_date?: string;
+  date_of_registration?: string;
   personal_address?: string;
   entity_type?: string;
   company_tin?: string;

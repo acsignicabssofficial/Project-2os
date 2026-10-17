@@ -437,7 +437,10 @@ function isSampleTransaction(record: any): boolean {
       const cleanPayorTin = (r.tin || '').replace(/\D/g, '').padEnd(9, '0').slice(0, 9);
       return `DSAWT,${r.seq},${cleanPayorTin},${r.branch},"${r.name}",${r.atc},${r.incomeBase.toFixed(2)},${r.taxWithheld.toFixed(2)}`;
     }).join('\n');
-    const content = header + details;
+    const totalBase = validRows.reduce((sum, r) => sum + r.incomeBase, 0);
+    const totalWithheld = validRows.reduce((sum, r) => sum + r.taxWithheld, 0);
+    const trailer = `\nTSAWT,${validRows.length},${totalBase.toFixed(2)},${totalWithheld.toFixed(2)}\n`;
+    const content = header + details + trailer;
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);

@@ -13,7 +13,8 @@ import {
   Users, 
   Layers, 
   ArrowRight,
-  Sparkles
+  Sparkles,
+  FileCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { exportToCsv } from '../../utils/csvImportExport';
@@ -31,6 +32,7 @@ export type ExportTarget =
   | 'employees'
   | 'special_entries'
   | 'ppe'
+  | 'sawt'
   | 'full_workbook'
   | 'sql_dump';
 
@@ -176,6 +178,12 @@ export default function ExportModal({
       icon: <Database className="w-5 h-5 text-orange-500" /> 
     },
     { 
+      id: 'sawt', 
+      label: 'Summary Alphalist of Withholding Tax (SAWT)', 
+      desc: `Creditable Withholding Taxes (BIR 2307) claimed on sales (${data.sales.filter((s: any) => (s.withholding_2307 || 0) > 0).length} records)`, 
+      icon: <FileCheck className="w-5 h-5 text-emerald-500" /> 
+    },
+    { 
       id: 'full_workbook', 
       label: 'Complete Multi-Sheet Accounting Workbook', 
       desc: `All 11 modules combined into one comprehensive multi-tab Excel file`, 
@@ -284,6 +292,19 @@ export default function ExportModal({
         case 'ppe':
           filenameBase = `${safeCompanyName}_PPE_Assets_${dateStr}`;
           dataset = data.ppeAssets;
+          break;
+        case 'sawt':
+          filenameBase = `${safeCompanyName}_SAWT_Schedule_${dateStr}`;
+          dataset = (data.sales || [])
+            .filter((s: any) => (Number(s.withholding_2307) || 0) > 0)
+            .map((s: any, idx: number) => ({
+              'Seq No': idx + 1,
+              'Payor TIN': s.customer_tin || '',
+              'Payor Name': s.customer_name || '',
+              'ATC Code': 'WI010',
+              'Income Base': Number(s.vatable_sales || s.vatable_amount || s.amount || 0),
+              'Creditable Tax Withheld': Number(s.withholding_2307 || 0)
+            }));
           break;
       }
 

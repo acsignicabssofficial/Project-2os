@@ -9,7 +9,8 @@ import {
   FileSpreadsheet,
   FileCheck,
   Printer,
-  ChevronDown
+  ChevronDown,
+  Download
 } from 'lucide-react';
 import { 
   Company, 
@@ -21,6 +22,7 @@ import {
   AccountTitle 
 } from '../types';
 import { computeIncomeTaxEngine } from '../utils/accounting';
+import BIRFormsExportModal from './BIRFormsExportModal';
 
 interface TaxReportsTabProps {
   sales: Sale[];
@@ -55,6 +57,7 @@ export default function TaxReportsTab({
 
   // Active Tax Report Form Subtab
   const [activeFormTab, setActiveFormTab] = useState<'1701_1702' | '2550Q' | '1601EQ'>('1701_1702');
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // Normalize entity default
   const defaultEntity = rawEntityType.toUpperCase().includes('SOLE') || rawEntityType.toUpperCase().includes('INDIVIDUAL') || rawEntityType.toUpperCase().includes('PROFESSIONAL')
@@ -251,31 +254,42 @@ export default function TaxReportsTab({
             Official Return Generators
           </span>
 
-          {/* Form Selector Sub-navigation */}
-          <div className="flex items-center gap-2 bg-zinc-800/40 p-1.5 rounded-xl border border-zinc-700/30">
+          {/* Form Selector Sub-navigation & Export Hub Button */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 bg-zinc-800/40 p-1.5 rounded-xl border border-zinc-700/30">
+              <button
+                onClick={() => setActiveFormTab('1701_1702')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${
+                  activeFormTab === '1701_1702' ? 'bg-cyan-600 text-white shadow-sm' : `${theme.textMuted} hover:text-white`
+                }`}
+              >
+                BIR 1701Q / 1702Q (Income Tax)
+              </button>
+              <button
+                onClick={() => setActiveFormTab('2550Q')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${
+                  activeFormTab === '2550Q' ? 'bg-cyan-600 text-white shadow-sm' : `${theme.textMuted} hover:text-white`
+                }`}
+              >
+                BIR 2550Q (Value-Added Tax)
+              </button>
+              <button
+                onClick={() => setActiveFormTab('1601EQ')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${
+                  activeFormTab === '1601EQ' ? 'bg-cyan-600 text-white shadow-sm' : `${theme.textMuted} hover:text-white`
+                }`}
+              >
+                BIR 1601-EQ (Withholding Tax)
+              </button>
+            </div>
+
             <button
-              onClick={() => setActiveFormTab('1701_1702')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${
-                activeFormTab === '1701_1702' ? 'bg-cyan-600 text-white shadow-sm' : `${theme.textMuted} hover:text-white`
-              }`}
+              onClick={() => setShowExportModal(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 bg-blue-900 hover:bg-blue-800 text-white shadow-sm"
+              title="Open statutory eBIR Forms Export Hub"
             >
-              BIR 1701Q / 1702Q (Income Tax)
-            </button>
-            <button
-              onClick={() => setActiveFormTab('2550Q')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${
-                activeFormTab === '2550Q' ? 'bg-cyan-600 text-white shadow-sm' : `${theme.textMuted} hover:text-white`
-              }`}
-            >
-              BIR 2550Q (Value-Added Tax)
-            </button>
-            <button
-              onClick={() => setActiveFormTab('1601EQ')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${
-                activeFormTab === '1601EQ' ? 'bg-cyan-600 text-white shadow-sm' : `${theme.textMuted} hover:text-white`
-              }`}
-            >
-              BIR 1601-EQ (Withholding Tax)
+              <Download className="w-4 h-4 text-amber-300" />
+              <span>eBIR Forms Export Hub</span>
             </button>
           </div>
         </div>
@@ -599,6 +613,19 @@ export default function TaxReportsTab({
           </div>
         </div>
       )}
+
+      {/* eBIR Forms Export Hub Modal */}
+      <BIRFormsExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        activeCompany={activeCompany}
+        sales={sales}
+        expenses={expenses}
+        ppeAssets={ppeAssets}
+        specialEntries={specialEntries}
+        theme={theme}
+        triggerAlert={triggerAlert}
+      />
     </div>
   );
 }
