@@ -124,18 +124,8 @@ export default function IncomeStatementTab({
             {/* Fiscal Year Selector (Present Year + Input Years Only) */}
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-700 bg-zinc-900/80 text-xs font-bold text-white shadow-xs">
               <Calendar className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="text-zinc-400 font-medium">Fiscal Year:</span>
-              <select
-                value={currentYear}
-                onChange={(e) => handleYearSelect(Number(e.target.value))}
-                className="bg-transparent text-cyan-400 font-bold focus:outline-hidden cursor-pointer"
-              >
-                {availableYears.map(yr => (
-                  <option key={yr} value={yr} className="bg-zinc-900 text-white">
-                    {yr}
-                  </option>
-                ))}
-              </select>
+              <span className="text-zinc-400 font-medium">Fiscal Year (set in period bar above):</span>
+              <span className="text-cyan-400 font-bold">{currentYear}</span>
             </div>
 
             <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-500/10 border border-zinc-700/30 text-xs">

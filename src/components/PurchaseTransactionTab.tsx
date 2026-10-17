@@ -19,6 +19,7 @@ import {
   Trash2,
   Eye,
   AlertTriangle,
+  Lock,
   Unlock
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
@@ -56,7 +57,7 @@ export default function PurchaseTransactionTab({
   setCashDisbursements,
   payments,
   setPayments,
-  contractors,
+  contractors: allContractors,
   setContractors,
   activeCompany,
   theme,
@@ -72,6 +73,12 @@ export default function PurchaseTransactionTab({
   onUpdateClosedFiscalYears
 }: PurchaseTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
+  // Directory is strictly scoped to the ACTIVE entity: records of other / deleted entities must never match, auto-suggest or
+  // be reported as "already in the directory".
+  const contractors = useMemo(
+    () => allContractors.filter((r: any) => activeCompanyName && String(r.company_name || '').trim().toLowerCase() === activeCompanyName.trim().toLowerCase()),
+    [allContractors, activeCompanyName]
+  );
   // Company-scoped, blank-safe matching between a payable (voucher / invoice) and its Payments Book rows
   const normKey = (v?: string) => (v || '').trim().toLowerCase();
   const isActiveCompanyRow = (r: { company_name?: string }) =>
@@ -373,6 +380,10 @@ export default function PurchaseTransactionTab({
     const cleanBranch5 = (branchCode.replace(/\D/g, '') || '00000').padStart(5, '0').slice(0, 5);
     const full14DigitTin = rawTin9.length === 9 ? `${formattedTin9}-${cleanBranch5}` : '000-000-000-00000';
 
+    // PAS 8: a transaction for a CLOSED year is posted on the present-year date so it never touches the closed books.
+    const originalDate = date;
+    const bookDate = isConfirmedOptionC ? new Date().toISOString().slice(0, 10) : date;
+
     const totalDue = liveFormulas.total_amount_due;
     const nowIso = new Date().toISOString();
     const commonId = Date.now();
@@ -403,12 +414,12 @@ export default function PurchaseTransactionTab({
       tin: full14DigitTin,
       address: address.trim(),
       type_of_transaction: assignedTransactionType,
-      date: date,
+      date: bookDate,
       invoice_type: invoiceType,
       voucher_number: voucherNo.trim(),
       invoice_number: invoiceNo.trim() || `INV-${voucherNo.trim()}`,
       particulars: isConfirmedOptionC
-        ? `[Prior FY ${expYear} Omission - Reflected in FY ${curYear} (PAS 8)] [${expenseType}] ${cleanParticulars}`
+        ? `[Prior FY ${expYear} Omission (orig. date ${originalDate}) - Posted in FY ${curYear} (PAS 8)] [${expenseType}] ${cleanParticulars}`
         : `[${expenseType}] ${cleanParticulars}`,
       qty: parseFloat(qty) || 1,
       unit_price: parsedUnitPrice,
@@ -428,13 +439,14 @@ export default function PurchaseTransactionTab({
       is_cancelled: false,
       is_prior_year_omission: isConfirmedOptionC,
       original_year: isConfirmedOptionC ? expYear : undefined,
+      original_invoice_date: isConfirmedOptionC ? originalDate : undefined,
       effective_year: isConfirmedOptionC ? curYear : undefined,
       omission_acknowledged_at: isConfirmedOptionC ? nowIso : undefined,
       created_at: nowIso,
       // Compatibility aliases for BIR tools, Reports, Notes to FS
-      expense_date: date,
+      expense_date: bookDate,
       record_date: new Date().toISOString().slice(0, 10),
-      issue_date: date,
+      issue_date: bookDate,
       expense_invoice_amount: liveFormulas.total_amount_vat_inclusive || liveFormulas.amount,
       vatable_expense: liveFormulas.vatable_purchases,
       vatable_expense_amount: liveFormulas.vatable_purchases,
@@ -488,7 +500,7 @@ export default function PurchaseTransactionTab({
         tin: full14DigitTin,
         address: address.trim(),
         type_of_transaction: 'CASH',
-        date: date,
+        date: bookDate,
         invoice_type: invoiceType,
         voucher_number: voucherNo.trim(),
         invoice_number: invoiceNo.trim() || `INV-${voucherNo.trim()}`,
@@ -560,7 +572,7 @@ export default function PurchaseTransactionTab({
         tin: full14DigitTin,
         address: address.trim(),
         type_of_transaction: 'ON ACCOUNT',
-        date: date,
+        date: bookDate,
         invoice_type: invoiceType,
         voucher_number: voucherNo.trim(),
         invoice_number: invoiceNo.trim() || `INV-${voucherNo.trim()}`,
@@ -586,7 +598,7 @@ export default function PurchaseTransactionTab({
         installments: [
           {
             payment_no: 1,
-            date: date,
+            date: bookDate,
             ref_no: voucherNo.trim(),
             cash_amount: actualFirstCash,
             wtax_2307: isFull ? totalEwt : downWtax

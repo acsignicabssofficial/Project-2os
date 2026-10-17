@@ -32,6 +32,8 @@ interface CompaniesTabProps {
   setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
   activeCompany: Company | null;
   setActiveCompany: (c: Company | null) => void;
+  /** Cascade-delete every record (customers, providers, books, journals...) that belongs to the deleted entity name */
+  onDeleteEntityData?: (entityName: string) => void;
   activeBranchCode?: string;
   onSelectBranch?: (code: string) => void;
   theme: any;
@@ -58,6 +60,7 @@ export default function CompaniesTab({
   setCompanies,
   activeCompany,
   setActiveCompany,
+  onDeleteEntityData,
   activeBranchCode = '00000',
   onSelectBranch,
   theme,
@@ -403,6 +406,14 @@ export default function CompaniesTab({
     const { id, company_name } = companyToDelete;
     const remaining = companies.filter(c => c.id !== id);
     setCompanies(remaining);
+    // Branches share the head office's entity name (and therefore its books). Wipe the entity's data only when no
+    // other registered profile (head office / branch) still uses that name.
+    const normName = (n?: string) => String(n || '').trim().toLowerCase();
+    const deletedKey = normName(companyToDelete.company_name || companyToDelete.entity_name);
+    const nameStillInUse = remaining.some(c => normName(c.company_name || c.entity_name) === deletedKey);
+    if (deletedKey && !nameStillInUse && onDeleteEntityData) {
+      onDeleteEntityData(companyToDelete.company_name || companyToDelete.entity_name || '');
+    }
     if (activeCompany && activeCompany.id === id) {
       const nextComp = remaining.length > 0 ? remaining[0] : null;
       setActiveCompany(nextComp);

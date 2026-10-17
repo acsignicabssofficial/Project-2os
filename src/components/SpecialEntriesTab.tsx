@@ -36,6 +36,9 @@ interface SpecialEntriesTabProps {
   theme: any;
   triggerAlert: (text: string, type?: 'success' | 'error' | 'info') => void;
   globalSearch: string;
+  /** Closed fiscal years of the active entity (shared with Entity Status / Sales / Purchases) */
+  closedFiscalYears?: string[];
+  onUpdateClosedFiscalYears?: (years: string[]) => void;
 }
 
 export default function SpecialEntriesTab({
@@ -48,7 +51,9 @@ export default function SpecialEntriesTab({
   activeCompany,
   theme,
   triggerAlert,
-  globalSearch
+  globalSearch,
+  closedFiscalYears,
+  onUpdateClosedFiscalYears
 }: SpecialEntriesTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
   const [voucherNo, setVoucherNo] = useState(`JV-${new Date().getFullYear()}-${String(specialEntries.length + 1).padStart(3, '0')}`);
@@ -80,14 +85,12 @@ export default function SpecialEntriesTab({
   const [isLockWizardOpen, setIsLockWizardOpen] = useState(false);
   const [isRJEWizardOpen, setIsRJEWizardOpen] = useState(false);
 
-  // Period Lock state (stored locally or synchronized with Entity Status)
-  const [lockedPeriods, setLockedPeriods] = useState<string[]>(() => {
-    const saved = localStorage.getItem('2os_closed_fiscal_years');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { }
-    }
-    return ['2024'];
-  });
+  // Period Lock state - shared with Entity Status / Sales / Purchases (single source of truth lives in App, per entity)
+  const lockedPeriods: string[] = closedFiscalYears || [];
+  const setLockedPeriods = (updater: string[] | ((prev: string[]) => string[])) => {
+    const next = typeof updater === 'function' ? updater(lockedPeriods) : updater;
+    if (onUpdateClosedFiscalYears) onUpdateClosedFiscalYears(next);
+  };
   const [selectedFiscalYear, setSelectedFiscalYear] = useState('2025');
 
   // Calculate debit and credit totals

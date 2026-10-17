@@ -62,6 +62,16 @@ export default function RelatedPartiesTab({
 }: RelatedPartiesTabProps) {
   const [subTab, setSubTab] = useState<'customers' | 'providers' | 'various'>(initialSubTab);
 
+  // Badge counts only the ACTIVE entity's directory (same rule the Customers / Providers lists use)
+  const scopedCustomerCount = useMemo(() => {
+    const name = (activeCompany?.company_name || '').trim().toLowerCase();
+    return name ? customers.filter((c: any) => String(c.company_name || '').trim().toLowerCase() === name).length : 0;
+  }, [customers, activeCompany]);
+  const scopedProviderCount = useMemo(() => {
+    const name = (activeCompany?.company_name || '').trim().toLowerCase();
+    return name ? contractors.filter((c: any) => String(c.company_name || '').trim().toLowerCase() === name).length : 0;
+  }, [contractors, activeCompany]);
+
   // Count various customer transactions
   const variousCount = useMemo(() => {
     const activeCompName = activeCompany?.company_name || '';
@@ -98,7 +108,7 @@ export default function RelatedPartiesTab({
           >
             <Users className="w-4 h-4" />
             <span>Customer / Client Details</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-black/20">{customers.length}</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-black/20">{scopedCustomerCount}</span>
           </button>
 
           <button
@@ -126,7 +136,7 @@ export default function RelatedPartiesTab({
           >
             <Truck className="w-4 h-4" />
             <span>Contractors / Providers</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-black/20">{contractors.length}</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-black/20">{scopedProviderCount}</span>
           </button>
         </div>
       </div>
@@ -181,4 +191,3 @@ export default function RelatedPartiesTab({
     </div>
   );
 }
-

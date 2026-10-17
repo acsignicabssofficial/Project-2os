@@ -734,6 +734,8 @@ export interface PaymentInstallment {
 }
 
 export interface UniformBookRecord {
+  original_invoice_date?: string;
+  branch_code?: string;
   id: number;
   company_name?: string;
   // Uniform 21 headers

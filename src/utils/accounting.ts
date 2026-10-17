@@ -833,13 +833,21 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const normInvRecognized = normalizeDocNo(s.invoice_number);
     if (normInvRecognized) recognizedSaleInvoices.add(normInvRecognized);
 
-    const saleDate = s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0];
+    // PAS 8 omissions post on the present-year (record) date, never on the closed prior-year date
+    const saleDate = (s.is_prior_year_omission && (s.record_date || s.created_at))
+      ? String(s.record_date || s.created_at).slice(0, 10)
+      : (s.date || s.invoice_date || s.issue_date || new Date().toISOString().split('T')[0]);
 
     const entry1Credits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-    if (s.is_prior_year_omission) {
-      // Prior-Period Omission under PAS 8: Credits Retained Earnings directly (does NOT distort current year 4010 Sales)
-      const revBase = vatableSales > 0 ? vatableSales : totalGrossSales;
-      entry1Credits.push({ account_code: '3020', account_title: 'Retained Earnings (Prior Period Adjustment)', amount: revBase });
+    const isOmission = Boolean(s.is_prior_year_omission);
+    // Omitted sale of a CLOSED prior year (PAS 8 / correcting-entry reference #31, #33, #43):
+    //   Dr Accounts Receivable (or Cash)        Cr Opening Retained Earnings   Cr Output VAT
+    // The discount, zero-rated / exempt portions and everything else are netted INTO the Retained Earnings credit, so
+    // NOTHING touches present-year Sales (4010-4030) or Sales Discounts (4015); only Equity moves.
+    const omissionCashSale = isOmission && isDirectFullCashSale(s, collections);
+    if (isOmission) {
+      const reAmount = Math.max(0, r2(netReceivable - vatOutput));
+      entry1Credits.push({ account_code: '3020', account_title: 'Retained Earnings - Prior Period Adjustment (PAS 8)', amount: reAmount });
       if (vatOutput > 0) {
         entry1Credits.push({ account_code: '2020', account_title: 'Output VAT Payable', amount: vatOutput });
       }
@@ -861,10 +869,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       }
     }
 
-    const saleDebits: Array<{ account_code: string; account_title: string; amount: number }> = [
+    let saleDebits: Array<{ account_code: string; account_title: string; amount: number }> = [
       { account_code: '1020', account_title: 'Accounts Receivable', amount: netReceivable }
     ];
-    if (discounts > 0) {
+    if (omissionCashSale) {
+      // Single compound correcting entry: Dr Cash (+ CWT 2307) / Cr Opening Retained Earnings / Cr Output VAT
+      const cashIn = Math.max(0, r2(netReceivable - w2307));
+      saleDebits = [];
+      if (cashIn > 0) saleDebits.push({ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashIn });
+      if (w2307 > 0) saleDebits.push({ account_code: '1040', account_title: 'Creditable Withholding Tax (BIR 2307)', amount: w2307 });
+    } else if (discounts > 0 && !isOmission) {
       saleDebits.push({ account_code: '4015', account_title: 'Sales Discounts', amount: Math.min(discounts, totalGrossSales) });
     }
 
@@ -877,7 +891,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       ref_type: 'Sales',
       ref_no: s.invoice_number,
       description: s.is_prior_year_omission
-        ? `[PAS 8 Prior-Period Omission] Subsidiary Sales: Invoice #${s.invoice_number} - ${customerName} (Reflected via Retained Earnings)`
+        ? `Correcting entry - omitted FY ${s.original_year || 'prior-year'} sale (PAS 8): Invoice #${s.invoice_number} - ${customerName} (Dr ${omissionCashSale ? 'Cash' : 'Accounts Receivable'} / Cr Retained Earnings${vatOutput > 0 ? ' & Output VAT' : ''}; closed books untouched)`
         : `Subsidiary Sales: Invoice #${s.invoice_number} - ${customerName} (${s.status || s.sales_status || 'Recorded'})`,
       debits: saleDebits,
       credits: entry1Credits
@@ -885,7 +899,7 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
 
     // 5.3 Direct full cash sale -> Cash Receipts Book posts ONE compound entry:
     // Dr Cash (net received), Dr Creditable Withholding Tax (2307), Cr Accounts Receivable
-    if (isDirectFullCashSale(s, collections)) {
+    if (!isOmission && isDirectFullCashSale(s, collections)) {
       const cashReceived = Math.max(0, Math.round((netReceivable - w2307) * 100) / 100);
       const crDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
       if (cashReceived > 0) {
@@ -1047,18 +1061,31 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
     const expType = e.expense_type || e.particulars || 'Operating Expense';
     const matched = accountTitles.find(a => a.title.toLowerCase() === expType.toLowerCase() || a.category === expType);
     const expCode = matched ? matched.code : '6100';
-    const expDate = e.date || e.expense_date || new Date().toISOString().split('T')[0];
+    const expDate = (e.is_prior_year_omission && (e.record_date || e.created_at))
+      ? String(e.record_date || e.created_at).slice(0, 10)
+      : (e.date || e.expense_date || new Date().toISOString().split('T')[0]);
     const vNo = e.voucher_number || e.invoice_number || `EXP-${e.id}`;
 
     const expDebits: Array<{ account_code: string; account_title: string; amount: number }> = [];
-    if (e.is_prior_year_omission) {
-      // Prior-Period Omission under PAS 8: Debits Retained Earnings directly (does NOT distort current year 6000s Expense)
-      expDebits.push({ account_code: '3020', account_title: 'Retained Earnings (Prior Period Adjustment)', amount: expBase });
+    const isExpOmission = Boolean(e.is_prior_year_omission);
+    if (isExpOmission) {
+      // Omitted expense of a CLOSED prior year (PAS 8 / reference #34, #35): Dr Opening Retained Earnings, Dr Input VAT, Cr A/P (or Cash)
+      expDebits.push({ account_code: '3020', account_title: 'Retained Earnings - Prior Period Adjustment (PAS 8)', amount: expBase });
     } else {
       expDebits.push({ account_code: expCode, account_title: matched ? matched.title : `Expense: ${expType}`, amount: expBase });
     }
     if (inputVat > 0) {
       expDebits.push({ account_code: '1030', account_title: 'Input VAT', amount: inputVat });
+    }
+
+    const omissionCashPurchase = isExpOmission && isDirectFullCashPurchase(e, payments);
+    let expCredits: Array<{ account_code: string; account_title: string; amount: number }> = [
+      { account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }
+    ];
+    if (omissionCashPurchase) {
+      // Single compound correcting entry: Dr Opening RE / Dr Input VAT, Cr Cash (net of EWT), Cr EWT payable
+      expCredits = [{ account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: Math.max(0, r2(grossPayable - w2307)) }];
+      if (w2307 > 0) expCredits.push({ account_code: '2030', account_title: 'Expanded Withholding Tax Payable (BIR 0619-E)', amount: w2307 });
     }
 
     entries.push({
@@ -1069,16 +1096,16 @@ export function buildMasterJournalEntries(input: MasterJournalInput): JournalEnt
       date: expDate,
       ref_type: 'Expense',
       ref_no: vNo,
-      description: e.is_prior_year_omission
-        ? `[PAS 8 Prior-Period Omission] Subsidiary Purchases: Voucher #${vNo} - ${providerName} (Reflected via Retained Earnings)`
+      description: isExpOmission
+        ? `Correcting entry - omitted FY ${e.original_year || 'prior-year'} expense (PAS 8): Voucher #${vNo} - ${providerName} (Dr Retained Earnings${inputVat > 0 ? ' & Input VAT' : ''} / Cr ${omissionCashPurchase ? 'Cash' : 'Accounts Payable'}; closed books untouched)`
         : `Subsidiary Purchases: Voucher #${vNo} - ${providerName} (${expType})`,
       debits: expDebits,
-      credits: [{ account_code: '2010', account_title: 'Accounts Payable', amount: grossPayable }]
+      credits: expCredits
     } as any);
     recognizedExpenseKeys.push(e);
 
     // Direct full cash purchase -> Cash Disbursements Book posts ONE compound entry
-    if (isDirectFullCashPurchase(e, payments)) {
+    if (!isExpOmission && isDirectFullCashPurchase(e, payments)) {
       const cashPaid = Math.max(0, Math.round((grossPayable - w2307) * 100) / 100);
       const cdCredits: Array<{ account_code: string; account_title: string; amount: number }> = [
         { account_code: '1010', account_title: 'Cash and Cash Equivalents', amount: cashPaid }

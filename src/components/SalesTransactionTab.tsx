@@ -22,6 +22,7 @@ import {
   Trash2,
   X,
   AlertTriangle,
+  Lock,
   Unlock
 } from 'lucide-react';
 import InvoiceReceiptPreviewModal from './InvoiceReceiptPreviewModal';
@@ -57,7 +58,7 @@ export default function SalesTransactionTab({
   setCashReceipts,
   collections,
   setCollections,
-  customers,
+  customers: allCustomers,
   setCustomers,
   activeCompany,
   theme,
@@ -71,6 +72,12 @@ export default function SalesTransactionTab({
   onUpdateClosedFiscalYears
 }: SalesTransactionTabProps) {
   const activeCompanyName = activeCompany?.company_name || '';
+  // Directory is strictly scoped to the ACTIVE entity: records of other / deleted entities must never match, auto-suggest or
+  // be reported as "already in the directory".
+  const customers = useMemo(
+    () => allCustomers.filter((r: any) => activeCompanyName && String(r.company_name || '').trim().toLowerCase() === activeCompanyName.trim().toLowerCase()),
+    [allCustomers, activeCompanyName]
+  );
   const isDark = !theme || !theme.isLight;
 
   // Theme-aware form classes (readable on BOTH light and dark themes)
@@ -366,6 +373,10 @@ export default function SalesTransactionTab({
     setExistingCustomerMatchPrompt(null);
     setPriorYearWarning(null);
 
+    // PAS 8: a transaction for a CLOSED year is posted on the present-year date so it never touches the closed books.
+    const originalDate = date;
+    const bookDate = priorYearAdjustment ? new Date().toISOString().slice(0, 10) : date;
+
     const effectiveName = (overrideName !== undefined ? overrideName : customerName).trim();
     const effectiveTinStr = overrideTin9 !== undefined ? overrideTin9 : tin;
     const effectiveBranchStr = overrideBranch5 !== undefined ? overrideBranch5 : branchCode;
@@ -482,14 +493,14 @@ export default function SalesTransactionTab({
       customer_tin: finalIsVarious ? '000-000-000' : formattedTin9,
       address: effectiveAddressStr.trim(),
       type_of_transaction: assignedTransactionType,
-      date: date,
-      date_of_sale: date,
+      date: bookDate,
+      date_of_sale: bookDate,
       record_date: todayRecordDate,
       invoice_type: invoiceType,
       voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
       invoice_number: formattedInvoiceNo,
       particulars: priorYearAdjustment
-        ? `[Prior FY ${priorYearAdjustment.originalYear} Omission - Reflected in FY ${priorYearAdjustment.effectiveYear} (PAS 8)] ${particulars.trim()}`.trim()
+        ? `[Prior FY ${priorYearAdjustment.originalYear} Omission (orig. date ${originalDate}) - Posted in FY ${priorYearAdjustment.effectiveYear} (PAS 8)] ${particulars.trim()}`.trim()
         : particulars.trim(),
       qty: parseFloat(qty) || 1,
       unit_price: parseFloat(unitPrice) || 0,
@@ -509,12 +520,13 @@ export default function SalesTransactionTab({
       is_various: finalIsVarious,
       is_prior_year_omission: Boolean(priorYearAdjustment),
       original_year: priorYearAdjustment?.originalYear,
+      original_invoice_date: priorYearAdjustment ? originalDate : undefined,
       effective_year: priorYearAdjustment?.effectiveYear,
       omission_acknowledged_at: priorYearAdjustment ? nowIso : undefined,
       created_at: nowIso,
       // Compatibility aliases for BIR tools, Reports, Notes to FS
-      invoice_date: date,
-      issue_date: date,
+      invoice_date: bookDate,
+      issue_date: bookDate,
       invoice_amount: liveFormulas.total_sale_vat_inclusive || liveFormulas.amount,
       vatable_sales: liveFormulas.vatable_sales,
       output_vat: liveFormulas.vat,
@@ -529,43 +541,8 @@ export default function SalesTransactionTab({
       less_discount: liveFormulas.less_discount
     };
 
-    // If recorded as Prior-Period Omission under PAS 8, generate adjusting Retained Earnings journal entry in present year
-    if (priorYearAdjustment && setSpecialEntries) {
-      const jvId = Date.now() + 50;
-      const jvNum = `JV-PAS8-${Date.now().toString().slice(-4)}`;
-      const debitAccountCode = saleMode === 'ON CASH' ? '1010' : '1020';
-      const debitAccountTitle = saleMode === 'ON CASH' ? 'Cash and Cash Equivalents' : 'Accounts Receivable';
-      
-      const pas8Voucher: SpecialEntry = {
-        id: jvId,
-        jv_number: jvNum,
-        voucher_no: jvNum,
-        company_name: activeCompanyName,
-        entry_date: todayRecordDate,
-        entry_type: 'Adjusting Entry',
-        description: `[PAS 8 Prior-Period Adjustment] FY ${priorYearAdjustment.originalYear} Closed Sale ${formattedInvoiceNo} recognized via Retained Earnings in FY ${priorYearAdjustment.effectiveYear}`,
-        accounting_treatment: 'Retrospective Restatement',
-        total_debit: totalDue,
-        total_credit: totalDue,
-        lines: [
-          {
-            id: `l-${jvId}-1`,
-            type: 'Debit',
-            account_code: debitAccountCode,
-            account_title: debitAccountTitle,
-            amount: totalDue
-          },
-          {
-            id: `l-${jvId}-2`,
-            type: 'Credit',
-            account_code: '3020',
-            account_title: 'Retained Earnings (Prior Period Adjustment)',
-            amount: totalDue
-          }
-        ]
-      };
-      setSpecialEntries(prev => [pas8Voucher, ...prev]);
-    }
+    // PAS 8 omission: the correcting journal entry (Dr Cash / A-R, Cr Retained Earnings & Output VAT) is generated by the journal
+    // engine from the flagged sale record itself (single source of truth) - no separate voucher is posted, to avoid duplicates.
 
     // 2. Routing Logic based on user specification:
     // 5.1 / 6.1 Sales (other transaction) single-entry method -> recorded in Subsidiary Sales
@@ -600,8 +577,8 @@ export default function SalesTransactionTab({
         customer_tin: finalIsVarious ? '000-000-000' : formattedTin9,
         address: effectiveAddressStr.trim(),
         type_of_transaction: 'CASH',
-        date: date,
-        date_of_sale: date,
+        date: bookDate,
+        date_of_sale: bookDate,
         record_date: todayRecordDate,
         invoice_type: invoiceType,
         voucher_number: voucherNo.trim() || `CR #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
@@ -665,8 +642,8 @@ export default function SalesTransactionTab({
         customer_tin: finalIsVarious ? '000-000-000' : formattedTin9,
         address: effectiveAddressStr.trim(),
         type_of_transaction: 'ON ACCOUNT',
-        date: date,
-        date_of_sale: date,
+        date: bookDate,
+        date_of_sale: bookDate,
         record_date: todayRecordDate,
         invoice_type: invoiceType,
         voucher_number: collectionRef.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
@@ -702,7 +679,7 @@ export default function SalesTransactionTab({
           ...saleRecord,
           id: commonId + 2,
           type_of_transaction: 'ON ACCOUNT',
-          date: date,
+          date: bookDate,
           invoice_type: invoiceType,
           voucher_number: collectionRef.trim() || `COLL #${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
           amount_collected: downPmt,

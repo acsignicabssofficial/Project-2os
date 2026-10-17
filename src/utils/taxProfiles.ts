@@ -178,3 +178,56 @@ export function getAvailableTaxYears(
 
   return Array.from(yearsSet).sort((a, b) => b - a); // Descending (e.g. 2026, 2025... 2014)
 }
+
+// ---------------------------------------------------------------------------
+// Financial Statement period helpers (Trial Balance, Income Statement, etc.)
+// ---------------------------------------------------------------------------
+export type FsPeriodScope = 'month' | 'quarter' | 'year';
+
+export interface FsPeriodRange {
+  start: string; // YYYY-MM-DD inclusive
+  end: string;   // YYYY-MM-DD inclusive
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Returns inclusive ISO start/end dates for a month, quarter or whole year. */
+export function getPeriodRange(year: number, monthIdx: number, scope: FsPeriodScope): FsPeriodRange {
+  if (scope === 'year') return { start: `${year}-01-01`, end: `${year}-12-31` };
+  if (scope === 'quarter') {
+    const q = Math.floor(monthIdx / 3);
+    const sm = q * 3;
+    const em = sm + 2;
+    const lastDay = new Date(year, em + 1, 0).getDate();
+    return { start: `${year}-${pad2(sm + 1)}-01`, end: `${year}-${pad2(em + 1)}-${pad2(lastDay)}` };
+  }
+  const lastDay = new Date(year, monthIdx + 1, 0).getDate();
+  return { start: `${year}-${pad2(monthIdx + 1)}-01`, end: `${year}-${pad2(monthIdx + 1)}-${pad2(lastDay)}` };
+}
+
+/** Best-effort extraction of the transaction date (YYYY-MM-DD) from any record. */
+export function getRecordDate(r: any): string {
+  if (!r) return '';
+  const d =
+    r.invoice_date || r.expense_date || r.collection_date || r.payment_date ||
+    r.issue_date || r.date || r.entry_date || r.special_entry_date ||
+    r.transaction_date || r.date_of_entry || r.period_end || r.record_date ||
+    r.date_of_sale || r.date_of_sales || r.date_of_expense || '';
+  return typeof d === 'string' ? d.slice(0, 10) : '';
+}
+
+/**
+ * Filters records by period. cumulative=true keeps everything up to the period end
+ * (balance sheet / trial balance "as of"); false keeps only the period itself.
+ * Records without a usable date are kept so nothing silently disappears.
+ */
+export function filterByPeriod<T>(rows: T[] | undefined, range: FsPeriodRange, cumulative: boolean): T[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(r => {
+    const d = getRecordDate(r);
+    if (!d) return true;
+    if (d > range.end) return false;
+    if (!cumulative && d < range.start) return false;
+    return true;
+  });
+}

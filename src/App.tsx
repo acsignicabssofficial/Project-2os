@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Calculator, 
   Receipt, 
@@ -101,6 +101,8 @@ import TaxReportsTab from './components/TaxReportsTab';
 import CWTFromCustomersTab from './components/CWTFromCustomersTab';
 import CWTForProvidersTab from './components/CWTForProvidersTab';
 import FinancialPositionTab from './components/FinancialPositionTab';
+import FsPeriodBar from './components/FsPeriodBar';
+import { getPeriodRange, filterByPeriod, FsPeriodScope } from './utils/taxProfiles';
 import IncomeStatementTab from './components/IncomeStatementTab';
 import ChangesInEquityTab from './components/ChangesInEquityTab';
 import CashFlowsTab from './components/CashFlowsTab';
@@ -320,6 +322,7 @@ function mapSaleToUniform(s: any): UniformBookRecord {
     discounts: discount,
     is_prior_year_omission: Boolean(s.is_prior_year_omission),
     original_year: s.original_year,
+    original_invoice_date: s.original_invoice_date,
     effective_year: s.effective_year,
     record_date: s.record_date,
     omission_acknowledged_at: s.omission_acknowledged_at,
@@ -391,6 +394,7 @@ function mapExpenseToUniform(e: any): UniformBookRecord {
     discounts: discount,
     is_prior_year_omission: Boolean(e.is_prior_year_omission),
     original_year: e.original_year,
+    original_invoice_date: e.original_invoice_date,
     effective_year: e.effective_year,
     record_date: e.record_date,
     omission_acknowledged_at: e.omission_acknowledged_at,
@@ -504,6 +508,33 @@ export default function App() {
   const [activeBranchCode, setActiveBranchCode] = useState<string>('00000');
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [contractors, setContractors] = useState<Contractor[]>(INITIAL_CONTRACTORS);
+
+  // Closed Fiscal Years are tracked PER ENTITY (keyed by normalized entity name, same key the books use) and are persisted
+  // inside the ledger payload (database) - not just localStorage - so a closed year can never silently "re-open" itself.
+  const normEntityKey = (name?: string) => String(name || '').trim().toLowerCase();
+  const [closedYearsByCompany, setClosedYearsByCompany] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem('2os_closed_years_by_company');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) { }
+    return {};
+  });
+  const closedFiscalYears: string[] = useMemo(
+    () => closedYearsByCompany[normEntityKey(activeCompany?.company_name)] || [],
+    [closedYearsByCompany, activeCompany?.company_name]
+  );
+  const handleUpdateClosedFiscalYears = (years: string[]) => {
+    const key = normEntityKey(activeCompany?.company_name);
+    if (!key) return;
+    const clean = Array.from(new Set(years.map(String))).sort();
+    setClosedYearsByCompany(prev => ({ ...prev, [key]: clean }));
+  };
+  useEffect(() => {
+    try { localStorage.setItem('2os_closed_years_by_company', JSON.stringify(closedYearsByCompany)); } catch (e) { }
+  }, [closedYearsByCompany]);
 
   // Legacy arrays kept in sync
   const [sales, setSales] = useState<Sale[]>(INITIAL_SALES);
@@ -1038,6 +1069,29 @@ export default function App() {
         }
         setActiveCompany(found || data.companies[0] || null);
       }
+      if (data.closedYearsByCompany && typeof data.closedYearsByCompany === 'object' && !Array.isArray(data.closedYearsByCompany)) {
+        // The saved ledger is the source of truth (a re-opened year must stay re-opened)
+        const fromDb: Record<string, string[]> = {};
+        Object.keys(data.closedYearsByCompany).forEach(k => {
+          fromDb[k] = Array.from(new Set((data.closedYearsByCompany[k] || []).map(String))).sort() as string[];
+        });
+        setClosedYearsByCompany(fromDb);
+      } else if (Array.isArray(data.companies)) {
+        // One-time migration of the old single global list (2os_closed_fiscal_years) to every existing entity
+        try {
+          const legacy = JSON.parse(localStorage.getItem('2os_closed_fiscal_years') || '[]');
+          if (Array.isArray(legacy) && legacy.length > 0) {
+            setClosedYearsByCompany(prev => {
+              const merged = { ...prev };
+              data.companies.forEach((c: any) => {
+                const k = String(c.company_name || '').trim().toLowerCase();
+                if (k && !merged[k]) merged[k] = legacy.map(String);
+              });
+              return merged;
+            });
+          }
+        } catch (e) { }
+      }
       if (Array.isArray(data.customers)) setCustomers(data.customers);
       if (Array.isArray(data.contractors)) setContractors(data.contractors);
 
@@ -1150,6 +1204,7 @@ export default function App() {
       const payload = {
         companies,
         activeCompanyId: activeCompany?.id,
+        closedYearsByCompany,
         customers,
         contractors,
         subsidiarySales,
@@ -1191,7 +1246,131 @@ export default function App() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [isLoaded, companies, activeCompany, customers, contractors, subsidiarySales, subsidiaryPurchases, cashReceipts, cashDisbursements, collectionsRecords, paymentsRecords, sales, collections, expenses, payments, ppeAssets, employees, payrollRecords, sssBrackets, philhealthConfig, pagibigConfig, taxBrackets, accountTitles, specialEntries, incomeTaxRecords, theme]);
+  }, [isLoaded, companies, activeCompany, customers, contractors, subsidiarySales, subsidiaryPurchases, cashReceipts, cashDisbursements, collectionsRecords, paymentsRecords, sales, collections, expenses, payments, ppeAssets, employees, payrollRecords, sssBrackets, philhealthConfig, pagibigConfig, taxBrackets, accountTitles, specialEntries, incomeTaxRecords, theme, closedYearsByCompany]);
+
+  // =========================================================================
+  // CLOSED-BOOKS GUARD (single choke point for EVERY entry screen, import and mobile form)
+  // A closed fiscal year must never change. Any NEW book record whose transaction date falls in a closed year of its
+  // own entity (and that was not explicitly re-opened) is re-posted on today's date:
+  //   - Sales / Purchases are flagged is_prior_year_omission -> the journal engine books them to Retained Earnings [3020]
+  //     (+ Output/Input VAT) in the present year, so present-year Sales/Expenses are NOT touched but Equity is.
+  //   - Collections / Payments / Cash Receipts / Cash Disbursements are settled on today's date (cash actually moved today).
+  // The original date is preserved on the record for the audit trail. The Sales / Purchase forms still ask first
+  // ("Post to present year" vs "Re-open the year"); this guard catches everything else.
+  // =========================================================================
+  const knownBookIdsRef = useRef<Record<string, Set<any>> | null>(null);
+  useEffect(() => {
+    if (!isLoaded) return;
+    const books: Record<string, any[]> = {
+      sales: subsidiarySales,
+      purchases: subsidiaryPurchases,
+      receipts: cashReceipts,
+      disbursements: cashDisbursements,
+      collections: collectionsRecords,
+      payments: paymentsRecords
+    };
+    const snapshotIds = () => {
+      const snap: Record<string, Set<any>> = {};
+      Object.keys(books).forEach(k => { snap[k] = new Set(books[k].map(r => r.id)); });
+      knownBookIdsRef.current = snap;
+    };
+    if (!knownBookIdsRef.current) { snapshotIds(); return; }
+    const known = knownBookIdsRef.current;
+
+    const now = new Date();
+    const curYear = String(now.getFullYear());
+    const today = now.toISOString().slice(0, 10);
+    const recDate = (r: any) => String(
+      r.invoice_date || r.expense_date || r.collection_date || r.payment_date || r.issue_date || r.date || r.date_of_sale || ''
+    ).slice(0, 10);
+    const closedYearOf = (r: any): string | null => {
+      if (r.is_prior_year_omission || r.reclassified_from_closed_year) return null;
+      const y = recDate(r).slice(0, 4);
+      if (!y || y === curYear || !/^\d{4}$/.test(y)) return null;
+      const list = closedYearsByCompany[normEntityKey(r.company_name)] || [];
+      return list.includes(y) ? y : null;
+    };
+    const isNew = (k: string, r: any) => !known[k].has(r.id);
+
+    let converted = 0;
+    const redate = (r: any, y: string, extra: any = {}) => {
+      converted++;
+      const orig = recDate(r);
+      return {
+        ...r,
+        date: today, invoice_date: today, issue_date: today, date_of_sale: today,
+        expense_date: today, collection_date: today, payment_date: today,
+        record_date: today,
+        reclassified_from_closed_year: true,
+        original_year: y,
+        original_invoice_date: orig,
+        effective_year: curYear,
+        ...extra
+      };
+    };
+    const flagOmission = (r: any, y: string, label: string) => redate(r, y, {
+      is_prior_year_omission: true,
+      omission_acknowledged_at: new Date().toISOString(),
+      particulars: `[Prior FY ${y} Omission (orig. date ${recDate(r)}) - Posted in FY ${curYear} (PAS 8)] ${r.particulars || ''}`.trim()
+    });
+
+    const patch = (k: string, setter: (u: (prev: any[]) => any[]) => void, convert: (r: any, y: string) => any) => {
+      const targets = books[k].filter(r => isNew(k, r) && closedYearOf(r));
+      if (targets.length === 0) return;
+      const ids = new Set(targets.map(r => r.id));
+      setter(prev => prev.map(r => {
+        if (!ids.has(r.id)) return r;
+        const y = closedYearOf(r);
+        return y ? convert(r, y) : r;
+      }));
+    };
+
+    patch('sales', handleUpdateSubsidiarySales, (r, y) => flagOmission(r, y, 'sale'));
+    patch('purchases', handleUpdateSubsidiaryPurchases, (r, y) => flagOmission(r, y, 'purchase'));
+    patch('receipts', handleUpdateCashReceipts, (r, y) => redate(r, y));
+    patch('disbursements', handleUpdateCashDisbursements, (r, y) => redate(r, y));
+    patch('collections', handleUpdateCollectionsRecords, (r, y) => redate(r, y));
+    patch('payments', handleUpdatePaymentsRecords, (r, y) => redate(r, y));
+
+    snapshotIds();
+    if (converted > 0) {
+      triggerAlert(
+        `Closed-books protection: ${converted} record(s) dated in a CLOSED fiscal year were NOT posted to the closed books. They were recorded in ${curYear} instead (sales/purchases via Retained Earnings [3020], PAS 8). To post them in the closed year, re-open that year first in Entity Status.`,
+        'info'
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, subsidiarySales, subsidiaryPurchases, cashReceipts, cashDisbursements, collectionsRecords, paymentsRecords, closedYearsByCompany]);
+
+  // Deleting an entity deletes EVERYTHING that belongs to it (customers, providers, books, journals, payroll, ...)
+  const handleDeleteEntityData = (entityName: string) => {
+    const key = normEntityKey(entityName);
+    if (!key) return;
+    const keep = <T extends { company_name?: string }>(rows: T[]) => rows.filter(r => normEntityKey(r.company_name) !== key);
+    setCustomers(prev => keep(prev));
+    setContractors(prev => keep(prev));
+    setSubsidiarySales(prev => keep(prev));
+    setSubsidiaryPurchases(prev => keep(prev));
+    setCashReceipts(prev => keep(prev));
+    setCashDisbursements(prev => keep(prev));
+    setCollectionsRecords(prev => keep(prev));
+    setPaymentsRecords(prev => keep(prev));
+    setSales(prev => keep(prev));
+    setCollections(prev => keep(prev));
+    setExpenses(prev => keep(prev));
+    setPayments(prev => keep(prev));
+    setPpeAssets(prev => keep(prev as any) as any);
+    setSpecialEntries(prev => keep(prev));
+    setIncomeTaxRecords(prev => keep(prev as any) as any);
+    setEmployees(prev => keep(prev));
+    setPayrollRecords(prev => keep(prev));
+    setNotesToFS(prev => keep(prev as any) as any);
+    setClosedYearsByCompany(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
   // NAVIGATION ACTIVE TAB
   const [activeTab, setActiveTab] = useState<
@@ -1206,20 +1385,6 @@ export default function App() {
     | 'reports' | 'reports_turnovers' | 'reports_horizontal' | 'reports_vertical' | 'reports_ratios' // Group 7
     | 'bank_recon' | 'inventory_services' | 'inventory_list'
   >('dashboard');
-
-  // Closed Fiscal Years (Option C - PAS 8 Period-End Accounting & Lock Guardrail)
-  const [closedFiscalYears, setClosedFiscalYears] = useState<string[]>(() => {
-    const saved = localStorage.getItem('2os_closed_fiscal_years');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { }
-    }
-    return ['2024'];
-  });
-
-  const handleUpdateClosedFiscalYears = (years: string[]) => {
-    setClosedFiscalYears(years);
-    localStorage.setItem('2os_closed_fiscal_years', JSON.stringify(years));
-  };
 
   // Automatically scroll to the top of the page whenever switching tools/tabs or sheet branches
   useEffect(() => {
@@ -1255,6 +1420,13 @@ export default function App() {
   const [selectedMonthIdx, setSelectedMonthIdx] = useState<number>(() => new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
   const [selectedPrefix, setSelectedPrefix] = useState<string>('FOR THE MONTH OF');
+  const [fsScope, setFsScope] = useState<FsPeriodScope>('year');
+  const handleFsPeriodChange = (yr: number, m: number, sc: FsPeriodScope) => {
+    setSelectedYear(yr);
+    setSelectedMonthIdx(m);
+    setFsScope(sc);
+    setSelectedPrefix(sc === 'year' ? 'FOR THE YEAR ENDED' : sc === 'quarter' ? 'FOR THE QUARTER ENDED' : 'FOR THE MONTH OF');
+  };
 
   const handleMonthYearChange = (newMonth: number, newYear: number, newPrefix?: string) => {
     setSelectedMonthIdx(newMonth);
@@ -1382,6 +1554,11 @@ export default function App() {
   const companyIncomeTaxRecords = incomeTaxRecords.filter(r => matchesActiveSheetScope(r.company_name));
   const companyPpeAssets = ppeAssets.filter(a => matchesActiveSheetScope(a.company_name));
   const companyPayrollRecords = payrollRecords.filter(r => matchesActiveSheetScope(r.company_name));
+
+  // Financial-statement period filtering (Trial Balance / Balance Sheet are cumulative "as of"; others are period-only)
+  const fsRange = getPeriodRange(selectedYear, selectedMonthIdx, fsScope);
+  const fsCum = <T,>(rows: T[]) => filterByPeriod(rows, fsRange, true);
+  const fsPer = <T,>(rows: T[]) => filterByPeriod(rows, fsRange, false);
   const companyEmployees = employees.filter(e => matchesActiveSheetScope(e.company_name));
 
   // Currency & Statistical Formatting Helpers for Operational Views
@@ -2093,6 +2270,8 @@ export default function App() {
                     theme={activeTheme}
                     triggerAlert={triggerAlert}
                     globalSearch={globalSearch}
+                    closedFiscalYears={closedFiscalYears}
+                    onUpdateClosedFiscalYears={handleUpdateClosedFiscalYears}
                   />
                 </div>
               )}
@@ -2143,6 +2322,7 @@ export default function App() {
                   setCompanies={setCompanies}
                   activeCompany={activeCompany!}
                   setActiveCompany={setActiveCompany}
+                  onDeleteEntityData={handleDeleteEntityData}
                   activeBranchCode={activeBranchCode}
                   onSelectBranch={(code) => setActiveBranchCode(code)}
                   theme={activeTheme}
@@ -2276,17 +2456,19 @@ export default function App() {
               )}
 
               {(activeTab === 'fs_position' || activeTab === 'fs_balance_sheet' || activeTab === 'fs_position_pfrs') && (
-                <FinancialPositionTab 
-                  sales={companySales}
-                  collections={companyCollections}
-                  cashReceipts={companyCashReceipts}
-                  expenses={companyExpenses}
-                  payments={companyPayments}
-                  cashDisbursements={companyCashDisbursements}
+                <>
+<FsPeriodBar activeCompany={activeCompany} year={selectedYear} monthIdx={selectedMonthIdx} scope={fsScope} onChange={handleFsPeriodChange} theme={activeTheme} cumulativeNote />
+<FinancialPositionTab 
+                  sales={fsCum(companySales)}
+                  collections={fsCum(companyCollections)}
+                  cashReceipts={fsCum(companyCashReceipts)}
+                  expenses={fsCum(companyExpenses)}
+                  payments={fsCum(companyPayments)}
+                  cashDisbursements={fsCum(companyCashDisbursements)}
                   ppeAssets={companyPpeAssets}
-                  specialEntries={companySpecialEntries}
+                  specialEntries={fsCum(companySpecialEntries)}
                   setSpecialEntries={setSpecialEntries}
-                  payrollRecords={companyPayrollRecords}
+                  payrollRecords={fsCum(companyPayrollRecords)}
                   incomeTaxRecords={companyIncomeTaxRecords}
                   accountTitles={accountTitles}
                   setAccountTitles={setAccountTitles}
@@ -2295,61 +2477,80 @@ export default function App() {
                   mode={activeTab === 'fs_balance_sheet' ? 'balance_sheet' : 'financial_position'}
                   triggerAlert={triggerAlert}
                 />
+</>
               )}
 
               {activeTab === 'fs_income' && (
-                <IncomeStatementTab 
-                  sales={companySales}
-                  expenses={companyExpenses}
+                <>
+<FsPeriodBar activeCompany={activeCompany} year={selectedYear} monthIdx={selectedMonthIdx} scope={fsScope} onChange={handleFsPeriodChange} theme={activeTheme} />
+<IncomeStatementTab 
+                  sales={fsPer(companySales)}
+                  expenses={fsPer(companyExpenses)}
                   ppeAssets={companyPpeAssets}
-                  specialEntries={companySpecialEntries}
-                  payrollRecords={companyPayrollRecords}
+                  specialEntries={fsPer(companySpecialEntries)}
+                  payrollRecords={fsPer(companyPayrollRecords)}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                   selectedYear={selectedYear}
                   onYearChange={setSelectedYear}
                 />
+</>
               )}
 
               {activeTab === 'fs_equity' && (
-                <ChangesInEquityTab 
-                  sales={companySales}
-                  expenses={companyExpenses}
+                <>
+<FsPeriodBar activeCompany={activeCompany} year={selectedYear} monthIdx={selectedMonthIdx} scope={fsScope} onChange={handleFsPeriodChange} theme={activeTheme} />
+<ChangesInEquityTab 
+                  sales={fsCum(companySales)}
+                  expenses={fsCum(companyExpenses)}
+                  collections={fsCum(companyCollections)}
+                  payments={fsCum(companyPayments)}
+                  cashReceipts={fsCum(companyCashReceipts)}
+                  cashDisbursements={fsCum(companyCashDisbursements)}
                   ppeAssets={companyPpeAssets}
-                  payrollRecords={companyPayrollRecords}
-                  specialEntries={companySpecialEntries}
+                  payrollRecords={fsCum(companyPayrollRecords)}
+                  specialEntries={fsCum(companySpecialEntries)}
+                  periodStart={fsRange.start}
+                  periodEnd={fsRange.end}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                 />
+</>
               )}
 
               {activeTab === 'fs_cashflows' && (
-                <CashFlowsTab 
-                  sales={companySales}
-                  collections={companyCollections}
-                  cashReceipts={companyCashReceipts}
-                  expenses={companyExpenses}
-                  payments={companyPayments}
-                  cashDisbursements={companyCashDisbursements}
+                <>
+<FsPeriodBar activeCompany={activeCompany} year={selectedYear} monthIdx={selectedMonthIdx} scope={fsScope} onChange={handleFsPeriodChange} theme={activeTheme} />
+<CashFlowsTab 
+                  sales={fsPer(companySales)}
+                  collections={fsPer(companyCollections)}
+                  cashReceipts={fsPer(companyCashReceipts)}
+                  expenses={fsPer(companyExpenses)}
+                  payments={fsPer(companyPayments)}
+                  cashDisbursements={fsPer(companyCashDisbursements)}
                   ppeAssets={companyPpeAssets}
-                  payrollRecords={companyPayrollRecords}
-                  specialEntries={companySpecialEntries}
+                  payrollRecords={fsPer(companyPayrollRecords)}
+                  specialEntries={fsPer(companySpecialEntries)}
                   accountTitles={accountTitles}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                 />
+</>
               )}
 
               {activeTab === 'fs_notes' && (
-                <NotesToFSTab 
-                  sales={companySales}
-                  collections={companyCollections}
-                  expenses={companyExpenses}
-                  payments={companyPayments}
+                <>
+<FsPeriodBar activeCompany={activeCompany} year={selectedYear} monthIdx={selectedMonthIdx} scope={fsScope} onChange={handleFsPeriodChange} theme={activeTheme} />
+<NotesToFSTab 
+                  sales={fsPer(companySales)}
+                  collections={fsPer(companyCollections)}
+                  expenses={fsPer(companyExpenses)}
+                  payments={fsPer(companyPayments)}
                   ppeAssets={companyPpeAssets}
                   activeCompany={activeCompany}
                   theme={activeTheme}
                 />
+</>
               )}
 
               {/* BIR COMPUTATIONS TOOLS */}
